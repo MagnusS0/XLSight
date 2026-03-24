@@ -1,7 +1,9 @@
 <Project>
-  <ItemGroup>
-    <!-- SourceLink for debugger source navigation -->
+  <!-- SourceLink only runs in CI where a GitHub remote exists -->
+  <ItemGroup Condition="'$(CI)' == 'true'">
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Meziantou.Analyzer: ConfigureAwait(false) enforcement + best practices -->
     <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" />
   </ItemGroup>

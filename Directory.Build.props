@@ -9,12 +9,14 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
-  <!-- SourceLink — enables debugger source navigation from NuGet packages -->
-  <PropertyGroup>
+  <!-- SourceLink — package only added in CI (see Directory.Build.targets), settings here for when it is active -->
+  <PropertyGroup Condition="'$(CI)' == 'true'">
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+  <PropertyGroup>
     <DebugType>embedded</DebugType>
-    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <!-- NuGet security audit on restore -->
