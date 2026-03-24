@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>High-performance streaming Excel workbook reading and analysis library for .NET 10</Description>
+    <!-- AOT and trimming compatibility — enforced from day one -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+</Project>

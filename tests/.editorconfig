@@ -1,0 +1,9 @@
+[*.cs]
+# ConfigureAwait not relevant in tests
+dotnet_diagnostic.MA0004.severity = none
+
+# Allow underscores in test method names (Method_Scenario_Expected pattern)
+dotnet_diagnostic.CA1707.severity = none
+
+# Relax access modifier requirement for test classes
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:suggestion

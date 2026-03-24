@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Infrastructure -->
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.102" />
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.27" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Test packages -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="coverlet.collector" Version="8.0.0" />
+  </ItemGroup>
+</Project>
