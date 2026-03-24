@@ -56,5 +56,8 @@ dotnet_diagnostic.MA0004.severity = error
 # CA1062: Validate parameter — disabled (nullable reference types handle this)
 dotnet_diagnostic.CA1062.severity = none
 
+# CS1591: Missing XML comment — suppressed during active development; re-enable in Phase 8 (Polish)
+dotnet_diagnostic.CS1591.severity = none
+
 # IDE0005: Remove unnecessary usings
 dotnet_diagnostic.IDE0005.severity = warning
