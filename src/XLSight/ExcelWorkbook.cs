@@ -191,25 +191,59 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     public Models.Analysis.ExcelWorkbookInfo Analyze()
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        EnterOperation();
+        try
+        {
+            return _engine.Analyze();
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public Task<Models.Analysis.ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        EnterOperation();
+        try
+        {
+            return _engine.AnalyzeAsync(ct);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public Models.Analysis.ExcelSheetInfo AnalyzeSheet(string sheet)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        EnterOperation();
+        try
+        {
+            return _engine.AnalyzeSheet(sheet);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public Task<Models.Analysis.ExcelSheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        EnterOperation();
+        try
+        {
+            return _engine.AnalyzeSheetAsync(sheet, ct);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public IAsyncEnumerable<ExcelRow> StreamSheetAsync(

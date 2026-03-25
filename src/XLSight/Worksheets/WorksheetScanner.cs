@@ -55,7 +55,9 @@ internal static class WorksheetScanner
                     var refStr = reader.GetAttribute(names.Ref);
                     if (refStr is not null && AddressParser.TryParse(refStr, out var mergeRange))
                     {
-                        sink.OnMergeCell(new ExcelMergedRegion(mergeRange.TopLeft, mergeRange.BottomRight));
+                        sink.OnMergeCell(new ExcelMergedRegion(
+                            mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
+                            mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
                     }
                 }
             }
@@ -116,7 +118,9 @@ internal static class WorksheetScanner
                     var refStr = reader.GetAttribute(names.Ref);
                     if (refStr is not null && AddressParser.TryParse(refStr, out var mergeRange))
                     {
-                        sink.OnMergeCell(new ExcelMergedRegion(mergeRange.TopLeft, mergeRange.BottomRight));
+                        sink.OnMergeCell(new ExcelMergedRegion(
+                            mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
+                            mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
                     }
                 }
             }

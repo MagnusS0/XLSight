@@ -127,25 +127,69 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
     public ExcelWorkbookInfo Analyze()
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+
+        var sheets = _metadata.Sheets
+            .Select((s, i) => AnalyzeSheetCore(s, i))
+            .ToList();
+
+        var namedRanges = _metadata.NamedRanges
+            .Select(nr => new ExcelNamedRange
+            {
+                Name = nr.Name,
+                Sheet = nr.ScopeSheetName,
+                Reference = nr.Reference,
+            })
+            .ToList();
+
+        return new ExcelWorkbookInfo
+        {
+            Sheets = sheets,
+            NamedRanges = namedRanges,
+            HasMacros = _metadata.HasMacros,
+            IsDate1904 = _metadata.UsesDate1904,
+            AnalyzedAtUtc = DateTimeOffset.UtcNow,
+        };
     }
 
     public ExcelSheetInfo AnalyzeSheet(string sheetName)
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+
+        var sheet = FindSheet(sheetName);
+        int sheetIndex = _metadata.Sheets
+            .Select((s, i) => (s, i))
+            .First(t => string.Equals(t.s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+            .i;
+
+        return AnalyzeSheetCore(sheet, sheetIndex);
     }
 
     public Task<ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct)
     {
-        ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(Analyze());
     }
 
     public Task<ExcelSheetInfo> AnalyzeSheetAsync(string sheetName, CancellationToken ct)
     {
-        ThrowIfDisposed();
-        throw new NotSupportedException("Analysis is not yet implemented. Coming in Phase 5.");
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(AnalyzeSheet(sheetName));
+    }
+
+    private ExcelSheetInfo AnalyzeSheetCore(WorkbookMetadata.WorkbookSheetInfo sheet, int sheetIndex)
+    {
+        var entry = _package.GetEntry(sheet.Path);
+        if (entry is null)
+        {
+            throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
+        }
+
+        using var sheetStream = entry.Open();
+
+        var sink = new AnalysisSink(_sharedStrings, _styles, _metadata.UsesDate1904, ExcelReadMode.Values);
+        WorksheetScanner.Scan(sheetStream, _names, ref sink);
+
+        return sink.Build(sheet.Name, sheetIndex, []);
     }
 
     public IEnumerable<ExcelRow> StreamRange(string sheetName, ExcelRange range, ExcelReadMode mode)

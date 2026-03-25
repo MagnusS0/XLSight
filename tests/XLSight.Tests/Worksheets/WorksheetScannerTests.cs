@@ -265,8 +265,10 @@ public sealed class WorksheetScannerTests
 
         Assert.Single(sink.MergedRegions);
         var region = sink.MergedRegions[0];
-        Assert.Equal(new ExcelAddress(1, 1), region.TopLeft);
-        Assert.Equal(new ExcelAddress(2, 2), region.BottomRight);
+        Assert.Equal(1, region.StartRow);
+        Assert.Equal(1, region.StartColumn);
+        Assert.Equal(2, region.EndRow);
+        Assert.Equal(2, region.EndColumn);
     }
 
     [Fact]
