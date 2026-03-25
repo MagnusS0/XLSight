@@ -17,7 +17,7 @@ public sealed class CellValueDecoderTests
         string? formula = null,
         int styleIndex = 0,
         int row = 1, int col = 1)
-        => new ParsedCell(row, col, styleIndex, kind, rawValue.AsMemory(), inlineStr, formula);
+        => new ParsedCell(row, col, styleIndex, kind, rawValue.Length > 0 ? rawValue : null, inlineStr, formula);
 
     [Fact]
     public void Decode_SharedString_ReturnsCorrectText()

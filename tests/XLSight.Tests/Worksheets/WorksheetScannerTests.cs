@@ -88,7 +88,7 @@ public sealed class WorksheetScannerTests
         Assert.Equal(2, cell.Row);
         Assert.Equal(2, cell.Column);
         Assert.Equal(CellDataKind.Number, cell.DataKind);
-        Assert.Equal("42", new string(cell.RawValue.Span));
+        Assert.Equal("42", cell.RawValue);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public sealed class WorksheetScannerTests
         Assert.Single(sink.Cells);
         var cell = sink.Cells[0];
         Assert.Equal(CellDataKind.SharedString, cell.DataKind);
-        Assert.Equal("0", new string(cell.RawValue.Span));
+        Assert.Equal("0", cell.RawValue);
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public sealed class WorksheetScannerTests
         Assert.Single(sink.Cells);
         var cell = sink.Cells[0];
         Assert.Equal(CellDataKind.SharedString, cell.DataKind);
-        Assert.Equal(0, cell.RawValue.Length);
+        Assert.True(string.IsNullOrEmpty(cell.RawValue));
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class WorksheetScannerTests
         Assert.Single(sink.Cells);
         var cell = sink.Cells[0];
         Assert.Equal(CellDataKind.Boolean, cell.DataKind);
-        Assert.Equal("1", new string(cell.RawValue.Span));
+        Assert.Equal("1", cell.RawValue);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class WorksheetScannerTests
         Assert.Single(sink.Cells);
         var cell = sink.Cells[0];
         Assert.Equal("SUM(A1:B1)", cell.FormulaText);
-        Assert.Equal("42", new string(cell.RawValue.Span));
+        Assert.Equal("42", cell.RawValue);
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public sealed class WorksheetScannerTests
         WorksheetScanner.Scan(stream, names, ref sink);
 
         Assert.Single(sink.Cells);
-        Assert.Equal("42", new string(sink.Cells[0].RawValue.Span));
+        Assert.Equal("42", sink.Cells[0].RawValue);
     }
 
     [Fact]
@@ -312,7 +312,100 @@ public sealed class WorksheetScannerTests
         Assert.Equal(2, cell.Row);
         Assert.Equal(2, cell.Column);
         Assert.Equal(CellDataKind.Number, cell.DataKind);
-        Assert.Equal("42", new string(cell.RawValue.Span));
+        Assert.Equal("42", cell.RawValue);
         Assert.True(sink.Ended);
+    }
+
+    // Bug 1: ReadValueChunk must be drained in a loop — values longer than the
+    // 256-char pool buffer must not be silently truncated.
+    [Fact]
+    public void Scan_LongValue_ExceedingBuffer_IsReadCompletely()
+    {
+        var longValue = new string('A', 600); // well beyond the 256-char ArrayPool buffer
+        var xml = $"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="str"><v>{longValue}</v></c></row>
+              </sheetData>
+            </worksheet>
+            """;
+        var names = new XlsxNameTable();
+        var sink = new MockSink();
+
+        using var stream = XmlStream(xml);
+        WorksheetScanner.Scan(stream, names, ref sink);
+
+        Assert.Single(sink.Cells);
+        Assert.Equal(longValue, sink.Cells[0].RawValue);
+    }
+
+    // Bug 2: RawValue must be a safe string, not aliased into the shared pool
+    // buffer.  Storing ParsedCell and reading RawValue after Scan() must work.
+    [Fact]
+    public void Scan_RawValue_IsNotAliasedToPoolBuffer()
+    {
+        var xml = $"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1">
+                  <c r="A1"><v>first</v></c>
+                  <c r="B1"><v>second</v></c>
+                </row>
+              </sheetData>
+            </worksheet>
+            """;
+        var names = new XlsxNameTable();
+        var sink = new MockSink();
+
+        using var stream = XmlStream(xml);
+        WorksheetScanner.Scan(stream, names, ref sink);
+
+        // Both values must be intact after Scan() has returned and the pool
+        // buffer has been released.
+        Assert.Equal(2, sink.Cells.Count);
+        Assert.Equal("first", sink.Cells[0].RawValue);
+        Assert.Equal("second", sink.Cells[1].RawValue);
+    }
+
+    // Bug 3: rows with no r= attribute must be assigned sequential row numbers.
+    [Fact]
+    public void Scan_RowWithoutRAttribute_InfersRowNumber()
+    {
+        var xml = $"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row><c r="A1"><v>10</v></c></row>
+                <row><c r="A2"><v>20</v></c></row>
+              </sheetData>
+            </worksheet>
+            """;
+        var names = new XlsxNameTable();
+        var sink = new MockSink();
+
+        using var stream = XmlStream(xml);
+        WorksheetScanner.Scan(stream, names, ref sink);
+
+        Assert.Equal([1, 2], sink.RowStarts);
+    }
+
+    [Fact]
+    public void Scan_MixedRowAttributePresence_InfersCorrectly()
+    {
+        var xml = $"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="3"><c r="A3"><v>30</v></c></row>
+                <row><c r="A4"><v>40</v></c></row>
+                <row><c r="A5"><v>50</v></c></row>
+              </sheetData>
+            </worksheet>
+            """;
+        var names = new XlsxNameTable();
+        var sink = new MockSink();
+
+        using var stream = XmlStream(xml);
+        WorksheetScanner.Scan(stream, names, ref sink);
+
+        Assert.Equal([3, 4, 5], sink.RowStarts);
     }
 }

@@ -25,11 +25,11 @@ internal static class CellValueDecoder
             CellDataKind.InlineString  => cell.InlineString is not null
                                             ? ExcelCellValue.FromText(cell.InlineString)
                                             : ExcelCellValue.Empty,
-            CellDataKind.Error         => cell.RawValue.Length > 0
-                                            ? ExcelCellValue.FromError(new string(cell.RawValue.Span))
+            CellDataKind.Error         => !string.IsNullOrEmpty(cell.RawValue)
+                                            ? ExcelCellValue.FromError(cell.RawValue)
                                             : ExcelCellValue.Empty,
-            CellDataKind.FormulaString => cell.RawValue.Length > 0
-                                            ? ExcelCellValue.FromText(new string(cell.RawValue.Span))
+            CellDataKind.FormulaString => !string.IsNullOrEmpty(cell.RawValue)
+                                            ? ExcelCellValue.FromText(cell.RawValue)
                                             : ExcelCellValue.Empty,
             _                          => DecodeNumber(in cell, styles, isDate1904),
         };
@@ -38,12 +38,12 @@ internal static class CellValueDecoder
     private static ExcelCellValue DecodeSharedString(in ParsedCell cell, string[] sharedStrings)
     {
         // Empty <v> with t="s" MUST return Empty, NOT sharedStrings[0] (calamine #607)
-        if (cell.RawValue.Length == 0)
+        if (string.IsNullOrEmpty(cell.RawValue))
         {
             return ExcelCellValue.Empty;
         }
 
-        if (!int.TryParse(cell.RawValue.Span, NumberStyles.None, CultureInfo.InvariantCulture, out int index))
+        if (!int.TryParse(cell.RawValue, NumberStyles.None, CultureInfo.InvariantCulture, out int index))
         {
             return ExcelCellValue.Empty;
         }
@@ -59,22 +59,22 @@ internal static class CellValueDecoder
 
     private static ExcelCellValue DecodeBoolean(in ParsedCell cell)
     {
-        if (cell.RawValue.Length == 0)
+        if (string.IsNullOrEmpty(cell.RawValue))
         {
             return ExcelCellValue.Empty;
         }
 
-        return ExcelCellValue.FromBoolean(cell.RawValue.Span[0] == '1');
+        return ExcelCellValue.FromBoolean(cell.RawValue[0] == '1');
     }
 
     private static ExcelCellValue DecodeNumber(in ParsedCell cell, StyleTable styles, bool isDate1904)
     {
-        if (cell.RawValue.Length == 0)
+        if (string.IsNullOrEmpty(cell.RawValue))
         {
             return ExcelCellValue.Empty;
         }
 
-        if (!double.TryParse(cell.RawValue.Span, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+        if (!double.TryParse(cell.RawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
         {
             return ExcelCellValue.Empty;
         }

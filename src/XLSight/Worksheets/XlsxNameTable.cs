@@ -53,6 +53,7 @@ internal sealed class XlsxNameTable
     // worksheet.xml merge/dimension elements and attributes
     internal readonly string Dimension;
     internal readonly string MergeCell;
+    internal readonly string MergeCells;
     internal readonly string Ref;
 
     // worksheet.xml attributes
@@ -107,6 +108,7 @@ internal sealed class XlsxNameTable
 
         Dimension = nt.Add("dimension");
         MergeCell = nt.Add("mergeCell");
+        MergeCells = nt.Add("mergeCells");
         Ref = nt.Add("ref");
 
         S = nt.Add("s");

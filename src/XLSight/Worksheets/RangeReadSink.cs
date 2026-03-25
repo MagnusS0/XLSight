@@ -35,7 +35,7 @@ internal struct RangeReadSink : IWorksheetSink
 
     public void OnRowStart(int rowIndex)
     {
-        if (rowIndex > _range.BottomRight.Row)
+        if (!_range.IsUnbounded && rowIndex > _range.BottomRight.Row)
         {
             _pastEnd = true;
         }

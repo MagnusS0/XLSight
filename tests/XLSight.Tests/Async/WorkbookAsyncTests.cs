@@ -128,6 +128,28 @@ public sealed class WorkbookAsyncTests
     }
 
     [Fact]
+    public async Task OpenAsync_FromFilePath_ReadRangeAsync_ReturnsCorrectValues()
+    {
+        // Ensures file stream stays alive for the workbook lifetime (not disposed by 'await using' on open).
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            WriteWorkbookToFile(tempFile);
+
+            await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(tempFile);
+            var result = await workbook.ReadRangeAsync("Sheet1", "A1:B2");
+
+            Assert.Equal(2, result.Width);
+            Assert.Equal(2, result.Height);
+            Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+            Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+    [Fact]
     public async Task ReadRangeAsync_KnownValues_DecodesCorrectly()
     {
         using var ms = CreateWorkbook();
