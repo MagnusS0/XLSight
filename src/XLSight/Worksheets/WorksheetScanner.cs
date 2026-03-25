@@ -63,6 +63,10 @@ internal static class WorksheetScanner
                             mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
                     }
                 }
+                else if (!IsTransparentElement(reader.LocalName, names))
+                {
+                    reader.Skip();
+                }
             }
             sink.OnEnd();
         }
@@ -125,6 +129,10 @@ internal static class WorksheetScanner
                             mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
                     }
                 }
+                else if (!IsTransparentElement(reader.LocalName, names))
+                {
+                    reader.Skip();
+                }
             }
             sink.OnEnd();
         }
@@ -148,12 +156,7 @@ internal static class WorksheetScanner
             while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 ct.ThrowIfCancellationRequested();
-
-                if (reader.NodeType != XmlNodeType.Element)
-                {
-                    continue;
-                }
-
+                if (reader.NodeType != XmlNodeType.Element) { continue; }
                 if (ReferenceEquals(reader.LocalName, names.Dimension))
                 {
                     var dimRef = reader.GetAttribute(names.Ref);
@@ -186,6 +189,10 @@ internal static class WorksheetScanner
                             mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
                             mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
                     }
+                }
+                else if (!IsTransparentElement(reader.LocalName, names))
+                {
+                    reader.Skip();
                 }
             }
             sink.OnEnd();
@@ -253,6 +260,10 @@ internal static class WorksheetScanner
                     rowVals.Add(val);
                 }
             }
+            else if (!IsTransparentElement(reader.LocalName, names))
+            {
+                reader.Skip();
+            }
         }
         if (lastRowSeen > 0 && rowCols.Count > 0
             && (range.IsUnbounded || (lastRowSeen >= range.TopLeft.Row && lastRowSeen <= range.BottomRight.Row)))
@@ -315,6 +326,10 @@ internal static class WorksheetScanner
                     rowCols.Add(col);
                     rowVals.Add(val);
                 }
+            }
+            else if (!IsTransparentElement(reader.LocalName, names))
+            {
+                reader.Skip();
             }
         }
         if (lastRowSeen > 0 && rowCols.Count > 0
@@ -382,9 +397,7 @@ internal static class WorksheetScanner
         out int column,
         out ExcelCellValue value)
     {
-        var cellRef  = reader.GetAttribute(names.R);
-        var styleStr = reader.GetAttribute(names.S);
-        var typeStr  = reader.GetAttribute(names.T);
+        ReadCellAttributes(reader, names, out string? cellRef, out string? styleStr, out string? typeStr);
 
         int row = 0, col = 0;
         if (cellRef is not null && CellReferenceParser.TryParse(cellRef, out var addr))
@@ -532,11 +545,36 @@ internal static class WorksheetScanner
         return ExcelCellValue.FromNumber(d);
     }
 
+    // True for elements that are transparent containers for things we care about
+    // (must be entered, not skipped). Everything else can be skipped wholesale.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsTransparentElement(string localName, XlsxNameTable names) =>
+        ReferenceEquals(localName, names.Worksheet) ||
+        ReferenceEquals(localName, names.SheetData) ||
+        ReferenceEquals(localName, names.MergeCells);
+
+    // Read r=, s=, t= attributes in one pass rather than three separate GetAttribute
+    // calls that each re-iterate the attribute list.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReadCellAttributes(XmlReader reader, XlsxNameTable names,
+        out string? cellRef, out string? styleStr, out string? typeStr)
+    {
+        cellRef = null; styleStr = null; typeStr = null;
+        if (!reader.MoveToFirstAttribute()) { return; }
+        do
+        {
+            var a = reader.LocalName;
+            if (ReferenceEquals(a, names.R))      { cellRef  = reader.Value; }
+            else if (ReferenceEquals(a, names.S)) { styleStr = reader.Value; }
+            else if (ReferenceEquals(a, names.T)) { typeStr  = reader.Value; }
+        }
+        while (reader.MoveToNextAttribute());
+        reader.MoveToElement();
+    }
+
     private static ParsedCell ParseCell(XmlReader reader, XlsxNameTable names, char[] valueBuf, bool readFormulas)
     {
-        var cellRef = reader.GetAttribute(names.R);
-        var styleStr = reader.GetAttribute(names.S);
-        var typeStr = reader.GetAttribute(names.T);
+        ReadCellAttributes(reader, names, out string? cellRef, out string? styleStr, out string? typeStr);
 
         int row = 0, col = 0;
         if (cellRef is not null && CellReferenceParser.TryParse(cellRef, out var addr))
@@ -576,6 +614,10 @@ internal static class WorksheetScanner
         return new ParsedCell(row, col, styleIndex, kind, rawValue, inlineString, formulaText);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool AtCellEnd(XmlReader reader, XlsxNameTable names) =>
+        reader.NodeType == XmlNodeType.EndElement && ReferenceEquals(reader.LocalName, names.C);
+
     private static void ReadCellChildren(
         XmlReader reader,
         XlsxNameTable names,
@@ -586,29 +628,15 @@ internal static class WorksheetScanner
         out string? inlineString,
         out string? formulaText)
     {
-        valueLen     = 0;
-        valueOverflow = null;
-        inlineString = null;
-        formulaText  = null;
-
-        // skipNextRead: ReadElementContentAsString()/Skip() already advanced past the end tag
-        // to the next sibling — do not call Read() again at the top of the loop.
+        valueLen = 0; valueOverflow = null; inlineString = null; formulaText = null;
+        // skipNextRead: Skip()/ReadElementContentAsString() already advanced past the end
+        // tag to the next sibling — suppress the next Read() call.
         bool skipNextRead = false;
         while (skipNextRead || reader.Read())
         {
             skipNextRead = false;
-
-            if (reader.NodeType == XmlNodeType.EndElement
-                && ReferenceEquals(reader.LocalName, names.C))
-            {
-                break;
-            }
-
-            if (reader.NodeType != XmlNodeType.Element)
-            {
-                continue;
-            }
-
+            if (AtCellEnd(reader, names)) { break; }
+            if (reader.NodeType != XmlNodeType.Element) { continue; }
             if (ReferenceEquals(reader.LocalName, names.V))
             {
                 valueLen = ReadValueIntoBuffer(reader, valueBuf, out valueOverflow);
@@ -618,30 +646,24 @@ internal static class WorksheetScanner
                 if (readFormulas)
                 {
                     formulaText = reader.ReadElementContentAsString();
-                    if (reader.NodeType == XmlNodeType.EndElement
-                        && ReferenceEquals(reader.LocalName, names.C))
-                    {
-                        break;
-                    }
+                    if (AtCellEnd(reader, names)) { break; }
                 }
                 else
                 {
-                    // Skip() positions reader on the next sibling (may be <v> or </c>).
-                    // Same post-position as ReadElementContentAsString — set skipNextRead
-                    // so the loop doesn't advance past it.
                     reader.Skip();
-                    if (reader.NodeType == XmlNodeType.EndElement
-                        && ReferenceEquals(reader.LocalName, names.C))
-                    {
-                        break;
-                    }
+                    if (AtCellEnd(reader, names)) { break; }
                 }
-
                 skipNextRead = true;
             }
             else if (ReferenceEquals(reader.LocalName, names.Is))
             {
                 inlineString = ReadInlineString(reader, names);
+            }
+            else
+            {
+                reader.Skip();
+                if (AtCellEnd(reader, names)) { break; }
+                skipNextRead = true;
             }
         }
     }
