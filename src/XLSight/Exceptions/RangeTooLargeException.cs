@@ -1,4 +1,4 @@
-namespace XLSight;
+namespace XLSight.Exceptions;
 
 /// <summary>
 /// Thrown when a requested range would require allocating more cells than

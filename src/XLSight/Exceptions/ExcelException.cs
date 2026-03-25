@@ -1,4 +1,4 @@
-namespace XLSight;
+namespace XLSight.Exceptions;
 
 /// <summary>Base exception for all XLSight errors.</summary>
 public class ExcelException : Exception

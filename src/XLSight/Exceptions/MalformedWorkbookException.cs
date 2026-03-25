@@ -1,4 +1,4 @@
-namespace XLSight;
+namespace XLSight.Exceptions;
 
 /// <summary>Thrown when the file is not a valid xlsx or the XML is corrupt.</summary>
 public sealed class MalformedWorkbookException : ExcelException
