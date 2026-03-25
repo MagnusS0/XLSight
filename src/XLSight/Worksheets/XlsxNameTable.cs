@@ -50,6 +50,11 @@ internal sealed class XlsxNameTable
     internal readonly string F;
     internal readonly string Is;
 
+    // worksheet.xml merge/dimension elements and attributes
+    internal readonly string Dimension;
+    internal readonly string MergeCell;
+    internal readonly string Ref;
+
     // worksheet.xml attributes
     internal readonly string S;      // s= style index on <c>
     internal readonly string Spans;
@@ -99,6 +104,10 @@ internal sealed class XlsxNameTable
         V = nt.Add("v");
         F = nt.Add("f");
         Is = nt.Add("is");
+
+        Dimension = nt.Add("dimension");
+        MergeCell = nt.Add("mergeCell");
+        Ref = nt.Add("ref");
 
         S = nt.Add("s");
         Spans = nt.Add("spans");
