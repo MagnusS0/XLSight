@@ -20,11 +20,29 @@
           "System.Management": "9.0.5"
         }
       },
+      "ExcelDataReader": {
+        "type": "Direct",
+        "requested": "[3.8.0, )",
+        "resolved": "3.8.0",
+        "contentHash": "kbUsldc5Fn9IKgzL2nr4VvN/mKqPqn8zGXUZpA7uL6svCA4psF+qMK519EhMvderpU4pAJoqk9DWpiSIkiZtXA=="
+      },
       "Meziantou.Analyzer": {
         "type": "Direct",
         "requested": "[3.0.27, )",
         "resolved": "3.0.27",
         "contentHash": "rlWM33Ldt8FJTai9F0KAhPEQrx9J7lX/lYgG2VJEnS7yoCoEEPTNgHN7M/Sigw02Kzv74NumxfH11UaPwbdJ8A=="
+      },
+      "MiniExcel": {
+        "type": "Direct",
+        "requested": "[1.43.0, )",
+        "resolved": "1.43.0",
+        "contentHash": "ImtWDO4zpjNKuNdFlK5LeNcpVtN/8aWp8M0rd8LPjrCU87ND2qbUEfvIcuS9RDGw+9OxS4ZZaDI0PcHiLtb8qg=="
+      },
+      "System.Text.Encoding.CodePages": {
+        "type": "Direct",
+        "requested": "[9.0.3, )",
+        "resolved": "9.0.3",
+        "contentHash": "80ABiml18jG+6PB6GmrOyMlWla66f4Tp6RgUCJXZLki1Zu+yqbflXvweT86j2xImKHXoVgivto25Z8P5+FO85w=="
       },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",

@@ -10,10 +10,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\XLSight\XLSight.csproj" />
     <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="MiniExcel" />
+    <PackageReference Include="ExcelDataReader" />
+    <PackageReference Include="System.Text.Encoding.CodePages" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="..\..\tests\XLSight.Tests\TestData\*.xlsx">
+    <None Include="../../tests/XLSight.Tests/TestData/*.xlsx">
       <Link>TestData\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
