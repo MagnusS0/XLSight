@@ -25,9 +25,9 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         }
     }
 
-    public static XlsxPackage Open(Stream input)
+    public static XlsxPackage Open(Stream input, bool ownsStream = false)
     {
-        SeekableBacking backing = SeekableBacking.Create(input);
+        SeekableBacking backing = SeekableBacking.Create(input, takeOwnership: ownsStream);
         try
         {
             var archive = new ZipArchive(backing.Stream, ZipArchiveMode.Read, leaveOpen: true);
@@ -42,9 +42,10 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
 
     public static async ValueTask<XlsxPackage> OpenAsync(
         Stream input,
+        bool ownsStream = false,
         CancellationToken cancellationToken = default)
     {
-        SeekableBacking backing = await SeekableBacking.CreateAsync(input, cancellationToken).ConfigureAwait(false);
+        SeekableBacking backing = await SeekableBacking.CreateAsync(input, takeOwnership: ownsStream, cancellationToken).ConfigureAwait(false);
         try
         {
             ZipArchive archive = await ZipArchive.CreateAsync(

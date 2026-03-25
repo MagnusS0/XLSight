@@ -22,7 +22,7 @@ public sealed class SeekableBackingTests
     }
 
     [Fact]
-    public void Create_FromSeekableFileStream_CopiesToOwnedMemoryStream()
+    public void Create_FromSeekableFileStream_UsesOriginalStream()
     {
         string path = Path.GetTempFileName();
         try
@@ -32,12 +32,8 @@ public sealed class SeekableBackingTests
 
             using SeekableBacking backing = SeekableBacking.Create(fileStream);
 
-            Assert.NotSame(fileStream, backing.Stream);
-            Assert.True(backing.OwnsStream);
-            Assert.IsType<MemoryStream>(backing.Stream);
-
-            using var reader = new StreamReader(backing.Stream, Encoding.UTF8, leaveOpen: true);
-            Assert.Equal("xlsx", reader.ReadToEnd());
+            Assert.Same(fileStream, backing.Stream);
+            Assert.False(backing.OwnsStream);
         }
         finally
         {
@@ -56,18 +52,17 @@ public sealed class SeekableBackingTests
     }
 
     [Fact]
-    public void Create_FromMemoryStreamWithHiddenBuffer_CopiesStream()
+    public void Create_FromMemoryStreamWithHiddenBuffer_UsesOriginalStream()
     {
-        // MemoryStream with publiclyVisible=false returns false from TryGetBuffer —
-        // the spec requires a copy in this case.
+        // MemoryStream with publiclyVisible=false returns false from TryGetBuffer,
+        // but it is still seekable so it is used directly without copying.
         var buffer = Encoding.UTF8.GetBytes("abc");
         using var stream = new MemoryStream(buffer, index: 0, count: buffer.Length, writable: true, publiclyVisible: false);
 
         using SeekableBacking backing = SeekableBacking.Create(stream);
 
-        Assert.NotSame(stream, backing.Stream);
-        Assert.True(backing.OwnsStream);
-        Assert.IsType<MemoryStream>(backing.Stream);
+        Assert.Same(stream, backing.Stream);
+        Assert.False(backing.OwnsStream);
     }
 
     [Fact]
@@ -78,7 +73,7 @@ public sealed class SeekableBackingTests
         stream.Write(Encoding.UTF8.GetBytes("abc"));
         stream.Position = 0;
 
-        await using SeekableBacking backing = await SeekableBacking.CreateAsync(stream, TestContext.Current.CancellationToken);
+        await using SeekableBacking backing = await SeekableBacking.CreateAsync(stream, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Same(stream, backing.Stream);
         Assert.False(backing.OwnsStream);
@@ -90,13 +85,24 @@ public sealed class SeekableBackingTests
         using var inner = new MemoryStream(Encoding.UTF8.GetBytes("async content"));
         using var stream = new NonSeekableReadStream(inner);
 
-        await using SeekableBacking backing = await SeekableBacking.CreateAsync(stream, TestContext.Current.CancellationToken);
+        await using SeekableBacking backing = await SeekableBacking.CreateAsync(stream, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotSame(stream, backing.Stream);
         Assert.True(backing.OwnsStream);
         Assert.IsType<MemoryStream>(backing.Stream);
         using var reader = new StreamReader(backing.Stream, Encoding.UTF8, leaveOpen: true);
         Assert.Equal("async content", reader.ReadToEnd());
+    }
+
+    [Fact]
+    public async Task CreateAsync_FromSeekableStream_UsesOriginalStream()
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("seekable async"));
+
+        await using SeekableBacking backing = await SeekableBacking.CreateAsync(stream, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Same(stream, backing.Stream);
+        Assert.False(backing.OwnsStream);
     }
 
     private sealed class NonSeekableReadStream(Stream inner) : Stream

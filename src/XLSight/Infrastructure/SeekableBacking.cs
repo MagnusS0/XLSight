@@ -14,44 +14,49 @@ internal sealed class SeekableBacking : IDisposable, IAsyncDisposable
 
     public bool OwnsStream { get; }
 
-    public static SeekableBacking Create(Stream input)
+    public static SeekableBacking Create(Stream input, bool takeOwnership = false)
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (input is MemoryStream memoryStream && memoryStream.TryGetBuffer(out _))
+        // Already a usable MemoryStream — use directly, caller owns it
+        if (input is MemoryStream ms && ms.TryGetBuffer(out _))
         {
-            return new SeekableBacking(memoryStream, ownsStream: false);
+            return new SeekableBacking(ms, ownsStream: false);
         }
 
-        if (!input.CanSeek)
+        // Any seekable stream can be used directly by ZipArchive — no copy needed
+        if (input.CanSeek)
         {
-            ThrowHelpers.ThrowNonSeekableStreamRequiresAsync();
+            input.Position = 0;
+            return new SeekableBacking(input, ownsStream: takeOwnership);
         }
 
-        var copy = new MemoryStream();
-        input.Position = 0;
-        input.CopyTo(copy);
-        copy.Position = 0;
-        return new SeekableBacking(copy, ownsStream: true);
+        ThrowHelpers.ThrowNonSeekableStreamRequiresAsync();
+        return null!; // unreachable
     }
 
     public static async ValueTask<SeekableBacking> CreateAsync(
         Stream input,
+        bool takeOwnership = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (input is MemoryStream memoryStream && memoryStream.TryGetBuffer(out _))
+        // Already a usable MemoryStream
+        if (input is MemoryStream ms && ms.TryGetBuffer(out _))
         {
-            return new SeekableBacking(memoryStream, ownsStream: false);
+            return new SeekableBacking(ms, ownsStream: false);
         }
 
-        var copy = new MemoryStream();
+        // Seekable — use directly, no copy
         if (input.CanSeek)
         {
             input.Position = 0;
+            return new SeekableBacking(input, ownsStream: takeOwnership);
         }
 
+        // Non-seekable (e.g. HttpResponseStream) — must buffer
+        var copy = new MemoryStream();
         await input.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
         copy.Position = 0;
         return new SeekableBacking(copy, ownsStream: true);

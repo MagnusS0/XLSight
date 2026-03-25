@@ -48,7 +48,7 @@ public sealed class XlsxPackageTests
     {
         using var stream = CreatePackage(("xl/workbook.xml", "<workbook/>"), ("[Content_Types].xml", "<Types/>"));
 
-        await using XlsxPackage package = await XlsxPackage.OpenAsync(stream, TestContext.Current.CancellationToken);
+        await using XlsxPackage package = await XlsxPackage.OpenAsync(stream, cancellationToken: TestContext.Current.CancellationToken);
         string[] entries = [.. package.Entries.Select(entry => entry.FullName).OrderBy(name => name, StringComparer.Ordinal)];
 
         Assert.Equal(["[Content_Types].xml", "xl/workbook.xml"], entries);
