@@ -251,8 +251,11 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ExcelReadMode mode = ExcelReadMode.Values,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+        // Known limitation: the busy lock is not held across async enumeration.
+        // Concurrent access during iteration is the caller's responsibility.
+        return _engine.StreamRangeAsync(sheet, ExcelRange.Unbounded, mode, ct);
     }
 
     public IAsyncEnumerable<ExcelRow> StreamRangeAsync(
@@ -261,14 +264,28 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ExcelReadMode mode = ExcelReadMode.Values,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(range);
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+        // Known limitation: the busy lock is not held across async enumeration.
+        // Concurrent access during iteration is the caller's responsibility.
+        var parsedRange = AddressParser.Parse(range.AsSpan());
+        return _engine.StreamRangeAsync(sheet, parsedRange, mode, ct);
     }
 
     public IEnumerable<ExcelRow> StreamSheet(string sheet, ExcelReadMode mode = ExcelReadMode.Values)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+        EnterOperation();
+        try
+        {
+            return _engine.StreamRange(sheet, ExcelRange.Unbounded, mode);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public IEnumerable<ExcelRow> StreamRange(
@@ -276,8 +293,19 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         string range,
         ExcelReadMode mode = ExcelReadMode.Values)
     {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(range);
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+        EnterOperation();
+        try
+        {
+            var parsedRange = AddressParser.Parse(range.AsSpan());
+            return _engine.StreamRange(sheet, parsedRange, mode);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public void Dispose()

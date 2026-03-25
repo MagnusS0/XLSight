@@ -195,13 +195,37 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
     public IEnumerable<ExcelRow> StreamRange(string sheetName, ExcelRange range, ExcelReadMode mode)
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+
+        var sheet = FindSheet(sheetName);
+        var entry = _package.GetEntry(sheet.Path);
+        if (entry is null)
+        {
+            throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
+        }
+
+        using var sheetStream = entry.Open();
+        var sink = new StreamingSink(range, _sharedStrings, _styles, _metadata.UsesDate1904, mode);
+        WorksheetScanner.Scan(sheetStream, _names, ref sink);
+        return sink.Rows;
     }
 
     public IAsyncEnumerable<ExcelRow> StreamRangeAsync(string sheetName, ExcelRange range, ExcelReadMode mode, CancellationToken ct)
     {
         ThrowIfDisposed();
-        throw new NotSupportedException("Streaming is not yet implemented. Coming in Phase 6.");
+        ct.ThrowIfCancellationRequested();
+        var rows = StreamRange(sheetName, range, mode);
+        return ToAsyncEnumerable(rows, ct);
+    }
+
+    private static async IAsyncEnumerable<ExcelRow> ToAsyncEnumerable(
+        IEnumerable<ExcelRow> source,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var row in source)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
     }
 
     public void Dispose()
