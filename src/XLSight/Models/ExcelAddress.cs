@@ -6,6 +6,8 @@ namespace XLSight.Models;
 /// Represents a single Excel cell address as a 1-based (column, row) pair.
 /// Column 1 = A, Column 26 = Z, Column 27 = AA, Column 16384 = XFD.
 /// </summary>
+/// <param name="Column">The 1-based column index (1 = A, 16384 = XFD).</param>
+/// <param name="Row">The 1-based row index (1 to 1048576).</param>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct ExcelAddress(int Column, int Row)
 {

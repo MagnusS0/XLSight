@@ -1,0 +1,39 @@
+name: Pack and Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CI: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: dotnet restore XLSight.slnx --locked-mode
+
+      - name: Build
+        run: dotnet build XLSight.slnx --no-restore -c Release
+
+      - name: Test
+        run: dotnet test XLSight.slnx --no-build -c Release
+
+      - name: Pack
+        run: dotnet pack src/XLSight/XLSight.csproj --no-build -c Release -o ./nupkg
+
+      - name: Push to NuGet
+        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

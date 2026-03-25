@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/XLSight.Tests/XLSight.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/XLSight.Benchmarks/XLSight.Benchmarks.csproj" />
+  </Folder>
 </Solution>
