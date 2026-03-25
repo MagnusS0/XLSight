@@ -138,21 +138,63 @@ public sealed class ExcelWorkbookTests
     }
 
     [Fact]
-    public void Dispose_CallerStreamCanBeDisposedAfterOpen()
+    public void Open_FromFilePath_ReadRange_ReturnsCorrectValues()
     {
-        // Use publiclyVisible:false so SeekableBacking is forced to copy rather than wrap.
-        // This simulates a non-MemoryStream seekable stream (e.g. FileStream) that the
-        // workbook must copy internally before the caller can dispose their handle.
+        // Ensures file stream stays alive for the workbook lifetime (not disposed by 'using' on open).
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            WriteWorkbookToFile(tempFile);
+
+            using var workbook = XLSight.ExcelWorkbook.Open(tempFile);
+            var result = workbook.ReadRange("Sheet1", "A1:B2");
+
+            Assert.Equal(2, result.Width);
+            Assert.Equal(2, result.Height);
+            Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+            Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void Open_FromFilePath_StreamSheet_ReturnsRows()
+    {
+        // Ensures lazy sheet streaming works when opened by file path.
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            WriteWorkbookToFile(tempFile);
+
+            using var workbook = XLSight.ExcelWorkbook.Open(tempFile);
+            var rows = workbook.StreamSheet("Sheet1").ToList();
+
+            Assert.Equal(2, rows.Count);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void Dispose_CallerMustKeepSeekableStreamAlive()
+    {
+        // For seekable streams, the workbook uses the stream directly (no copy).
+        // The caller must keep the stream alive for the workbook's lifetime.
         byte[] bytes = CreateWorkbook().ToArray();
         var callerStream = new MemoryStream(bytes, 0, bytes.Length, writable: false, publiclyVisible: false);
         var workbook = XLSight.ExcelWorkbook.Open(callerStream);
 
-        callerStream.Dispose(); // workbook owns a copy — this must not break reads
-
+        // Stream is still alive — reads must succeed
         var result = workbook.ReadRange("Sheet1", "A1:B2");
         Assert.Equal(4, result.CellCount);
 
         workbook.Dispose();
+        callerStream.Dispose();
     }
 
     [Fact]

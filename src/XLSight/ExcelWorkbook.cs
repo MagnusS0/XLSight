@@ -4,8 +4,6 @@ using XLSight.Infrastructure;
 using XLSight.Models;
 using XLSight.Packaging;
 using XLSight.Parsing;
-using XLSight.SharedStrings;
-using XLSight.Styles;
 using XLSight.Worksheets;
 
 namespace XLSight;
@@ -39,6 +37,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <summary>Opens a workbook from a seekable stream synchronously.</summary>
     /// <param name="stream">A seekable, readable stream containing the .xlsx file.</param>
     /// <returns>A new <see cref="ExcelWorkbook"/> instance.</returns>
+    /// <remarks>
+    /// If the stream is seekable, it is used directly and must remain open for the workbook's lifetime.
+    /// For non-seekable streams, use <see cref="OpenAsync(Stream, CancellationToken)"/> instead.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="stream"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown when <paramref name="stream"/> is not seekable.</exception>
     public static ExcelWorkbook Open(Stream stream)
@@ -61,8 +63,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(filePath);
         XLSightEventSource.Log.WorkbookOpened(filePath);
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return Create(fileStream);
+        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Create(fileStream, ownsStream: true);
     }
 
     /// <summary>Opens a workbook from a stream asynchronously.</summary>
@@ -90,7 +92,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     private static async Task<ExcelWorkbook> OpenAsyncCore(Stream stream, CancellationToken ct)
     {
         XLSightEventSource.Log.WorkbookOpened("stream");
-        var package = await XlsxPackage.OpenAsync(stream, ct).ConfigureAwait(false);
+        var package = await XlsxPackage.OpenAsync(stream, cancellationToken: ct).ConfigureAwait(false);
         return await CreateFromPackageAsync(package, ct).ConfigureAwait(false);
     }
 
@@ -98,16 +100,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         XLSightEventSource.Log.WorkbookOpened(filePath);
         var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        await using (fileStream.ConfigureAwait(false))
-        {
-            var package = await XlsxPackage.OpenAsync(fileStream, ct).ConfigureAwait(false);
-            return await CreateFromPackageAsync(package, ct).ConfigureAwait(false);
-        }
+        var package = await XlsxPackage.OpenAsync(fileStream, ownsStream: true, ct).ConfigureAwait(false);
+        return await CreateFromPackageAsync(package, ct).ConfigureAwait(false);
     }
 
-    private static ExcelWorkbook Create(Stream stream)
+    private static ExcelWorkbook Create(Stream stream, bool ownsStream = false)
     {
-        var package = XlsxPackage.Open(stream);
+        var package = XlsxPackage.Open(stream, ownsStream: ownsStream);
         return CreateFromPackageSync(package);
     }
 
@@ -115,28 +114,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         var names = new XlsxNameTable();
 
-        using var workbookStream = package.GetEntry("xl/workbook.xml")!.Open();
-        using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.Open();
+        using var workbookStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
+        using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
         var def = WorkbookParser.Parse(workbookStream);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
-        string[] sharedStrings = [];
-        var sstEntry = package.GetEntry("xl/sharedStrings.xml");
-        if (sstEntry is not null)
-        {
-            using var sstStream = sstEntry.Open();
-            sharedStrings = SharedStringsParser.Parse(sstStream, names);
-        }
-
-        var styles = StyleTable.Default;
-        var stylesEntry = package.GetEntry("xl/styles.xml");
-        if (stylesEntry is not null)
-        {
-            using var stylesStream = stylesEntry.Open();
-            styles = StylesParser.Parse(stylesStream, names);
-        }
-
-        var engine = new XlsxWorkbookEngine(package, metadata, sharedStrings, styles);
+        // SST and styles are loaded lazily inside the engine on first use.
+        var engine = new XlsxWorkbookEngine(package, metadata, names);
         return new ExcelWorkbook(engine);
     }
 

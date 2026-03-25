@@ -1,7 +1,10 @@
+using System.IO.Compression;
 using XLSight.Exceptions;
+using XLSight.Infrastructure;
 using XLSight.Models;
 using XLSight.Models.Analysis;
 using XLSight.Packaging;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -11,22 +14,42 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
 {
     private readonly XlsxPackage _package;
     private readonly WorkbookMetadata _metadata;
-    private readonly string[] _sharedStrings;
-    private readonly StyleTable _styles;
+    private readonly Lazy<string[]> _sharedStrings;
+    private readonly Lazy<StyleTable> _styles;
     private readonly XlsxNameTable _names;
-    private bool _disposed;
+    private volatile bool _disposed;
 
-    internal XlsxWorkbookEngine(
-        XlsxPackage package,
-        WorkbookMetadata metadata,
-        string[] sharedStrings,
-        StyleTable styles)
+    internal XlsxWorkbookEngine(XlsxPackage package, WorkbookMetadata metadata, XlsxNameTable names)
     {
-        _package = package;
+        _package  = package;
         _metadata = metadata;
-        _sharedStrings = sharedStrings;
-        _styles = styles;
-        _names = new XlsxNameTable();
+        _names    = names;
+        _sharedStrings = new Lazy<string[]>(LoadSharedStrings, LazyThreadSafetyMode.ExecutionAndPublication);
+        _styles        = new Lazy<StyleTable>(LoadStyles,       LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    private string[] LoadSharedStrings()
+    {
+        var entry = _package.GetEntry("xl/sharedStrings.xml");
+        if (entry is null)
+        {
+            return [];
+        }
+
+        using var stream = entry.OpenBuffered();
+        return SharedStringsParser.Parse(stream, _names);
+    }
+
+    private StyleTable LoadStyles()
+    {
+        var entry = _package.GetEntry("xl/styles.xml");
+        if (entry is null)
+        {
+            return StyleTable.Default;
+        }
+
+        using var stream = entry.OpenBuffered();
+        return StylesParser.Parse(stream, _names);
     }
 
     public IReadOnlyList<string> SheetNames
@@ -79,10 +102,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
             throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
         }
 
-        using var sheetStream = entry.Open();
+        using var sheetStream = entry.OpenBuffered();
 
         var buffer = new ExcelCellValue[cellCount];
-        var sink = new RangeReadSink(range, buffer, _sharedStrings, _styles, _metadata.UsesDate1904, mode);
+        var sink = new RangeReadSink(range, buffer, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode);
         WorksheetScanner.Scan(sheetStream, _names, ref sink);
 
         return new ExcelRangeResult
@@ -147,10 +170,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         var entry = _package.GetEntry(sheet.Path)
             ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
 
-        using var sheetStream = entry.Open();
+        using var sheetStream = entry.OpenBuffered();
         var buffer = new ExcelCellValue[cellCount];
-        IWorksheetSink sink = new RangeReadSink(range, buffer, _sharedStrings, _styles, _metadata.UsesDate1904, mode);
-        await WorksheetScanner.ScanAsync(sheetStream, _names, sink, ct).ConfigureAwait(false);
+        var wrapper = new RangeReadSinkWrapper(range, buffer, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode);
+        await WorksheetScanner.ScanAsync(sheetStream, _names, wrapper, ct).ConfigureAwait(false);
 
         return new ExcelRangeResult
         {
@@ -249,8 +272,8 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         var entry = _package.GetEntry(sheet.Path)
             ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
 
-        using var sheetStream = entry.Open();
-        var sink = new AnalysisSinkWrapper(_sharedStrings, _styles, _metadata.UsesDate1904, ExcelReadMode.Values);
+        using var sheetStream = entry.OpenBuffered();
+        var sink = new AnalysisSinkWrapper(_sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelReadMode.Values);
         await WorksheetScanner.ScanAsync(sheetStream, _names, sink, ct).ConfigureAwait(false);
         return sink.Build(sheetName, sheetIndex, []);
     }
@@ -263,9 +286,9 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
             throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
         }
 
-        using var sheetStream = entry.Open();
+        using var sheetStream = entry.OpenBuffered();
 
-        var sink = new AnalysisSink(_sharedStrings, _styles, _metadata.UsesDate1904, ExcelReadMode.Values);
+        var sink = new AnalysisSink(_sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelReadMode.Values);
         WorksheetScanner.Scan(sheetStream, _names, ref sink);
 
         return sink.Build(sheet.Name, sheetIndex, []);
@@ -276,33 +299,44 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         ThrowIfDisposed();
 
         var sheet = FindSheet(sheetName);
-        var entry = _package.GetEntry(sheet.Path);
-        if (entry is null)
-        {
-            throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
-        }
+        var entry = _package.GetEntry(sheet.Path)
+            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
 
-        using var sheetStream = entry.Open();
-        var sink = new StreamingSink(range, _sharedStrings, _styles, _metadata.UsesDate1904, mode);
-        WorksheetScanner.Scan(sheetStream, _names, ref sink);
-        return sink.Rows;
+        // Validation runs eagerly here; iteration is deferred to the private iterator below,
+        // which owns the stream lifetime via 'using' inside the iterator body.
+        return StreamRangeCore(entry, range, mode);
     }
 
-    public IAsyncEnumerable<ExcelRow> StreamRangeAsync(string sheetName, ExcelRange range, ExcelReadMode mode, CancellationToken ct)
+    // Private iterator — stream lifetime is tied to the iterator's lifetime.
+    // The 'using' inside a yield iterator's body runs on disposal of the enumerator,
+    // so early break (Take(N)) correctly disposes the stream.
+    private IEnumerable<ExcelRow> StreamRangeCore(ZipArchiveEntry entry, ExcelRange range, ExcelReadMode mode)
+    {
+        using var sheetStream = entry.OpenBuffered();
+        foreach (var row in WorksheetScanner.ScanRows(sheetStream, _names, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode, range))
+        {
+            yield return row;
+        }
+    }
+
+    public async IAsyncEnumerable<ExcelRow> StreamRangeAsync(
+        string sheetName,
+        ExcelRange range,
+        ExcelReadMode mode,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
-        var rows = StreamRange(sheetName, range, mode);
-        return ToAsyncEnumerable(rows, ct);
-    }
 
-    private static async IAsyncEnumerable<ExcelRow> ToAsyncEnumerable(
-        IEnumerable<ExcelRow> source,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-    {
-        foreach (var row in source)
+        var sheet = FindSheet(sheetName);
+        var entry = _package.GetEntry(sheet.Path)
+            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
+
+        // The 'using' inside an async iterator method is safe — the stream stays alive
+        // until the async enumerator is disposed (end of 'await foreach' or cancellation).
+        using var sheetStream = entry.OpenBuffered();
+        await foreach (var row in WorksheetScanner.ScanRowsAsync(sheetStream, _names, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode, range, ct).ConfigureAwait(false))
         {
-            ct.ThrowIfCancellationRequested();
             yield return row;
         }
     }
