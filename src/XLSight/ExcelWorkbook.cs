@@ -146,7 +146,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    public Task<ExcelCellResult> ReadCellAsync(
+    public async Task<ExcelCellResult> ReadCellAsync(
         string sheet,
         string cellAddress,
         ExcelReadMode mode = ExcelReadMode.Values,
@@ -159,7 +159,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         try
         {
             var range = AddressParser.Parse(cellAddress.AsSpan());
-            return _engine.ReadCellAsync(sheet, range.TopLeft, mode, ct);
+            return await _engine.ReadCellAsync(sheet, range.TopLeft, mode, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -167,7 +167,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    public Task<ExcelRangeResult> ReadRangeAsync(
+    public async Task<ExcelRangeResult> ReadRangeAsync(
         string sheet,
         string rangeAddress,
         ExcelReadMode mode = ExcelReadMode.Values,
@@ -180,7 +180,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         try
         {
             var range = AddressParser.Parse(rangeAddress.AsSpan());
-            return _engine.ReadRangeAsync(sheet, range, mode, ct);
+            return await _engine.ReadRangeAsync(sheet, range, mode, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -202,13 +202,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    public Task<Models.Analysis.ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
+    public async Task<Models.Analysis.ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
         EnterOperation();
         try
         {
-            return _engine.AnalyzeAsync(ct);
+            return await _engine.AnalyzeAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -231,14 +231,14 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    public Task<Models.Analysis.ExcelSheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
+    public async Task<Models.Analysis.ExcelSheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
         EnterOperation();
         try
         {
-            return _engine.AnalyzeSheetAsync(sheet, ct);
+            return await _engine.AnalyzeSheetAsync(sheet, ct).ConfigureAwait(false);
         }
         finally
         {

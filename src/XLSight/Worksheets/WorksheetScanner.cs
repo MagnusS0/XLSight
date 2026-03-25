@@ -69,9 +69,8 @@ internal static class WorksheetScanner
         }
     }
 
-    internal static async Task ScanAsync<TSink>(
-        Stream entryStream, XlsxNameTable names, TSink sink, CancellationToken ct)
-        where TSink : class, IWorksheetSink
+    internal static async Task ScanAsync(
+        Stream entryStream, XlsxNameTable names, IWorksheetSink sink, CancellationToken ct)
     {
         var settings = XlsxReaderSettings.Create(names.Table);
         settings.Async = true;

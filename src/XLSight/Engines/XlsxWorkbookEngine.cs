@@ -112,16 +112,55 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         };
     }
 
-    public Task<ExcelCellResult> ReadCellAsync(string sheetName, ExcelAddress address, ExcelReadMode mode, CancellationToken ct)
+    public async Task<ExcelCellResult> ReadCellAsync(string sheetName, ExcelAddress address, ExcelReadMode mode, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(ReadCell(sheetName, address, mode));
+        var range = new ExcelRange(address, address);
+        var result = await ReadRangeAsync(sheetName, range, mode, ct).ConfigureAwait(false);
+        return new ExcelCellResult
+        {
+            Sheet = sheetName,
+            Row = address.Row,
+            Column = address.Column,
+            Value = result.Cells[0],
+        };
     }
 
-    public Task<ExcelRangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ExcelReadMode mode, CancellationToken ct)
+    public async Task<ExcelRangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ExcelReadMode mode, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(ReadRange(sheetName, range, mode));
+        ThrowIfDisposed();
+
+        var sheet = FindSheet(sheetName);
+
+        if (range.IsUnbounded)
+        {
+            throw new RangeTooLargeException(0, ExcelLimits.MaxCells);
+        }
+
+        long cellCount = (long)range.Width * range.Height;
+        if (cellCount > ExcelLimits.MaxCells)
+        {
+            throw new RangeTooLargeException(cellCount, ExcelLimits.MaxCells);
+        }
+
+        var entry = _package.GetEntry(sheet.Path)
+            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
+
+        using var sheetStream = entry.Open();
+        var buffer = new ExcelCellValue[cellCount];
+        IWorksheetSink sink = new RangeReadSink(range, buffer, _sharedStrings, _styles, _metadata.UsesDate1904, mode);
+        await WorksheetScanner.ScanAsync(sheetStream, _names, sink, ct).ConfigureAwait(false);
+
+        return new ExcelRangeResult
+        {
+            Sheet = sheetName,
+            StartRow = range.TopLeft.Row,
+            StartColumn = range.TopLeft.Column,
+            Width = range.Width,
+            Height = range.Height,
+            Cells = buffer,
+        };
     }
 
     public ExcelWorkbookInfo Analyze()
@@ -164,16 +203,56 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         return AnalyzeSheetCore(sheet, sheetIndex);
     }
 
-    public Task<ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct)
+    public async Task<ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(Analyze());
+        ThrowIfDisposed();
+
+        var sheets = new List<ExcelSheetInfo>();
+        foreach (var sheet in _metadata.Sheets)
+        {
+            ct.ThrowIfCancellationRequested();
+            var sheetInfo = await AnalyzeSheetAsync(sheet.Name, ct).ConfigureAwait(false);
+            sheets.Add(sheetInfo);
+        }
+
+        var namedRanges = _metadata.NamedRanges
+            .Select(nr => new ExcelNamedRange
+            {
+                Name = nr.Name,
+                Sheet = nr.ScopeSheetName,
+                Reference = nr.Reference,
+            })
+            .ToArray();
+
+        return new ExcelWorkbookInfo
+        {
+            Sheets = sheets,
+            NamedRanges = namedRanges,
+            HasMacros = _metadata.HasMacros,
+            IsDate1904 = _metadata.UsesDate1904,
+            AnalyzedAtUtc = DateTimeOffset.UtcNow,
+        };
     }
 
-    public Task<ExcelSheetInfo> AnalyzeSheetAsync(string sheetName, CancellationToken ct)
+    public async Task<ExcelSheetInfo> AnalyzeSheetAsync(string sheetName, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(AnalyzeSheet(sheetName));
+        ThrowIfDisposed();
+
+        var sheet = FindSheet(sheetName);
+        int sheetIndex = _metadata.Sheets
+            .Select((s, i) => (s, i))
+            .First(t => string.Equals(t.s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+            .i;
+
+        var entry = _package.GetEntry(sheet.Path)
+            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
+
+        using var sheetStream = entry.Open();
+        var sink = new AnalysisSinkWrapper(_sharedStrings, _styles, _metadata.UsesDate1904, ExcelReadMode.Values);
+        await WorksheetScanner.ScanAsync(sheetStream, _names, sink, ct).ConfigureAwait(false);
+        return sink.Build(sheetName, sheetIndex, []);
     }
 
     private ExcelSheetInfo AnalyzeSheetCore(WorkbookMetadata.WorkbookSheetInfo sheet, int sheetIndex)
