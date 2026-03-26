@@ -20,7 +20,6 @@ internal static class XlsxSheetScanner
     internal static ReadOnlySpan<byte> PatCClose => "</c>"u8;
     internal static ReadOnlySpan<byte> PatV => "<v>"u8;
     internal static ReadOnlySpan<byte> PatVClose => "</v>"u8;
-    internal static ReadOnlySpan<byte> PatT => "<t>"u8;
     internal static ReadOnlySpan<byte> PatTClose => "</t>"u8;
 
     // ── Entry points ─────────────────────────────────────────────────────────
@@ -161,8 +160,16 @@ internal static class XlsxSheetScanner
             if (gt < 0) { buf.Advance(rowIdx); if (!buf.Refill()) { return false; } continue; }
 
             var attrBytes = span.Slice(rowIdx + PatRow.Length, gt - PatRow.Length + 1);
-            if (CellAttributeParser.ParseRowIndex(attrBytes, out int parsedRow)
-                && parsedRow > 0 && parsedRow <= ExcelLimits.MaxRows)
+            bool hasR = CellAttributeParser.ParseRowIndex(attrBytes, out int parsedRow);
+            if (hasR && parsedRow > ExcelLimits.MaxRows)
+            {
+                // Explicit r= is out of Excel range — skip entire row, do not auto-increment.
+                buf.Advance(rowIdx + gt + 1);
+                SkipToTag(buf, PatRowClose);
+                continue;
+            }
+
+            if (hasR && parsedRow > 0)
             {
                 rowIndex = parsedRow;
             }
@@ -172,7 +179,6 @@ internal static class XlsxSheetScanner
             }
 
             buf.Advance(rowIdx + gt + 1);
-            if (rowIndex > ExcelLimits.MaxRows) { SkipToTag(buf, PatRowClose); continue; }
             return true;
         }
     }
@@ -280,20 +286,72 @@ internal static class XlsxSheetScanner
 
     internal static ExcelCellValue ReadInlineString(ScanBuffer buf)
     {
+        // <is> may contain multiple <r><t>…</t></r> runs (rich text).
+        // Concatenate all <t> text nodes; handle <t xml:space="preserve"> and <t/>.
+        // seenT tracks whether any <t> element was encountered — an empty <t/> or <t></t>
+        // yields FromText("") not Empty, matching XmlReader behaviour.
+        bool seenT = false;
+        string? first = null;
+        System.Text.StringBuilder? sb = null;
+
         while (true)
         {
             var span = buf.Span;
-            int tIdx = span.IndexOf(PatT);
             int cClose = span.IndexOf(PatCClose);
-            if (cClose >= 0 && (tIdx < 0 || cClose < tIdx)) { buf.Advance(cClose + PatCClose.Length); return ExcelCellValue.Empty; }
-            if (tIdx < 0) { if (!buf.Refill()) { return ExcelCellValue.Empty; } continue; }
-            buf.Advance(tIdx + PatT.Length);
-            break;
+            int tIdx = FindTTag(span);
+
+            if (cClose >= 0 && (tIdx < 0 || cClose < tIdx))
+            {
+                buf.Advance(cClose + PatCClose.Length);
+                break;
+            }
+
+            if (tIdx < 0) { if (!buf.Refill()) { break; } continue; }
+
+            // Advance past the full opening <t...> tag.
+            int relGt = span[tIdx..].IndexOf((byte)'>');
+            if (relGt < 0) { buf.Advance(tIdx); if (!buf.Refill()) { break; } continue; }
+
+            seenT = true;
+            bool selfClosing = relGt > 0 && span[tIdx + relGt - 1] == (byte)'/';
+            buf.Advance(tIdx + relGt + 1);
+            if (selfClosing) { continue; }
+
+            var textBytes = ExtractUntilClose(buf, PatTClose);
+            if (textBytes.IsEmpty) { continue; }
+
+            // Decode (handles XML entity unescaping) before next buffer operation.
+            var cell = Utf8CellDecoder.Decode(textBytes, CellDataKind.InlineString, 0, [], StyleTable.Default, false);
+            if (cell.CellType == ExcelCellType.Text)
+            {
+                var text = cell.AsText();
+                if (first is null) { first = text; }
+                else { (sb ??= new System.Text.StringBuilder(first)).Append(text); }
+            }
         }
 
-        var textBytes = ExtractUntilClose(buf, PatTClose);
-        SkipToTag(buf, PatCClose);
-        return Utf8CellDecoder.Decode(textBytes, CellDataKind.InlineString, 0, [], StyleTable.Default, false);
+        var result = sb?.ToString() ?? first;
+        if (result is not null) { return ExcelCellValue.FromText(result); }
+        return seenT ? ExcelCellValue.FromText(string.Empty) : ExcelCellValue.Empty;
+    }
+
+    // Finds <t with valid tag-boundary byte ('>', ' ', or '/') after 't'.
+    // Returns -1 if not found. Rejects false matches like <text> or </t>.
+    private static int FindTTag(ReadOnlySpan<byte> span)
+    {
+        ReadOnlySpan<byte> pat = "<t"u8;
+        int search = 0;
+        while (true)
+        {
+            int idx = span[search..].IndexOf(pat);
+            if (idx < 0) { return -1; }
+            idx += search;
+            int afterName = idx + 2;
+            if (afterName >= span.Length) { return -1; }
+            byte next = span[afterName];
+            if (next == (byte)'>' || next == (byte)' ' || next == (byte)'/') { return idx; }
+            search = idx + 1;
+        }
     }
 
     // ── Buffer helpers ──────────────────────────────────────────────────────
