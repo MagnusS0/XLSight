@@ -12,6 +12,12 @@ using XLSight;
 //     for all columns so work is equivalent to XLSight.
 //   MiniExcel: useHeaderRow:false skips header detection; FillMergedCells:false
 //     is default but made explicit. Query() returns decoded IDictionary per row.
+//
+// Sheet selection (xl_large.xlsx):
+//   xl_large.xlsx has 4 sheets. "Worksheet" is the 4th sheet (~985K rows).
+//   All three libraries are directed to the same "Worksheet" sheet by name so
+//   the row count is identical. EDR navigates via NextResult(); MiniExcel uses
+//   the sheetName parameter; XLSight uses StreamSheet("Worksheet").
 [MemoryDiagnoser]
 [ShortRunJob]
 public class CompetitorStreamBenchmarks
@@ -41,7 +47,8 @@ public class CompetitorStreamBenchmarks
         {
             using var s = File.OpenRead(_xlLargePath);
             using var r = ExcelReaderFactory.CreateReader(s);
-            if (r.Read()) _xlLargeColumns = r.FieldCount;
+            NavigateToSheet(r, "Worksheet");
+            if (r.Read()) { _xlLargeColumns = r.FieldCount; }
         }
     }
 
@@ -152,9 +159,9 @@ public class CompetitorStreamBenchmarks
     [Benchmark(Description = "MiniExcel AllRows (1M)")]
     public int MiniExcel_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) return -1;
+        if (_xlLargePath is null) { return -1; }
         int n = 0;
-        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, configuration: s_cfg))
+        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, sheetName: "Worksheet", configuration: s_cfg))
         {
             n++;
         }
@@ -164,9 +171,9 @@ public class CompetitorStreamBenchmarks
     [Benchmark(Description = "MiniExcel First10 (1M)")]
     public int MiniExcel_XlLarge_First10()
     {
-        if (_xlLargePath is null) return -1;
+        if (_xlLargePath is null) { return -1; }
         int n = 0;
-        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, configuration: s_cfg).Take(10))
+        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, sheetName: "Worksheet", configuration: s_cfg).Take(10))
         {
             n++;
         }
@@ -176,13 +183,14 @@ public class CompetitorStreamBenchmarks
     [Benchmark(Description = "ExcelDataReader AllRows (1M)")]
     public int ExcelDataReader_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) return -1;
+        if (_xlLargePath is null) { return -1; }
         using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
+        NavigateToSheet(reader, "Worksheet");
         int n = 0;
         while (reader.Read())
         {
-            for (int i = 0; i < _xlLargeColumns; i++) _ = reader.GetValue(i);
+            for (int i = 0; i < _xlLargeColumns; i++) { _ = reader.GetValue(i); }
             n++;
         }
         return n;
@@ -191,15 +199,25 @@ public class CompetitorStreamBenchmarks
     [Benchmark(Description = "ExcelDataReader First10 (1M)")]
     public int ExcelDataReader_XlLarge_First10()
     {
-        if (_xlLargePath is null) return -1;
+        if (_xlLargePath is null) { return -1; }
         using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
+        NavigateToSheet(reader, "Worksheet");
         int n = 0;
         while (reader.Read() && n < 10)
         {
-            for (int i = 0; i < _xlLargeColumns; i++) _ = reader.GetValue(i);
+            for (int i = 0; i < _xlLargeColumns; i++) { _ = reader.GetValue(i); }
             n++;
         }
         return n;
+    }
+
+    private static void NavigateToSheet(IExcelDataReader reader, string sheetName)
+    {
+        do
+        {
+            if (string.Equals(reader.Name, sheetName, StringComparison.OrdinalIgnoreCase)) { return; }
+        }
+        while (reader.NextResult());
     }
 }
