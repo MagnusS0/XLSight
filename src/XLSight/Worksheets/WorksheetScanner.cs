@@ -234,13 +234,11 @@ internal static class WorksheetScanner
             var rowStr = reader.GetAttribute(names.R);
             lastRowSeen = rowStr is not null && int.TryParse(rowStr, NumberStyles.None, CultureInfo.InvariantCulture, out int parsedRow)
                 ? parsedRow : lastRowSeen + 1;
-            if (!range.IsUnbounded && lastRowSeen > range.BottomRight.Row)
+            if (!range.IsUnbounded && lastRowSeen > range.BottomRight.Row) { yield break; }
+            bool skipRow = lastRowSeen > ExcelLimits.MaxRows
+                || (!range.IsUnbounded && lastRowSeen < range.TopLeft.Row);
+            if (skipRow)
             {
-                yield break;
-            }
-            if (!range.IsUnbounded && lastRowSeen < range.TopLeft.Row)
-            {
-                // Skip the entire <row> subtree — reader lands on next sibling.
                 reader.Skip();
                 if (reader.NodeType != XmlNodeType.Element || !ReferenceEquals(reader.LocalName, names.Row))
                 {
@@ -250,12 +248,15 @@ internal static class WorksheetScanner
             }
             if (!reader.IsEmptyElement && reader.ReadToDescendant(names.C))
             {
+                int lastCellCol = 0;
                 do
                 {
                     // reader enters ON <c>, exits ON </c> (or stays on <c/> if empty element)
                     TryDecodeCellForRow(reader, names, valueBuf, sharedStrings, styles, isDate1904, mode, readFormulas,
                         out int col, out ExcelCellValue val);
-                    if (col > 0 && (range.IsUnbounded || range.Contains(new ExcelAddress(col, lastRowSeen))))
+                    if (col == 0) { col = lastCellCol + 1; } // positional fallback per OOXML §18.3.1.4
+                    lastCellCol = col;
+                    if (range.IsUnbounded || range.Contains(new ExcelAddress(col, lastRowSeen)))
                     {
                         rowCols.Add(col);
                         rowVals.Add(val);
