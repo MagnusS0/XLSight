@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Net;
 using System.Text;
 using XLSight.Models;
 using XLSight.Styles;
@@ -79,6 +80,10 @@ internal static class Utf8CellDecoder
         StyleTable styles,
         bool isDate1904)
     {
+        // Trim ASCII whitespace — Utf8Parser requires exact format, no leading/trailing spaces.
+        while (!valueBytes.IsEmpty && valueBytes[0] <= 32) { valueBytes = valueBytes[1..]; }
+        while (!valueBytes.IsEmpty && valueBytes[^1] <= 32) { valueBytes = valueBytes[..^1]; }
+
         if (!Utf8Parser.TryParse(valueBytes, out double d, out _))
         {
             return ExcelCellValue.Empty;
@@ -101,11 +106,9 @@ internal static class Utf8CellDecoder
             return value;
         }
 
-        return value
-            .Replace("&amp;", "&", StringComparison.Ordinal)
-            .Replace("&lt;", "<", StringComparison.Ordinal)
-            .Replace("&gt;", ">", StringComparison.Ordinal)
-            .Replace("&apos;", "'", StringComparison.Ordinal)
-            .Replace("&quot;", "\"", StringComparison.Ordinal);
+        // WebUtility.HtmlDecode handles named entities (&amp; &lt; &gt; &apos; &quot;)
+        // and numeric character references (&#9; &#xA; etc.) — XmlReader decodes these
+        // automatically, so the byte engine must match.
+        return WebUtility.HtmlDecode(value);
     }
 }
