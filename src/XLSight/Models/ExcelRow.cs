@@ -45,4 +45,16 @@ public readonly struct ExcelRow
 
     /// <summary>Span access for performance-sensitive consumers.</summary>
     public ReadOnlySpan<ExcelCellValue> Cells => _cells.Span;
+
+    /// <summary>
+    /// Returns a new <see cref="ExcelRow"/> whose cells are copied into an independent array.
+    /// Used internally when adapting a zero-alloc cursor (shared buffer) to an
+    /// <see cref="IEnumerable{ExcelRow}"/> that callers may materialise with .ToList().
+    /// </summary>
+    internal ExcelRow CloneRow()
+    {
+        var copy = new ExcelCellValue[_cells.Length];
+        _cells.Span.CopyTo(copy);
+        return new ExcelRow(_rowIndex, copy, _columnOffset);
+    }
 }

@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using XLSight.ByteEngine;
 using XLSight.Exceptions;
 using XLSight.Infrastructure;
 using XLSight.Models;
@@ -309,13 +310,22 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
 
     // Private iterator — stream lifetime is tied to the iterator's lifetime.
     // The 'using' inside a yield iterator's body runs on disposal of the enumerator,
-    // so early break (Take(N)) correctly disposes the stream.
+    // so early break (Take(N)) correctly disposes the stream and cursor.
+    //
+    // CONTRACT: each yielded ExcelRow is valid only until the next MoveNext() call.
+    // The cursor reuses a single pooled buffer — do not store a row or its Cells span
+    // across loop iterations. Use .Select(r => r.CloneRow()).ToList() if independent
+    // copies are needed.
     private IEnumerable<ExcelRow> StreamRangeCore(ZipArchiveEntry entry, ExcelRange range, ExcelReadMode mode)
     {
         using var sheetStream = entry.OpenBuffered();
-        foreach (var row in WorksheetScanner.ScanRows(sheetStream, _names, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode, range))
+        using var cursor = XlsxSheetScanner.OpenCursor(
+            sheetStream, _sharedStrings.Value, _styles.Value,
+            _metadata.UsesDate1904, mode, range);
+
+        while (cursor.MoveNext())
         {
-            yield return row;
+            yield return cursor.Current;
         }
     }
 
@@ -335,10 +345,16 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         // The 'using' inside an async iterator method is safe — the stream stays alive
         // until the async enumerator is disposed (end of 'await foreach' or cancellation).
         using var sheetStream = entry.OpenBuffered();
-        await foreach (var row in WorksheetScanner.ScanRowsAsync(sheetStream, _names, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode, range, ct).ConfigureAwait(false))
+        using var cursor = XlsxSheetScanner.OpenCursor(
+            sheetStream, _sharedStrings.Value, _styles.Value,
+            _metadata.UsesDate1904, mode, range);
+
+        while (!ct.IsCancellationRequested && cursor.MoveNext())
         {
-            yield return row;
+            yield return cursor.Current;
         }
+
+        ct.ThrowIfCancellationRequested();
     }
 
     public void Dispose()
