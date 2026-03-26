@@ -4,7 +4,7 @@ namespace XLSight.Worksheets;
 
 internal sealed class XlsxNameTable
 {
-    internal XmlNameTable Table { get; }
+    internal XmlNameTable Table { get; } = new NameTable();
 
     // workbook.xml elements
     internal readonly string Workbook;
@@ -65,8 +65,7 @@ internal sealed class XlsxNameTable
 
     internal XlsxNameTable()
     {
-        var nt = new NameTable();
-        Table = nt;
+        var nt = (NameTable)Table;
 
         Workbook = nt.Add("workbook");
         WorkbookPr = nt.Add("workbookPr");
@@ -113,5 +112,19 @@ internal sealed class XlsxNameTable
 
         S = nt.Add("s");
         Spans = nt.Add("spans");
+
+        AddNamespaceUris(nt);
+    }
+
+    // Pre-intern OOXML namespace URIs so XmlReader takes the fast-path on namespace
+    // declarations instead of falling into ParseAttributeValueSlow at buffer boundaries.
+    private static void AddNamespaceUris(NameTable nt)
+    {
+        nt.Add("http://schemas.openxmlformats.org/spreadsheetml/2006/main");
+        nt.Add("http://schemas.openxmlformats.org/officeDocument/2006/relationships");
+        nt.Add("http://schemas.openxmlformats.org/markup-compatibility/2006");
+        nt.Add("http://www.w3.org/XML/1998/namespace");
+        nt.Add("xmlns");
+        nt.Add("mc");
     }
 }
