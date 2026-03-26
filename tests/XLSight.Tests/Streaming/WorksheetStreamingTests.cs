@@ -133,7 +133,7 @@ public sealed class WorksheetStreamingTests
         using var ms = CreateWorkbook();
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        var rows = workbook.StreamRange("Sheet1", "A1:B2").ToList();
+        var rows = workbook.StreamRange("Sheet1", "A1:B2").Select(r => r.CloneRow()).ToList();
 
         Assert.Equal(2, rows.Count);
 

@@ -8,4 +8,7 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/XLSight.Benchmarks/XLSight.Benchmarks.csproj" />
   </Folder>
+  <Folder Name="/fuzz/">
+    <Project Path="fuzz/XLSight.Fuzz/XLSight.Fuzz.csproj" />
+  </Folder>
 </Solution>

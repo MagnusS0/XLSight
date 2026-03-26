@@ -8,4 +8,9 @@
   <ItemGroup>
     <ProjectReference Include="../../src/XLSight/XLSight.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="FuzzCorpus/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
