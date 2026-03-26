@@ -63,7 +63,7 @@ internal static class Utf8CellDecoder
             case CellDataKind.FormulaString:
             case CellDataKind.InlineString:
             {
-                // Slow path: allocate string and unescape the five standard XML entities.
+                // Slow path: allocate string and unescape XML entities via WebUtility.HtmlDecode.
                 return ExcelCellValue.FromText(UnescapeXml(Encoding.UTF8.GetString(valueBytes)));
             }
 

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<dimension ref="A1:B1" />
+<sheetViews>
+  <sheetView tabSelected="1" workbookViewId="0">
+    <selection activeCell="A1" sqref="A1" />
+  </sheetView>
+</sheetViews>
+<sheetFormatPr defaultRowHeight="14.25" /> 
+<cols>
+  <col min="1" max="1" width="22" />
+  <col min="2" max="2" width="8" />
+  <col min="3" max="3" width="8" />
+</cols>
+<sheetData>
+  <row r="1" spans="1:2">
+  </row>
+  <row r="2" spans="1:2">
+  </row>
+  <row r="3" spans="1:2">
+    <c r="A3" s="1" t="s">
+      <v>0</v>
+    </c>
+  </row>
+  <row r="4" spans="1:2">
+    <c r="A4" s="1" t="s">
+      <v>1</v>
+    </c>
+    <c r="B4" s="1" t="s">
+      <v>2</v>
+    </c>
+    <c r="C4" s="1" t="s">
+      <v>3</v>
+    </c>
+  </row>
+  <row r="5" spans="1:2">
+    <c r="A5" s="2">
+      <v>1.00000000</v>
+    </c>
+  </row>
+  <row r="6" spans="1:2">
+    <c r="A6" s="2">
+      <v>2.00000000</v>
+    </c>
+    <c r="B6" s="2">
+      <v>3.00000000</v>
+    </c>
+  </row>
+  <row r="7" spans="1:2">
+    <c r="A7" s="2">
+      <v>1.00000000</v>
+    </c>
+  </row>
+  <row r="8" spans="1:2">
+    <c r="A8" s="2">
+      <v>1.00000000</v>
+    </c>
+    <c r="B8" s="2">
+      <v>2.00000000</v>
+    </c>
+  </row>
+  <row r="9" spans="1:2">
+    <c r="A9" s="2">
+      <v>1.00000000</v>
+    </c>
+    <c r="B9" s="2">
+      <v>2.00000000</v>
+    </c>
+    <c r="C9" s="2">
+      <v>3.00000000</v>
+    </c>
+  </row>
+</sheetData>
+<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3" />
+</worksheet>

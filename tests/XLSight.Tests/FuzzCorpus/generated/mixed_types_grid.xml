@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+  <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>123</v></c><c r="C1" t="b"><v>1</v></c></row>
+  <row r="2"><c r="A2"><v>3.14</v></c><c r="B2" t="inlineStr"><is><t>hello</t></is></c><c r="C2" t="b"><v>0</v></c></row>
+  <row r="3"><c r="A3" t="e"><v>#N/A</v></c><c r="B3"><v>0</v></c><c r="C3"/></row>
+  <row r="4"><c r="A4" s="1"><v>44927</v></c><c r="B4" t="str"><v>computed</v></c></row>
+</sheetData></worksheet>

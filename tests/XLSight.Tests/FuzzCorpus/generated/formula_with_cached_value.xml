@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+  <row r="1">
+    <c r="A1"><f>1+1</f><v>2</v></c>
+    <c r="B1" t="str"><f>CONCATENATE("foo","bar")</f><v>foobar</v></c>
+    <c r="C1"><f t="shared" si="0">SUM(A1:A10)</f><v>55</v></c>
+  </row>
+</sheetData></worksheet>

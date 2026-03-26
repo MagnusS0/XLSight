@@ -112,22 +112,50 @@ public sealed class FuzzCorpusRegressionTests
 
     private static void AssertParity(IReadOnlyList<ExcelRow> xmlRows, IReadOnlyList<ExcelRow> byteRows, string file)
     {
-        Assert.Equal(xmlRows.Count, byteRows.Count);
+        Assert.True(
+            xmlRows.Count == byteRows.Count,
+            $"Row count mismatch in '{file}'. xml={xmlRows.Count}, byte={byteRows.Count}. " +
+            $"xml rows=[{DescribeRows(xmlRows)}], byte rows=[{DescribeRows(byteRows)}]");
 
         for (int i = 0; i < xmlRows.Count; i++)
         {
             var expected = xmlRows[i];
             var actual = byteRows[i];
+            string context = $"'{file}' at row[{i}]. xml={DescribeRow(expected)}, byte={DescribeRow(actual)}";
 
-            Assert.Equal(expected.RowIndex, actual.RowIndex);
-            Assert.Equal(expected.StartColumn, actual.StartColumn);
-            Assert.Equal(expected.CellCount, actual.CellCount);
+            Assert.True(expected.RowIndex == actual.RowIndex, $"RowIndex mismatch in {context}");
+            Assert.True(expected.StartColumn == actual.StartColumn, $"StartColumn mismatch in {context}");
+            Assert.True(expected.CellCount == actual.CellCount, $"CellCount mismatch in {context}");
 
             for (int c = 0; c < expected.CellCount; c++)
             {
                 Assert.True(expected.Cells[c] == actual.Cells[c],
-                    $"Cell mismatch in '{file}' at row={expected.RowIndex}, offset={c}.");
+                    $"Cell mismatch in '{file}' at row={expected.RowIndex}, offset={c}. xml={DescribeCell(expected.Cells[c])}, byte={DescribeCell(actual.Cells[c])}");
             }
         }
+    }
+
+    private static string DescribeRows(IReadOnlyList<ExcelRow> rows)
+    {
+        return string.Join(", ", rows.Take(8).Select(DescribeRow));
+    }
+
+    private static string DescribeRow(ExcelRow row)
+    {
+        return $"{row.RowIndex}:{row.StartColumn}+{row.CellCount}";
+    }
+
+    private static string DescribeCell(ExcelCellValue cell)
+    {
+        return cell.CellType switch
+        {
+            ExcelCellType.Text => $"Text({cell.AsText()})",
+            ExcelCellType.Number => $"Number({cell.AsNumber()})",
+            ExcelCellType.Boolean => $"Boolean({cell.AsBoolean()})",
+            ExcelCellType.Date => $"Date({cell.AsDate():O})",
+            ExcelCellType.Error => $"Error({cell.AsError()})",
+            ExcelCellType.Formula => $"Formula({cell.AsFormula()})",
+            _ => cell.CellType.ToString(),
+        };
     }
 }

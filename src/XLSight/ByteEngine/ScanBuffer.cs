@@ -32,6 +32,8 @@ internal sealed class ScanBuffer : IDisposable
     /// <summary>Current unconsumed window as a span.</summary>
     internal ReadOnlySpan<byte> Span => _buf.AsSpan(_start, _end - _start);
 
+    internal bool CanReadMore => !_streamDone && (_start > 0 || _end < BufferSize);
+
     /// <summary>
     /// Resets the buffer pointers and refills from the underlying stream's current position.
     /// Used after an external seek on the stream (e.g. when a seek hint repositions it).

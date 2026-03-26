@@ -119,6 +119,66 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal("Result", rows[0].GetCell(1).AsText());
     }
 
+    [Fact]
+    public void PrefixedWorksheetTags_AreParsed()
+    {
+        const string prefixedNs = "urn:test";
+        var rows = Scan($"""
+            <x:worksheet xmlns:x="{prefixedNs}">
+              <x:sheetData>
+                <x:row r="1">
+                  <x:c r="A1" t="str"><x:v>Alpha</x:v></x:c>
+                  <x:c r="B1"><x:v>42</x:v></x:c>
+                </x:row>
+              </x:sheetData>
+            </x:worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal("Alpha", rows[0].GetCell(1).AsText());
+        Assert.Equal(42.0, rows[0].GetCell(2).AsNumber());
+    }
+
+    [Fact]
+    public void PrefixedInlineStringTextTags_AreParsed()
+    {
+        const string prefixedNs = "urn:test";
+        var rows = Scan($"""
+            <x:worksheet xmlns:x="{prefixedNs}">
+              <x:sheetData>
+                <x:row r="1">
+                  <x:c r="A1" t="inlineStr">
+                    <x:is>
+                      <x:r><x:t>Hello</x:t></x:r>
+                      <x:r><x:t> World</x:t></x:r>
+                    </x:is>
+                  </x:c>
+                </x:row>
+              </x:sheetData>
+            </x:worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal("Hello World", rows[0].GetCell(1).AsText());
+    }
+
+    [Fact]
+    public void SingleQuotedInlineStringAttributes_AreParsed()
+    {
+        var rows = Scan("""
+            <worksheet xmlns="urn:test">
+              <sheetData>
+                <row>
+                  <c t='inlineStr'><is><t>Single quoted</t></is></c>
+                </row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal("Single quoted", rows[0].GetCell(1).AsText());
+    }
+
     // ── Edge cases ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -163,6 +223,29 @@ public sealed class XlsxSheetScannerTests
         Assert.Single(rows);
         Assert.True(rows[0].GetCell(1).IsEmpty);
         Assert.Equal(7.0, rows[0].GetCell(2).AsNumber());
+    }
+
+    [Fact]
+    public void ExplicitEmptyValueCells_PreserveRowWidth()
+    {
+        var rows = Scan($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1">
+                  <c r="A1"><v></v></c>
+                  <c r="B1"><v/></c>
+                  <c r="C1" t="s"><v></v></c>
+                </row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal(1, rows[0].StartColumn);
+        Assert.Equal(3, rows[0].CellCount);
+        Assert.True(rows[0].GetCell(1).IsEmpty);
+        Assert.True(rows[0].GetCell(2).IsEmpty);
+        Assert.True(rows[0].GetCell(3).IsEmpty);
     }
 
     [Fact]

@@ -32,6 +32,24 @@ public sealed class WorkbookMetadataTests
     }
 
     [Fact]
+    public void WorkbookParser_Parse_AcceptsAlternateRelationshipIdPrefix()
+    {
+        using var stream = CreateUtf8Stream("""
+            <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      xmlns:relationships="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <sheets>
+                <sheet name="Summary" sheetId="1" relationships:id="rId1" />
+              </sheets>
+            </workbook>
+            """);
+
+        WorkbookParser.ParsedWorkbookDefinition workbook = WorkbookParser.Parse(stream);
+
+        var sheet = Assert.Single(workbook.Sheets);
+        Assert.Equal(("Summary", "rId1"), (sheet.Name, sheet.RelationshipId));
+    }
+
+    [Fact]
     public void WorkbookParser_Parse_ExtractsNamedRangesAndDate1904()
     {
         using var stream = CreateUtf8Stream("""

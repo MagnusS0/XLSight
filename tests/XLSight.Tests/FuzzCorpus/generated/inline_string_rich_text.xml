@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+  <row r="1">
+    <c r="A1" t="inlineStr"><is>
+      <r><rPr><b/></rPr><t>Bold</t></r>
+      <r><t xml:space="preserve"> and </t></r>
+      <r><rPr><i/></rPr><t>Italic</t></r>
+    </is></c>
+  </row>
+</sheetData></worksheet>

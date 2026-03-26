@@ -91,7 +91,7 @@ internal sealed class SheetCursor : IDisposable
 
             if (!_range.IsUnbounded && rowIndex < _range.TopLeft.Row)
             {
-                XlsxSheetScanner.SkipToTag(_buf, XlsxSheetScanner.PatRowClose);
+                XlsxSheetScanner.SkipToEndTag(_buf, XlsxSheetScanner.TagRow);
                 continue;
             }
 

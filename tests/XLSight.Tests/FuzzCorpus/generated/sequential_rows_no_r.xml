@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+  <row><c><v>a</v></c><c><v>b</v></c></row>
+  <row><c><v>c</v></c><c><v>d</v></c></row>
+  <row><c><v>e</v></c><c><v>f</v></c></row>
+</sheetData></worksheet>

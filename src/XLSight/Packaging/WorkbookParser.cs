@@ -7,9 +7,6 @@ namespace XLSight.Packaging;
 
 internal static class WorkbookParser
 {
-    private const string SpreadsheetNamespace =
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
     private const string RelationshipsNamespace =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -78,13 +75,36 @@ internal static class WorkbookParser
     private static void ReadSheet(XmlReader reader, List<SheetDefinition> sheets)
     {
         string? name = reader.GetAttribute("name");
-        string? relationshipId = reader.GetAttribute("id", RelationshipsNamespace);
+        string? relationshipId = reader.GetAttribute("id", RelationshipsNamespace)
+            ?? GetAttributeByLocalName(reader, "id");
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(relationshipId))
         {
             return;
         }
 
         sheets.Add(new SheetDefinition(name, relationshipId));
+    }
+
+    private static string? GetAttributeByLocalName(XmlReader reader, string localName)
+    {
+        if (!reader.HasAttributes)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < reader.AttributeCount; i++)
+        {
+            reader.MoveToAttribute(i);
+            if (string.Equals(reader.LocalName, localName, StringComparison.Ordinal))
+            {
+                string value = reader.Value;
+                reader.MoveToElement();
+                return value;
+            }
+        }
+
+        reader.MoveToElement();
+        return null;
     }
 
     private static void ReadDefinedNames(

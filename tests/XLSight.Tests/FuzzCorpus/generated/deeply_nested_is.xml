@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+  <row r="1">
+    <c r="A1" t="inlineStr"><is>
+      <r><rPr><b/><i/><u/><strike/><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/></rPr><t>styled</t></r>
+      <r><t> and </t></r>
+      <r><t>more</t></r>
+    </is></c>
+  </row>
+</sheetData></worksheet>

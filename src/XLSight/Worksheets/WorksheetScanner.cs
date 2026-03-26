@@ -226,10 +226,8 @@ internal static class WorksheetScanner
         var rowVals = new List<ExcelCellValue>(16);
         int lastRowSeen = 0;
         bool readFormulas = mode == ExcelReadMode.Formulas;
-        // Jump to <sheetData> then first <row>, skipping all worksheet header elements.
-        if (!reader.ReadToDescendant(names.SheetData)) { yield break; }
-        if (!reader.ReadToDescendant(names.Row)) { yield break; }
-        while (true)
+        if (!ReadToSheetData(reader, names)) { yield break; }
+        while (ReadToNextRow(reader, names))
         {
             var rowStr = reader.GetAttribute(names.R);
             lastRowSeen = rowStr is not null && int.TryParse(rowStr, NumberStyles.None, CultureInfo.InvariantCulture, out int parsedRow)
@@ -240,18 +238,28 @@ internal static class WorksheetScanner
             if (skipRow)
             {
                 reader.Skip();
-                if (reader.NodeType != XmlNodeType.Element || !ReferenceEquals(reader.LocalName, names.Row))
-                {
-                    yield break;
-                }
                 continue;
             }
-            if (!reader.IsEmptyElement && reader.ReadToDescendant(names.C))
+
+            if (!reader.IsEmptyElement)
             {
+                int rowDepth = reader.Depth;
                 int lastCellCol = 0;
-                do
+                while (reader.Read())
                 {
-                    // reader enters ON <c>, exits ON </c> (or stays on <c/> if empty element)
+                    if (reader.NodeType == XmlNodeType.EndElement
+                        && reader.Depth == rowDepth
+                        && ReferenceEquals(reader.LocalName, names.Row))
+                    {
+                        break;
+                    }
+
+                    if (reader.NodeType != XmlNodeType.Element
+                        || !ReferenceEquals(reader.LocalName, names.C))
+                    {
+                        continue;
+                    }
+
                     TryDecodeCellForRow(reader, names, valueBuf, sharedStrings, styles, isDate1904, mode, readFormulas,
                         out int col, out ExcelCellValue val);
                     if (col == 0) { col = lastCellCol + 1; } // positional fallback per OOXML §18.3.1.4
@@ -262,7 +270,6 @@ internal static class WorksheetScanner
                         rowVals.Add(val);
                     }
                 }
-                while (reader.ReadToNextSibling(names.C));
             }
             if (rowCols.Count > 0)
             {
@@ -270,8 +277,41 @@ internal static class WorksheetScanner
                 rowCols.Clear();
                 rowVals.Clear();
             }
-            if (!reader.ReadToNextSibling(names.Row)) { break; }
         }
+    }
+
+    private static bool ReadToSheetData(XmlReader reader, XlsxNameTable names)
+    {
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.Element
+                && ReferenceEquals(reader.LocalName, names.SheetData))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ReadToNextRow(XmlReader reader, XlsxNameTable names)
+    {
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.EndElement
+                && ReferenceEquals(reader.LocalName, names.SheetData))
+            {
+                return false;
+            }
+
+            if (reader.NodeType == XmlNodeType.Element
+                && ReferenceEquals(reader.LocalName, names.Row))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 
@@ -376,8 +416,6 @@ internal static class WorksheetScanner
     }
 
     // Fused parse+decode for the ScanRows nested-loop path.
-    // Uses ReadToDescendant to jump directly to <v> or <is>, avoiding per-node dispatch
-    // for every child of <c>. Falls back to ReadCellChildren in formula mode (needs <f>).
     // Postcondition: reader is on </c> EndElement, or on <c/> if cell was an empty element.
     private static void TryDecodeCellForRow(
         XmlReader reader,
@@ -428,9 +466,6 @@ internal static class WorksheetScanner
 
     // Reads and decodes the value of a non-empty <c> element using nested navigation.
     // For formula mode, falls back to flat ReadCellChildren (must visit <f>).
-    // For inline strings, navigates directly to <is>.
-    // For all other kinds, navigates directly to <v> via ReadToDescendant and reads with
-    // ReadValueChunk — zero string allocation for Number, SharedString-index, and Boolean cells.
     // Postcondition: reader is on </c> EndElement.
     private static ExcelCellValue ReadCellValueNested(
         XmlReader reader,
@@ -454,31 +489,44 @@ internal static class WorksheetScanner
                 kind, styleIndex, inlineStr, formulaText, sharedStrings, styles, isDate1904, mode);
         }
 
-        // Inline string: navigate directly to <is>, read it, drain to </c>.
         if (kind == CellDataKind.InlineString)
         {
             string? inlineString = null;
-            if (reader.ReadToDescendant(names.Is)) // reader is now ON <is>
+            while (reader.Read())
             {
-                inlineString = ReadInlineString(reader, names); // exits ON </is>
-                DrainToCellEnd(reader, names);                  // advances to </c>
+                if (reader.NodeType == XmlNodeType.EndElement && ReferenceEquals(reader.LocalName, names.C))
+                {
+                    break;
+                }
+
+                if (reader.NodeType == XmlNodeType.Element && ReferenceEquals(reader.LocalName, names.Is))
+                {
+                    inlineString = ReadInlineString(reader, names);
+                    DrainToCellEnd(reader, names);
+                    break;
+                }
             }
-            // ReadToDescendant returned false → reader is already on </c>
             return inlineString is not null ? ExcelCellValue.FromText(inlineString) : ExcelCellValue.Empty;
         }
 
-        // All other kinds: jump directly to <v> via ReadToDescendant, read via ReadValueChunk
-        // (zero string allocation for Number, SharedString-index, Boolean), drain to </c>.
-        if (reader.ReadToDescendant(names.V)) // reader is now ON <v>
+        while (reader.Read())
         {
+            if (reader.NodeType == XmlNodeType.EndElement && ReferenceEquals(reader.LocalName, names.C))
+            {
+                return ExcelCellValue.Empty;
+            }
+
+            if (reader.NodeType != XmlNodeType.Element || !ReferenceEquals(reader.LocalName, names.V))
+            {
+                continue;
+            }
+
             int valueLen = ReadValueIntoBuffer(reader, valueBuf, out string? valueOverflow);
-            // ReadValueIntoBuffer exits ON </v>
-            DrainToCellEnd(reader, names); // advances to </c>
+            DrainToCellEnd(reader, names);
             return DecodeFromSpan(valueBuf.AsSpan(0, valueLen), valueOverflow,
                 kind, styleIndex, inlineString: null, formulaText: null, sharedStrings, styles, isDate1904, mode);
         }
 
-        // No <v> found (formula-only cell with no cached value); reader is on </c>.
         return ExcelCellValue.Empty;
     }
 

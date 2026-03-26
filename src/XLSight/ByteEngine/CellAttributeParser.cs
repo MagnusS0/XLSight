@@ -8,9 +8,9 @@ namespace XLSight.ByteEngine;
 /// </summary>
 internal static class CellAttributeParser
 {
-    private static ReadOnlySpan<byte> RAttr => "r=\""u8;
-    private static ReadOnlySpan<byte> TAttr => "t=\""u8;
-    private static ReadOnlySpan<byte> SAttr => "s=\""u8;
+    private static ReadOnlySpan<byte> RAttr => "r="u8;
+    private static ReadOnlySpan<byte> TAttr => "t="u8;
+    private static ReadOnlySpan<byte> SAttr => "s="u8;
 
     /// <summary>
     /// Parses attributes from a &lt;c ...&gt; or &lt;c .../&gt; tag.
@@ -40,39 +40,19 @@ internal static class CellAttributeParser
             && attrBytes[^2] == (byte)'/'
             && attrBytes[^1] == (byte)'>';
 
-        int idx = attrBytes.IndexOf(RAttr);
-        if (idx >= 0)
+        if (TryGetAttributeValue(attrBytes, RAttr, out var rValue))
         {
-            var valueStart = attrBytes[(idx + 3)..];
-            int end = valueStart.IndexOf((byte)'"');
-            if (end > 0)
-            {
-                // Return value intentionally ignored: defaults (0, 0) are used on failure.
-                _ = ColumnRefDecoder.TryParse(valueStart[..end], out column, out row);
-            }
+            _ = ColumnRefDecoder.TryParse(rValue, out column, out row);
         }
 
-        idx = attrBytes.IndexOf(TAttr);
-        if (idx >= 0)
+        if (TryGetAttributeValue(attrBytes, TAttr, out var tValue))
         {
-            var valueStart = attrBytes[(idx + 3)..];
-            int end = valueStart.IndexOf((byte)'"');
-            if (end > 0)
-            {
-                kind = ParseKind(valueStart[..end]);
-            }
+            kind = ParseKind(tValue);
         }
 
-        idx = attrBytes.IndexOf(SAttr);
-        if (idx >= 0)
+        if (TryGetAttributeValue(attrBytes, SAttr, out var sValue))
         {
-            var valueStart = attrBytes[(idx + 3)..];
-            int end = valueStart.IndexOf((byte)'"');
-            if (end > 0)
-            {
-                // Return value intentionally ignored: default styleIndex=0 is used on failure.
-                _ = Utf8Parser.TryParse(valueStart[..end], out styleIndex, out _);
-            }
+            _ = Utf8Parser.TryParse(sValue, out styleIndex, out _);
         }
     }
 
@@ -83,20 +63,47 @@ internal static class CellAttributeParser
     internal static bool ParseRowIndex(ReadOnlySpan<byte> attrBytes, out int rowIndex)
     {
         rowIndex = 0;
-        int idx = attrBytes.IndexOf(RAttr);
+        if (!TryGetAttributeValue(attrBytes, RAttr, out var rValue))
+        {
+            return false;
+        }
+
+        return Utf8Parser.TryParse(rValue, out rowIndex, out _);
+    }
+
+    private static bool TryGetAttributeValue(
+        ReadOnlySpan<byte> attrBytes,
+        ReadOnlySpan<byte> attributeName,
+        out ReadOnlySpan<byte> value)
+    {
+        value = default;
+        int idx = attrBytes.IndexOf(attributeName);
         if (idx < 0)
         {
             return false;
         }
 
-        var valueStart = attrBytes[(idx + 3)..];
-        int end = valueStart.IndexOf((byte)'"');
+        int quoteIndex = idx + attributeName.Length;
+        if ((uint)quoteIndex >= (uint)attrBytes.Length)
+        {
+            return false;
+        }
+
+        byte quote = attrBytes[quoteIndex];
+        if (quote is not ((byte)'"' or (byte)'\''))
+        {
+            return false;
+        }
+
+        var valueStart = attrBytes[(quoteIndex + 1)..];
+        int end = valueStart.IndexOf(quote);
         if (end <= 0)
         {
             return false;
         }
 
-        return Utf8Parser.TryParse(valueStart[..end], out rowIndex, out _);
+        value = valueStart[..end];
+        return true;
     }
 
     private static CellDataKind ParseKind(ReadOnlySpan<byte> tValue)
