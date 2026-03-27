@@ -5,6 +5,7 @@ namespace XLSight.Engines;
 
 internal interface IWorkbookEngine : IDisposable, IAsyncDisposable
 {
+    public bool IsFileBacked { get; }
     public IReadOnlyList<string> SheetNames { get; }
     public bool IsDate1904 { get; }
     public bool HasMacros { get; }

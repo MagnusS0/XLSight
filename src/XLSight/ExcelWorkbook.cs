@@ -4,7 +4,6 @@ using XLSight.Infrastructure;
 using XLSight.Models;
 using XLSight.Packaging;
 using XLSight.Parsing;
-using XLSight.Worksheets;
 
 namespace XLSight;
 
@@ -112,15 +111,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
 
     private static ExcelWorkbook CreateFromPackageSync(XlsxPackage package)
     {
-        var names = new XlsxNameTable();
-
         using var workbookStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
         using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
         var def = WorkbookParser.Parse(workbookStream);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
         // SST and styles are loaded lazily inside the engine on first use.
-        var engine = new XlsxWorkbookEngine(package, metadata, names);
+        var engine = new XlsxWorkbookEngine(package, metadata);
         return new ExcelWorkbook(engine);
     }
 
@@ -471,6 +468,14 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
 
     private void EnterOperation()
     {
+        // File-backed workbooks open a fresh ZipArchive per sheet read, so concurrent
+        // operations are safe. Only serialize for stream-backed workbooks where the
+        // shared ZipArchive is not thread-safe for concurrent entry reads.
+        if (_engine.IsFileBacked)
+        {
+            return;
+        }
+
         if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
         {
             throw new InvalidOperationException("ExcelWorkbook does not support concurrent operations.");

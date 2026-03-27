@@ -16,6 +16,9 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     private readonly SeekableBacking _backing;
     private readonly ZipArchive _archive;
 
+    /// <summary>True when the workbook was opened from a file path and concurrent entry reads are safe.</summary>
+    public bool IsFileBacked => _backing.Stream is FileStream;
+
     public IReadOnlyList<ZipArchiveEntry> Entries
     {
         get
@@ -79,6 +82,37 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
                     StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Opens a fresh, independent <see cref="ZipArchive"/> for a single entry.
+    /// Safe to call concurrently when <see cref="IsFileBacked"/> is true.
+    /// Returns null if no file path is available or the entry is not found.
+    /// </summary>
+    internal Stream? TryOpenFreshEntry(string entryPath)
+    {
+        if (_backing.Stream is not FileStream backingFs)
+        {
+            return null;
+        }
+
+        var fs = new FileStream(backingFs.Name, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                bufferSize: 4096, useAsync: false);
+        var zip = new ZipArchive(fs, ZipArchiveMode.Read, leaveOpen: false);
+
+        string normalizedPath = PathNormalizer.Normalize(entryPath);
+        var entry = zip.GetEntry(normalizedPath)
+            ?? zip.GetEntry(entryPath)
+            ?? zip.Entries.FirstOrDefault(e =>
+                string.Equals(PathNormalizer.Normalize(e.FullName), normalizedPath, StringComparison.OrdinalIgnoreCase));
+
+        if (entry is null)
+        {
+            zip.Dispose();
+            return null;
+        }
+
+        return new OwnedEntryStream(new BufferedStream(entry.Open(), 65536), zip);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -109,5 +143,51 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         {
             ThrowHelpers.ThrowObjectDisposed(nameof(XlsxPackage));
         }
+    }
+}
+
+/// <summary>
+/// Wraps a zip entry stream and disposes an <see cref="IDisposable"/> owner (the ZipArchive)
+/// when this stream is disposed, ensuring the archive stays alive until the entry is fully read.
+/// </summary>
+file sealed class OwnedEntryStream(Stream inner, IDisposable owner) : Stream
+{
+    public override bool CanRead  => inner.CanRead;
+    public override bool CanSeek  => inner.CanSeek;
+    public override bool CanWrite => inner.CanWrite;
+    public override long Length   => inner.Length;
+
+    public override long Position
+    {
+        get => inner.Position;
+        set => inner.Position = value;
+    }
+
+    public override void  Flush()                                              => inner.Flush();
+    public override int   Read(byte[] buffer, int offset, int count)           => inner.Read(buffer, offset, count);
+    public override int   Read(Span<byte> buffer)                              => inner.Read(buffer);
+    public override long  Seek(long offset, SeekOrigin origin)                 => inner.Seek(offset, origin);
+    public override void  SetLength(long value)                                => inner.SetLength(value);
+    public override void  Write(byte[] buffer, int offset, int count)          => inner.Write(buffer, offset, count);
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        => inner.ReadAsync(buffer, offset, count, ct);
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        => inner.ReadAsync(buffer, ct);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+            owner.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await inner.DisposeAsync().ConfigureAwait(false);
+        owner.Dispose();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }
