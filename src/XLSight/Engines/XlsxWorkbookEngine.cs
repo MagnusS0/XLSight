@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using XLSight.ByteEngine;
 using XLSight.Exceptions;
 using XLSight.Infrastructure;
@@ -17,14 +16,12 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
     private readonly WorkbookMetadata _metadata;
     private readonly Lazy<SharedStringTable> _sharedStrings;
     private readonly Lazy<StyleTable> _styles;
-    private readonly XlsxNameTable _names;
     private volatile bool _disposed;
 
-    internal XlsxWorkbookEngine(XlsxPackage package, WorkbookMetadata metadata, XlsxNameTable names)
+    internal XlsxWorkbookEngine(XlsxPackage package, WorkbookMetadata metadata)
     {
         _package  = package;
         _metadata = metadata;
-        _names    = names;
         _sharedStrings = new Lazy<SharedStringTable>(LoadSharedStrings, LazyThreadSafetyMode.ExecutionAndPublication);
         _styles        = new Lazy<StyleTable>(LoadStyles,       LazyThreadSafetyMode.ExecutionAndPublication);
     }
@@ -50,8 +47,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         }
 
         using var stream = entry.OpenBuffered();
-        return StylesParser.Parse(stream, _names);
+        return StylesParser.Parse(stream);
     }
+
+    public bool IsFileBacked => _package.IsFileBacked;
 
     public IReadOnlyList<string> SheetNames
     {
@@ -97,17 +96,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
             throw new RangeTooLargeException(cellCount, ExcelLimits.MaxCells);
         }
 
-        var entry = _package.GetEntry(sheet.Path);
-        if (entry is null)
-        {
-            throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
-        }
-
-        using var sheetStream = entry.OpenBuffered();
-
+        using var sheetStream = OpenSheetStream(sheet.Path);
         var buffer = new ExcelCellValue[cellCount];
-        var sink = new RangeReadSink(range, buffer, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode);
-        WorksheetScanner.Scan(sheetStream, _names, ref sink);
+        var sink = new RangeReadSink(range, buffer);
+        XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, range, ref sink);
 
         return new ExcelRangeResult
         {
@@ -168,13 +160,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
             throw new RangeTooLargeException(cellCount, ExcelLimits.MaxCells);
         }
 
-        var entry = _package.GetEntry(sheet.Path)
-            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
-
-        using var sheetStream = entry.OpenBuffered();
+        using var sheetStream = OpenSheetStream(sheet.Path);
         var buffer = new ExcelCellValue[cellCount];
-        var wrapper = new RangeReadSinkWrapper(range, buffer, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, mode);
-        await WorksheetScanner.ScanAsync(sheetStream, _names, wrapper, ct).ConfigureAwait(false);
+        var sink = new RangeReadSink(range, buffer);
+        XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, range, ref sink);
 
         return new ExcelRangeResult
         {
@@ -270,27 +259,18 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
             .First(t => string.Equals(t.s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
             .i;
 
-        var entry = _package.GetEntry(sheet.Path)
-            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
-
-        using var sheetStream = entry.OpenBuffered();
-        var sink = new AnalysisSinkWrapper(_sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelReadMode.Values);
-        await WorksheetScanner.ScanAsync(sheetStream, _names, sink, ct).ConfigureAwait(false);
+        using var sheetStream = OpenSheetStream(sheet.Path);
+        var sink = new AnalysisSink();
+        XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheetName, sheetIndex, []);
     }
 
     private ExcelSheetInfo AnalyzeSheetCore(WorkbookMetadata.WorkbookSheetInfo sheet, int sheetIndex)
     {
-        var entry = _package.GetEntry(sheet.Path);
-        if (entry is null)
-        {
-            throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
-        }
+        using var sheetStream = OpenSheetStream(sheet.Path);
 
-        using var sheetStream = entry.OpenBuffered();
-
-        var sink = new AnalysisSink(_sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelReadMode.Values);
-        WorksheetScanner.Scan(sheetStream, _names, ref sink);
+        var sink = new AnalysisSink();
+        XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelRange.Unbounded, ref sink);
 
         return sink.Build(sheet.Name, sheetIndex, []);
     }
@@ -300,12 +280,10 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         ThrowIfDisposed();
 
         var sheet = FindSheet(sheetName);
-        var entry = _package.GetEntry(sheet.Path)
-            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
 
         // Validation runs eagerly here; iteration is deferred to the private iterator below,
         // which owns the stream lifetime via 'using' inside the iterator body.
-        return StreamRangeCore(entry, range, mode);
+        return StreamRangeCore(OpenSheetStream(sheet.Path), range, mode);
     }
 
     // Private iterator — stream lifetime is tied to the iterator's lifetime.
@@ -316,11 +294,11 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
     // The cursor reuses a single pooled buffer — do not store a row or its Cells span
     // across loop iterations. Use .Select(r => r.CloneRow()).ToList() if independent
     // copies are needed.
-    private IEnumerable<ExcelRow> StreamRangeCore(ZipArchiveEntry entry, ExcelRange range, ExcelReadMode mode)
+    private IEnumerable<ExcelRow> StreamRangeCore(Stream sheetStream, ExcelRange range, ExcelReadMode mode)
     {
-        using var sheetStream = entry.OpenBuffered();
+        using var s = sheetStream;
         using var cursor = XlsxSheetScanner.OpenCursor(
-            sheetStream, _sharedStrings.Value, _styles.Value,
+            s, _sharedStrings.Value, _styles.Value,
             _metadata.UsesDate1904, mode, range);
 
         while (cursor.MoveNext())
@@ -339,19 +317,31 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         ct.ThrowIfCancellationRequested();
 
         var sheet = FindSheet(sheetName);
-        var entry = _package.GetEntry(sheet.Path)
-            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheet.Path}' was not found in the package.");
 
         // The 'using' inside an async iterator method is safe — the stream stays alive
         // until the async enumerator is disposed (end of 'await foreach' or cancellation).
-        using var sheetStream = entry.OpenBuffered();
+        using var sheetStream = OpenSheetStream(sheet.Path);
         using var cursor = XlsxSheetScanner.OpenCursor(
             sheetStream, _sharedStrings.Value, _styles.Value,
             _metadata.UsesDate1904, mode, range);
 
-        while (!ct.IsCancellationRequested && cursor.MoveNext())
+        // Outer-async / inner-sync loop: parse from the already-loaded buffer without
+        // blocking, and only await I/O at buffer boundaries.
+        while (!ct.IsCancellationRequested)
         {
-            yield return cursor.Current;
+            // Inner-sync: parse as many rows as the buffer holds (no I/O, no await).
+            if (cursor.TryParseNext(out var row))
+            {
+                yield return row;
+                continue;
+            }
+
+            // Sheet data fully consumed (</sheetData> found) — stop immediately.
+            if (cursor.IsSheetDone) { break; }
+
+            // Buffer exhausted — await a true async refill here (the only await point).
+            bool hasMore = await cursor.RefillAsync(ct).ConfigureAwait(false);
+            if (!hasMore) { break; }
         }
 
         ct.ThrowIfCancellationRequested();
@@ -377,6 +367,24 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
 
         await _package.DisposeAsync().ConfigureAwait(false);
         _disposed = true;
+    }
+
+    /// <summary>
+    /// Opens a stream for a worksheet entry. Uses a fresh, independent ZipArchive when the
+    /// package is file-backed (enabling concurrent calls); falls back to the shared archive
+    /// for stream-backed workbooks.
+    /// </summary>
+    private Stream OpenSheetStream(string sheetPath)
+    {
+        var freshStream = _package.TryOpenFreshEntry(sheetPath);
+        if (freshStream is not null)
+        {
+            return freshStream;
+        }
+
+        var entry = _package.GetEntry(sheetPath)
+            ?? throw new MalformedWorkbookException($"Worksheet entry '{sheetPath}' was not found in the package.");
+        return entry.OpenBuffered();
     }
 
     private WorkbookMetadata.WorkbookSheetInfo FindSheet(string sheetName)
