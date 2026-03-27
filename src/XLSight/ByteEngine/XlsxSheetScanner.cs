@@ -352,8 +352,12 @@ internal static class XlsxSheetScanner
 
             if (status == TagSearchResult.NeedMoreData)
             {
-                buf.Advance(closeIdx);
-                if (!buf.Refill()) { return ReadOnlySpan<byte>.Empty; }
+                if (closeIdx >= 0)
+                {
+                    buf.Advance(closeIdx);
+                    if (!buf.Refill()) { return ReadOnlySpan<byte>.Empty; }
+                }
+                else if (!RefillKeepingTagStart(buf, span, partialIndex)) { return ReadOnlySpan<byte>.Empty; }
                 continue;
             }
 
@@ -375,8 +379,12 @@ internal static class XlsxSheetScanner
 
             if (status == TagSearchResult.NeedMoreData)
             {
-                buf.Advance(idx);
-                if (!buf.Refill()) { return; }
+                if (idx >= 0)
+                {
+                    buf.Advance(idx);
+                    if (!buf.Refill()) { return; }
+                }
+                else if (!RefillKeepingTagStart(buf, span, partialIndex)) { return; }
                 continue;
             }
 
