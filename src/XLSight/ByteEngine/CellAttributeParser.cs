@@ -71,7 +71,16 @@ internal static class CellAttributeParser
         return Utf8Parser.TryParse(rValue, out rowIndex, out _);
     }
 
-    private static bool TryGetAttributeValue(
+    private static ReadOnlySpan<byte> RefAttr => "ref="u8;
+
+    /// <summary>
+    /// Extracts the <c>ref="..."</c> attribute value from a tag's attribute bytes.
+    /// Used for <c>&lt;dimension&gt;</c> and <c>&lt;mergeCell&gt;</c> elements.
+    /// </summary>
+    internal static bool TryGetRefAttribute(ReadOnlySpan<byte> attrBytes, out ReadOnlySpan<byte> refValue)
+        => TryGetAttributeValue(attrBytes, RefAttr, out refValue);
+
+    internal static bool TryGetAttributeValue(
         ReadOnlySpan<byte> attrBytes,
         ReadOnlySpan<byte> attributeName,
         out ReadOnlySpan<byte> value)

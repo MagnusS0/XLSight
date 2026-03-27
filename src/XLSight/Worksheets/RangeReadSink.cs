@@ -1,34 +1,20 @@
-using XLSight.SharedStrings;
 using XLSight.Models;
 using XLSight.Models.Analysis;
-using XLSight.Styles;
 
 namespace XLSight.Worksheets;
 
-internal struct RangeReadSink : IWorksheetSink
+internal struct RangeReadSink : IByteSheetSink
 {
     private readonly ExcelRange _range;
     private readonly ExcelCellValue[] _buffer;
-    private readonly SharedStringTable _sharedStrings;
-    private readonly StyleTable _styles;
-    private readonly bool _isDate1904;
-    private readonly ExcelReadMode _mode;
+    private int _currentRow;
     private bool _pastEnd;
 
-    internal RangeReadSink(
-        ExcelRange range,
-        ExcelCellValue[] buffer,
-        SharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ExcelReadMode mode)
+    internal RangeReadSink(ExcelRange range, ExcelCellValue[] buffer)
     {
         _range = range;
         _buffer = buffer;
-        _sharedStrings = sharedStrings;
-        _styles = styles;
-        _isDate1904 = isDate1904;
-        _mode = mode;
+        _currentRow = 0;
         _pastEnd = false;
     }
 
@@ -36,28 +22,23 @@ internal struct RangeReadSink : IWorksheetSink
 
     public void OnRowStart(int rowIndex)
     {
+        _currentRow = rowIndex;
+
         if (!_range.IsUnbounded && rowIndex > _range.BottomRight.Row)
         {
             _pastEnd = true;
         }
     }
 
-    public bool OnCell(in ParsedCell cell)
+    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value)
     {
         if (_pastEnd)
         {
             return false;
         }
 
-        if (!_range.Contains(new ExcelAddress(cell.Column, cell.Row)))
-        {
-            return true;
-        }
-
-        var value = CellValueDecoder.Decode(in cell, _sharedStrings, _styles, _isDate1904, _mode);
-
-        int rowOffset = cell.Row - _range.TopLeft.Row;
-        int colOffset = cell.Column - _range.TopLeft.Column;
+        int rowOffset = _currentRow - _range.TopLeft.Row;
+        int colOffset = column - _range.TopLeft.Column;
         int index = rowOffset * _range.Width + colOffset;
 
         if ((uint)index < (uint)_buffer.Length)

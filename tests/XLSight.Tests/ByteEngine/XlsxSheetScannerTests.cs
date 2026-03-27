@@ -7,7 +7,6 @@ using XLSight.Models;
 using XLSight.Packaging;
 using XLSight.SharedStrings;
 using XLSight.Styles;
-using XLSight.Worksheets;
 
 namespace XLSight.Tests.ByteEngine;
 
@@ -412,13 +411,12 @@ public sealed class XlsxSheetScannerTests
     private static List<ExcelRow> StreamWithXmlEngine(string path)
     {
         using var wb = global::XLSight.ExcelWorkbook.Open(path);
-        return wb.StreamSheet(wb.SheetNames[0]).ToList();
+        return wb.StreamSheet(wb.SheetNames[0]).Select(r => r.CloneRow()).ToList();
     }
 
     private static List<ExcelRow> StreamWithByteEngine(string path)
     {
         using var package = XlsxPackage.Open(File.OpenRead(path), ownsStream: true);
-        var names = new XlsxNameTable();
 
         using var wbStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
         using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
@@ -438,7 +436,7 @@ public sealed class XlsxSheetScannerTests
         if (stylesEntry is not null)
         {
             using var stylesStream = stylesEntry.OpenBuffered();
-            styles = StylesParser.Parse(stylesStream, names);
+            styles = StylesParser.Parse(stylesStream);
         }
 
         var sheet = metadata.Sheets[0];

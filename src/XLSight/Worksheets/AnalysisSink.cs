@@ -1,20 +1,13 @@
-using XLSight.SharedStrings;
 using System.Runtime.InteropServices;
 using XLSight.Analysis;
 using XLSight.Models;
 using XLSight.Models.Analysis;
-using XLSight.Styles;
 
 namespace XLSight.Worksheets;
 
 [StructLayout(LayoutKind.Auto)]
-internal struct AnalysisSink : IWorksheetSink
+internal struct AnalysisSink : IByteSheetSink
 {
-    private readonly SharedStringTable _sharedStrings;
-    private readonly StyleTable _styles;
-    private readonly bool _isDate1904;
-    private readonly ExcelReadMode _mode;
-
     private int _minRow;
     private int _maxRow;
     private int _minCol;
@@ -29,17 +22,8 @@ internal struct AnalysisSink : IWorksheetSink
     private int _firstRowIndex;
     private Dictionary<int, ExcelCellValue>? _firstRowByColumn;
 
-    internal AnalysisSink(
-        SharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ExcelReadMode mode)
+    public AnalysisSink()
     {
-        _sharedStrings = sharedStrings;
-        _styles = styles;
-        _isDate1904 = isDate1904;
-        _mode = mode;
-
         _minRow = int.MaxValue;
         _maxRow = int.MinValue;
         _minCol = int.MaxValue;
@@ -67,19 +51,17 @@ internal struct AnalysisSink : IWorksheetSink
         }
     }
 
-    public bool OnCell(in ParsedCell cell)
+    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value)
     {
-        var value = CellValueDecoder.Decode(in cell, _sharedStrings, _styles, _isDate1904, _mode);
-
-        UpdateBounds(cell.Row, cell.Column);
+        UpdateBounds(_currentRow, column);
 
         if (!value.IsEmpty)
         {
             _cellCount++;
-            var state = GetOrAddColumnState(cell.Column);
+            var state = GetOrAddColumnState(column);
             state.RecordValue(value);
 
-            if (cell.FormulaText is not null)
+            if (kind == CellDataKind.FormulaString)
             {
                 state.HasFormulas = true;
             }
@@ -87,7 +69,7 @@ internal struct AnalysisSink : IWorksheetSink
 
         if (_currentRow == _firstRowIndex && _firstRowByColumn is not null)
         {
-            _firstRowByColumn[cell.Column] = value;
+            _firstRowByColumn[column] = value;
         }
 
         return true;
@@ -212,25 +194,10 @@ internal struct AnalysisSink : IWorksheetSink
 
     private void UpdateBounds(int row, int col)
     {
-        if (row < _minRow)
-        {
-            _minRow = row;
-        }
-
-        if (row > _maxRow)
-        {
-            _maxRow = row;
-        }
-
-        if (col < _minCol)
-        {
-            _minCol = col;
-        }
-
-        if (col > _maxCol)
-        {
-            _maxCol = col;
-        }
+        if (row < _minRow) { _minRow = row; }
+        if (row > _maxRow) { _maxRow = row; }
+        if (col < _minCol) { _minCol = col; }
+        if (col > _maxCol) { _maxCol = col; }
     }
 
     private ColumnState GetOrAddColumnState(int col)
@@ -244,3 +211,4 @@ internal struct AnalysisSink : IWorksheetSink
         return state;
     }
 }
+

@@ -1,7 +1,6 @@
 using System.Text;
 using Xunit;
 using XLSight.SharedStrings;
-using XLSight.Worksheets;
 
 namespace XLSight.Tests.SharedStrings;
 
@@ -16,7 +15,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_NullStream_ReturnsEmptyArray()
     {
-        var names = new XlsxNameTable();
 
         var result = SharedStringsParser.Parse(null);
 
@@ -26,7 +24,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_SimpleStrings_ReturnsCorrectArray()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst uniqueCount="3">
               <si><t>Hello</t></si>
@@ -46,7 +43,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_RichTextRuns_ConcatenatesText()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst>
               <si><r><t>Bold</t></r><r><t> Normal</t></r></si>
@@ -62,7 +58,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_EmptySiElement_ProducesEmptyString()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst>
               <si/>
@@ -80,7 +75,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_UniqueCountHint_PreSizesCorrectly()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst uniqueCount="2">
               <si><t>First</t></si>
@@ -98,7 +92,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_MismatchedUniqueCount_StillParsesAll()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst uniqueCount="1">
               <si><t>One</t></si>
@@ -115,7 +108,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_CapAtMaxSharedStringCount_StopsAfterCap()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst uniqueCount="20000000">
               <si><t>Alpha</t></si>
@@ -134,7 +126,6 @@ public sealed class SharedStringsParserTests
     [Fact]
     public void Parse_XmlWithNamespace_ParsesCorrectly()
     {
-        var names = new XlsxNameTable();
         using var stream = CreateUtf8Stream("""
             <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="1">
               <si><t>Test</t></si>

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using Xunit;
+using XLSight.ByteEngine;
 using XLSight.Models;
 using XLSight.Packaging;
 using XLSight.SharedStrings;
@@ -122,8 +123,6 @@ public sealed class WorksheetRangeReadIntegrationTests
         using var ms = CreateWorkbook();
         using XlsxPackage package = XlsxPackage.Open(ms);
 
-        var names = new XlsxNameTable();
-
         // Parse metadata to locate the worksheet
         using Stream workbookStream = package.GetEntry("xl/workbook.xml")!.Open();
         using Stream relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.Open();
@@ -135,15 +134,15 @@ public sealed class WorksheetRangeReadIntegrationTests
         SharedStringTable sharedStrings = SharedStringsParser.Parse(sstStream);
 
         using Stream stylesStream = package.GetEntry("xl/styles.xml")!.Open();
-        StyleTable styles = StylesParser.Parse(stylesStream, names);
+        StyleTable styles = StylesParser.Parse(stylesStream);
 
         // Scan A1:B2 of Sheet1
         var range = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(2, 2));
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(range, buffer, sharedStrings, styles, isDate1904: false, ExcelReadMode.Values);
+        var sink = new RangeReadSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry(metadata.Sheets[0].Path)!.Open();
-        WorksheetScanner.Scan(sheetStream, names, ref sink);
+        XlsxSheetScanner.ScanSheet(sheetStream, sharedStrings, styles, isDate1904: false, range, ref sink);
 
         Assert.Equal(ExcelCellValue.FromNumber(42),    buffer[0]); // A1
         Assert.Equal(ExcelCellValue.FromText("Hello"), buffer[1]); // B1
@@ -157,13 +156,12 @@ public sealed class WorksheetRangeReadIntegrationTests
         using var ms = CreateWorkbook();
         using XlsxPackage package = XlsxPackage.Open(ms);
 
-        var names = new XlsxNameTable();
         var range = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(2, 2));
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(range, buffer, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, ExcelReadMode.Values);
+        var sink = new RangeReadSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry("xl/worksheets/sheet2.xml")!.Open();
-        WorksheetScanner.Scan(sheetStream, names, ref sink);
+        XlsxSheetScanner.ScanSheet(sheetStream, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, range, ref sink);
 
         Assert.All(buffer, cell => Assert.Equal(ExcelCellValue.Empty, cell));
     }

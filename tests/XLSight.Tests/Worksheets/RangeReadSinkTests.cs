@@ -1,6 +1,7 @@
 using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
+using XLSight.ByteEngine;
 using XLSight.Models;
 using XLSight.SharedStrings;
 using XLSight.Styles;
@@ -24,15 +25,15 @@ public sealed class RangeReadSinkTests
         SharedStringTable? sharedStrings = null,
         StyleTable? styles = null)
     {
-        var names = new XlsxNameTable();
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(
-            range, buffer,
+        var sink = new RangeReadSink(range, buffer);
+        XlsxSheetScanner.ScanSheet(
+            stream,
             sharedStrings ?? SharedStringTable.Empty,
             styles ?? StyleTable.Default,
             isDate1904: false,
-            ExcelReadMode.Values);
-        WorksheetScanner.Scan(stream, names, ref sink);
+            range,
+            ref sink);
         return buffer;
     }
 

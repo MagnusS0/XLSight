@@ -1,8 +1,8 @@
 using System.Text;
-using System.Xml;
 using SharpFuzz;
 using XLSight.ByteEngine;
 using XLSight.Models;
+using XLSight.Models.Analysis;
 using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
@@ -14,7 +14,6 @@ internal static class Program
     private const int MaxInputBytes = 2 * 1024 * 1024;
     private const int MaxRowsToInspect = 256;
 
-    private static readonly XlsxNameTable Names = new();
     private static readonly SharedStringTable SharedStrings = SharedStringTable.Empty;
 
     public static void Main(string[] args)
@@ -30,44 +29,22 @@ internal static class Program
                 return;
             }
 
-            bool xmlOk = TryScanWithXml(data, out var xmlRows);
-            bool byteOk = TryScanWithByte(data, out var byteRows);
+            bool rowsOk = TryScanWithRows(data, out var rows);
+            bool sinkOk = TryScanWithSink(data);
 
-            if (xmlOk && !byteOk)
+            if (rowsOk && !sinkOk)
             {
-                throw new InvalidOperationException("Byte engine rejected an input accepted by XmlReader scanner.");
+                throw new InvalidOperationException("ByteEngine sink scanner rejected an input accepted by row scanner.");
             }
 
-            if (xmlOk && byteOk)
+            if (rowsOk && sinkOk)
             {
-                AssertParity(xmlRows, byteRows);
+                _ = rows.Sum(static r => r.CellCount);
             }
         });
     }
 
-    private static bool TryScanWithXml(byte[] data, out IReadOnlyList<ExcelRow> rows)
-    {
-        try
-        {
-            using var stream = new MemoryStream(data, writable: false);
-            rows = DrainRows(WorksheetScanner.ScanRows(
-                stream,
-                Names,
-                SharedStrings,
-                StyleTable.Default,
-                isDate1904: false,
-                ExcelReadMode.Values,
-                ExcelRange.Unbounded));
-            return true;
-        }
-        catch (Exception ex) when (IsExpectedInputException(ex))
-        {
-            rows = [];
-            return false;
-        }
-    }
-
-    private static bool TryScanWithByte(byte[] data, out IReadOnlyList<ExcelRow> rows)
+    private static bool TryScanWithRows(byte[] data, out IReadOnlyList<ExcelRow> rows)
     {
         try
         {
@@ -88,6 +65,27 @@ internal static class Program
         }
     }
 
+    private static bool TryScanWithSink(byte[] data)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            var sink = new NoopSink();
+            XlsxSheetScanner.ScanSheet(
+                stream,
+                SharedStrings,
+                StyleTable.Default,
+                isDate1904: false,
+                ExcelRange.Unbounded,
+                ref sink);
+            return true;
+        }
+        catch (Exception ex) when (IsExpectedInputException(ex))
+        {
+            return false;
+        }
+    }
+
     private static List<ExcelRow> DrainRows(IEnumerable<ExcelRow> source)
     {
         var rows = new List<ExcelRow>(Math.Min(32, MaxRowsToInspect));
@@ -104,36 +102,18 @@ internal static class Program
     }
 
     private static bool IsExpectedInputException(Exception ex) =>
-        ex is XmlException
-            or InvalidDataException
+        ex is InvalidDataException
             or FormatException
             or OverflowException
             or ArgumentException
             or DecoderFallbackException;
 
-    private static void AssertParity(IReadOnlyList<ExcelRow> xmlRows, IReadOnlyList<ExcelRow> byteRows)
+    private struct NoopSink : IByteSheetSink
     {
-        if (xmlRows.Count != byteRows.Count)
-        {
-            throw new InvalidOperationException($"Row count mismatch. xml={xmlRows.Count}, byte={byteRows.Count}");
-        }
-
-        for (int i = 0; i < xmlRows.Count; i++)
-        {
-            var a = xmlRows[i];
-            var b = byteRows[i];
-            if (a.RowIndex != b.RowIndex || a.StartColumn != b.StartColumn || a.CellCount != b.CellCount)
-            {
-                throw new InvalidOperationException($"Row shape mismatch at index {i}.");
-            }
-
-            for (int c = 0; c < a.CellCount; c++)
-            {
-                if (a.Cells[c] != b.Cells[c])
-                {
-                    throw new InvalidOperationException($"Cell mismatch at row={a.RowIndex}, offset={c}.");
-                }
-            }
-        }
+        public void OnDimension(in ExcelRange dimension) { }
+        public void OnRowStart(int rowIndex) { }
+        public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value) => true;
+        public void OnMergeCell(in ExcelMergedRegion region) { }
+        public void OnEnd() { }
     }
 }

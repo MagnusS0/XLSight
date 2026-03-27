@@ -3,6 +3,8 @@ using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 using XLSight.Models;
+using XLSight.Models.Analysis;
+using XLSight.Parsing;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -20,6 +22,10 @@ internal static class XlsxSheetScanner
     internal static ReadOnlySpan<byte> TagCell => "c"u8;
     internal static ReadOnlySpan<byte> TagValue => "v"u8;
     internal static ReadOnlySpan<byte> TagText => "t"u8;
+
+    // SearchValues instances are pre-built bitmaps/SIMD vectors; AVX-512 on supported hardware.
+    private static readonly SearchValues<byte> s_tagBoundaries = SearchValues.Create(">/ \t\r\n"u8);
+    private static readonly SearchValues<byte> s_xmlWhitespace  = SearchValues.Create(" \t\r\n"u8);
 
     // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -83,6 +89,63 @@ internal static class XlsxSheetScanner
         ExcelRange range,
         long seekHint = -1)
         => new(entryStream, sharedStrings, styles, isDate1904, range, seekHint);
+
+    /// <summary>
+    /// Push-based sheet scanner. Drives <paramref name="sink"/> for every decoded cell.
+    /// Uses the same SIMD byte-scanning engine as <see cref="ScanRows"/> but avoids
+    /// per-row array allocation by calling the sink directly instead of yielding rows.
+    /// </summary>
+    internal static void ScanSheet<TSink>(
+        Stream entryStream,
+        SharedStringTable sharedStrings,
+        StyleTable styles,
+        bool isDate1904,
+        ExcelRange range,
+        ref TSink sink,
+        long seekHint = -1)
+        where TSink : struct, IByteSheetSink
+    {
+        using var buf = new ScanBuffer(entryStream);
+
+        if (!SeekToSheetData(buf, entryStream, seekHint))
+        {
+            sink.OnEnd();
+            return;
+        }
+
+        int lastRow = 0;
+
+        while (true)
+        {
+            if (!TryReadRowStart(buf, ref lastRow)) { break; }
+
+            int rowIndex = lastRow;
+
+            if (!range.IsUnbounded && rowIndex > range.BottomRight.Row) { break; }
+
+            if (!range.IsUnbounded && rowIndex < range.TopLeft.Row)
+            {
+                SkipToEndTag(buf, TagRow);
+                continue;
+            }
+
+            sink.OnRowStart(rowIndex);
+
+            if (!PushRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, range, ref sink))
+            {
+                break;
+            }
+        }
+
+        // Scan for merge regions after </sheetData> (only relevant when range is unbounded,
+        // i.e. Analyze calls; RangeReadSink ignores OnMergeCell).
+        if (range.IsUnbounded)
+        {
+            TryScanMergeCells(buf, ref sink);
+        }
+
+        sink.OnEnd();
+    }
 
     // ── Navigation helpers (internal so SheetCursor can call them) ──────────
 
@@ -337,6 +400,110 @@ internal static class XlsxSheetScanner
 
     // ── Buffer helpers ──────────────────────────────────────────────────────
 
+    // ── Push-based helpers for ScanSheet<TSink> ─────────────────────────────
+
+    private static ReadOnlySpan<byte> TagMergeCells => "mergeCells"u8;
+    private static ReadOnlySpan<byte> TagMergeCell  => "mergeCell"u8;
+
+    /// <summary>
+    /// Pushes all cells in the current row to <paramref name="sink"/>.
+    /// Returns false when the sink signals early termination.
+    /// Mirrors the filtering logic in <see cref="FillRowCells"/>.
+    /// </summary>
+    private static bool PushRowCells<TSink>(
+        ScanBuffer buf,
+        int rowIndex,
+        SharedStringTable sharedStrings,
+        StyleTable styles,
+        bool isDate1904,
+        ExcelRange range,
+        ref TSink sink)
+        where TSink : struct, IByteSheetSink
+    {
+        int currentCol = 0;
+
+        while (TryReadNextCell(buf, ref currentCol, out var kind, out int styleIdx, out bool isEmpty))
+        {
+            if (currentCol > ExcelLimits.MaxColumns)
+            {
+                if (!isEmpty) { SkipToEndTag(buf, TagCell); }
+                continue;
+            }
+
+            bool inRange = range.IsUnbounded || range.Contains(new ExcelAddress(currentCol, rowIndex));
+            if (!inRange)
+            {
+                if (!isEmpty) { SkipToEndTag(buf, TagCell); }
+                continue;
+            }
+
+            ExcelCellValue value = isEmpty
+                ? ExcelCellValue.Empty
+                : ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
+
+            if (!sink.OnCell(currentCol, kind, styleIdx, value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Scans bytes remaining after <c>&lt;/sheetData&gt;</c> for <c>&lt;mergeCell&gt;</c>
+    /// elements and calls <see cref="IByteSheetSink.OnMergeCell"/> for each one found.
+    /// Stops at <c>&lt;/mergeCells&gt;</c> or EOF.
+    /// </summary>
+    private static void TryScanMergeCells<TSink>(ScanBuffer buf, ref TSink sink)
+        where TSink : struct, IByteSheetSink
+    {
+        Span<char> refCharBuf = stackalloc char[32];
+
+        while (true)
+        {
+            var span = buf.Span;
+
+            // Bail out early when we hit </mergeCells>.
+            var closeStatus = TryFindEndTag(span, TagMergeCells, out int closeIdx, out int closeLen, out int closePartial);
+            var mergeStatus = TryFindStartTag(span, TagMergeCell, out var mergeMatch, out int mergePartial);
+
+            if (closeStatus == TagSearchResult.Found
+                && (mergeStatus != TagSearchResult.Found || closeIdx < mergeMatch.Start))
+            {
+                break;
+            }
+
+            if (mergeStatus == TagSearchResult.NotFound)
+            {
+                if (!RefillKeepingTagStart(buf, span, MaxPartial(closePartial, mergePartial))) { break; }
+                continue;
+            }
+
+            if (mergeStatus == TagSearchResult.NeedMoreData)
+            {
+                buf.Advance(mergeMatch.Start);
+                if (!buf.Refill()) { break; }
+                continue;
+            }
+
+            // Extract and parse the ref="A1:B2" attribute.
+            var attrBytes = span.Slice(mergeMatch.AfterName, mergeMatch.EndExclusive - mergeMatch.AfterName);
+            if (CellAttributeParser.TryGetRefAttribute(attrBytes, out var refBytes))
+            {
+                int charLen = Encoding.UTF8.GetChars(refBytes, refCharBuf);
+                if (AddressParser.TryParse(refCharBuf[..charLen], out var mergeRange))
+                {
+                    sink.OnMergeCell(new ExcelMergedRegion(
+                        mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
+                        mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
+                }
+            }
+
+            buf.Advance(mergeMatch.EndExclusive);
+        }
+    }
+
     internal static ReadOnlySpan<byte> ExtractUntilClose(ScanBuffer buf, ReadOnlySpan<byte> tagName)
     {
         while (true)
@@ -525,15 +692,14 @@ internal static class XlsxSheetScanner
     /// </summary>
     private static int FindCloseAngleBracket(ReadOnlySpan<byte> span, int cursor)
     {
-        while (cursor < span.Length)
+        var slice = span[cursor..];
+        int idx = slice.IndexOfAnyExcept(s_xmlWhitespace);
+        if (idx < 0)
         {
-            byte ch = span[cursor];
-            if (ch == (byte)'>') { return cursor; }
-            if (!IsXmlWhitespace(ch)) { return -2; }
-            cursor++;
+            return -1;
         }
 
-        return -1;
+        return slice[idx] == (byte)'>' ? cursor + idx : -2;
     }
 
     private const int NeedMoreDataSentinel = int.MinValue;
@@ -600,11 +766,9 @@ internal static class XlsxSheetScanner
         return false;
     }
 
-    private static bool IsTagNameBoundary(byte ch) =>
-        ch is (byte)'>' or (byte)'/' || IsXmlWhitespace(ch);
+    private static bool IsTagNameBoundary(byte ch) => s_tagBoundaries.Contains(ch);
 
-    private static bool IsXmlWhitespace(byte ch) =>
-        ch is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n';
+    private static bool IsXmlWhitespace(byte ch) => s_xmlWhitespace.Contains(ch);
 
     private static bool IsValidPrefixChar(byte ch) =>
         ch is >= (byte)'a' and <= (byte)'z'

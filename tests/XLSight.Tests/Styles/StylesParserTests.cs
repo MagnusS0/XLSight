@@ -1,22 +1,18 @@
 using System.Text;
 using Xunit;
 using XLSight.Styles;
-using XLSight.Worksheets;
 
 namespace XLSight.Tests.Styles;
 
 public sealed class StylesParserTests
 {
-    private static XlsxNameTable CreateNames() => new();
-
     private static MemoryStream ToStream(string xml) =>
         new(Encoding.UTF8.GetBytes(xml));
 
     [Fact]
     public void Parse_NullStream_ReturnsDefaultStyleTable()
     {
-        var names = CreateNames();
-        var result = StylesParser.Parse(null, names);
+        var result = StylesParser.Parse(null);
 
         Assert.Same(StyleTable.Default, result);
         Assert.Equal(FormatClass.General, result.GetClassification(0));
@@ -34,9 +30,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.General, table.GetClassification(0));
         Assert.Equal(FormatClass.Date, table.GetClassification(1));
@@ -57,9 +52,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.Time, table.GetClassification(0));
         Assert.Equal(FormatClass.Time, table.GetClassification(1));
@@ -83,9 +77,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.General, table.GetClassification(0));
         Assert.Equal(FormatClass.Date, table.GetClassification(1));
@@ -102,9 +95,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.Date, table.GetClassification(0));
     }
@@ -120,9 +112,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.General, table.GetClassification(9999));
         Assert.Equal(FormatClass.General, table.GetClassification(-1));
@@ -140,9 +131,8 @@ public sealed class StylesParserTests
         }
         sb.Append("</cellXfs></styleSheet>");
 
-        var names = CreateNames();
         using var stream = ToStream(sb.ToString());
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         // All 200 entries parsed successfully, none dropped
         Assert.Equal(FormatClass.General, table.GetClassification(0));
@@ -159,9 +149,8 @@ public sealed class StylesParserTests
             </styleSheet>
             """;
 
-        var names = CreateNames();
         using var stream = ToStream(xml);
-        var table = StylesParser.Parse(stream, names);
+        var table = StylesParser.Parse(stream);
 
         Assert.Equal(FormatClass.General, table.GetClassification(0));
     }
