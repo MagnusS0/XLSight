@@ -27,12 +27,12 @@ public class ByteEngineBenchmarks
     private string? _xlLargePath;
 
     // Pre-loaded for scanner-only group.
-    private string[] _largeSst         = [];
+    private SharedStringTable _largeSst         = SharedStringTable.Empty;
     private StyleTable _largeStyles    = StyleTable.Default;
     private byte[] _largeWsBytes       = [];
     private bool _largeIsDate1904;
 
-    private string[] _xlLargeSst        = [];
+    private SharedStringTable _xlLargeSst        = SharedStringTable.Empty;
     private StyleTable _xlLargeStyles   = StyleTable.Default;
     private byte[] _xlLargeWsBytes      = [];
     private bool _xlLargeIsDate1904;
@@ -218,7 +218,7 @@ public class ByteEngineBenchmarks
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private (string[] sst, StyleTable styles, byte[] wsBytes, bool isDate1904)
+    private (SharedStringTable sst, StyleTable styles, byte[] wsBytes, bool isDate1904)
         LoadFixture(string path, string sheetName)
     {
         using var package = XlsxPackage.Open(File.OpenRead(path), ownsStream: true);
@@ -228,12 +228,12 @@ public class ByteEngineBenchmarks
         var def      = WorkbookParser.Parse(wbStream);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
-        string[] sst = [];
+        SharedStringTable sst = SharedStringTable.Empty;
         var sstEntry = package.GetEntry("xl/sharedStrings.xml");
         if (sstEntry is not null)
         {
             using var s = sstEntry.OpenBuffered();
-            sst = SharedStringsParser.Parse(s, _names);
+            sst = SharedStringsParser.Parse(s);
         }
 
         StyleTable styles = StyleTable.Default;

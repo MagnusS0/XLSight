@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Buffers;
 using XLSight.Models;
 using XLSight.Styles;
@@ -23,7 +24,7 @@ namespace XLSight.ByteEngine;
 internal sealed class SheetCursor : IDisposable
 {
     private readonly ScanBuffer _buf;
-    private readonly string[] _sharedStrings;
+    private readonly SharedStringTable _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _isDate1904;
     private readonly ExcelRange _range;
@@ -36,7 +37,7 @@ internal sealed class SheetCursor : IDisposable
 
     internal SheetCursor(
         Stream entryStream,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelRange range,

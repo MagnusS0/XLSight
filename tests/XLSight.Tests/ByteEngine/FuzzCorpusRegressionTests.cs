@@ -3,6 +3,7 @@ using System.Xml;
 using Xunit;
 using XLSight.ByteEngine;
 using XLSight.Models;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -12,7 +13,7 @@ public sealed class FuzzCorpusRegressionTests
 {
     private const int MaxRowsToInspect = 256;
     private static readonly XlsxNameTable Names = new();
-    private static readonly string[] SharedStrings = [];
+    private static readonly SharedStringTable SharedStrings = SharedStringTable.Empty;
 
     [Fact]
     public void FuzzCorpus_ParsesWithoutUnexpectedCrashes()

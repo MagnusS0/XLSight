@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -213,7 +214,7 @@ internal static class WorksheetScanner
     internal static IEnumerable<ExcelRow> ScanRows(
         Stream entryStream,
         XlsxNameTable names,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode,
@@ -365,7 +366,7 @@ internal static class WorksheetScanner
         XmlReader reader,
         XlsxNameTable names,
         char[] valueBuf,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode,
@@ -421,7 +422,7 @@ internal static class WorksheetScanner
         XmlReader reader,
         XlsxNameTable names,
         char[] valueBuf,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode,
@@ -474,7 +475,7 @@ internal static class WorksheetScanner
         CellDataKind kind,
         int styleIndex,
         bool readFormulas,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)
@@ -554,7 +555,7 @@ internal static class WorksheetScanner
         int styleIndex,
         string? inlineString,
         string? formulaText,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)
@@ -605,7 +606,7 @@ internal static class WorksheetScanner
     }
 
     private static ExcelCellValue DecodeSharedStringFromSpan(
-        ReadOnlySpan<char> span, string? overflow, string[] sharedStrings)
+        ReadOnlySpan<char> span, string? overflow, SharedStringTable sharedStrings)
     {
         // Empty <v> with t="s" MUST return Empty, NOT sharedStrings[0] (calamine #607)
         if (span.IsEmpty && overflow is null)
@@ -619,8 +620,8 @@ internal static class WorksheetScanner
             return ExcelCellValue.Empty;
         }
 
-        return (uint)idx < (uint)sharedStrings.Length
-            ? ExcelCellValue.FromText(sharedStrings[idx])
+        return (uint)idx < (uint)sharedStrings.Count
+            ? ExcelCellValue.FromText(sharedStrings.GetString(idx))
             : ExcelCellValue.Empty;
     }
 

@@ -1,3 +1,4 @@
+using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
 using XLSight.ByteEngine;
@@ -49,7 +50,7 @@ public sealed class XlsxSheetScannerTests
                 <row r="1"><c r="A1" t="s"><v>0</v></c></row>
               </sheetData>
             </worksheet>
-            """, sst: ["Hello"]);
+            """, sst: SstBuilder.Make("Hello"));
 
         Assert.Single(rows);
         Assert.Equal("Hello", rows[0].GetCell(1).AsText());
@@ -203,7 +204,7 @@ public sealed class XlsxSheetScannerTests
                 <row r="1"><c r="A1" t="s"><v/></c></row>
               </sheetData>
             </worksheet>
-            """, sst: ["ShouldNotAppear"]);
+            """, sst: SstBuilder.Make("ShouldNotAppear"));
 
         Assert.Single(rows);
         Assert.True(rows[0].GetCell(1).IsEmpty);
@@ -395,13 +396,13 @@ public sealed class XlsxSheetScannerTests
 
     private static List<ExcelRow> Scan(
         string worksheetXml,
-        string[]? sst = null,
+        SharedStringTable? sst = null,
         ExcelRange? range = null)
     {
         using var stream = XmlStream(worksheetXml);
         return XlsxSheetScanner.ScanRows(
             stream,
-            sst ?? [],
+            sst ?? SharedStringTable.Empty,
             StyleTable.Default,
             isDate1904: false,
             ExcelReadMode.Values,
@@ -424,12 +425,12 @@ public sealed class XlsxSheetScannerTests
         var def = WorkbookParser.Parse(wbStream);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
-        string[] sst = [];
+        SharedStringTable sst = SharedStringTable.Empty;
         var sstEntry = package.GetEntry("xl/sharedStrings.xml");
         if (sstEntry is not null)
         {
             using var sstStream = sstEntry.OpenBuffered();
-            sst = SharedStringsParser.Parse(sstStream, names);
+            sst = SharedStringsParser.Parse(sstStream);
         }
 
         StyleTable styles = StyleTable.Default;

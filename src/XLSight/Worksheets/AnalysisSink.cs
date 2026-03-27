@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Runtime.InteropServices;
 using XLSight.Analysis;
 using XLSight.Models;
@@ -9,7 +10,7 @@ namespace XLSight.Worksheets;
 [StructLayout(LayoutKind.Auto)]
 internal struct AnalysisSink : IWorksheetSink
 {
-    private readonly string[] _sharedStrings;
+    private readonly SharedStringTable _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _isDate1904;
     private readonly ExcelReadMode _mode;
@@ -29,7 +30,7 @@ internal struct AnalysisSink : IWorksheetSink
     private Dictionary<int, ExcelCellValue>? _firstRowByColumn;
 
     internal AnalysisSink(
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)

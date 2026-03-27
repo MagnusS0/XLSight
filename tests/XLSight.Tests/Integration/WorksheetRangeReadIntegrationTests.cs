@@ -132,7 +132,7 @@ public sealed class WorksheetRangeReadIntegrationTests
 
         // Load SST and styles
         using Stream sstStream = package.GetEntry("xl/sharedStrings.xml")!.Open();
-        string[] sharedStrings = SharedStringsParser.Parse(sstStream, names);
+        SharedStringTable sharedStrings = SharedStringsParser.Parse(sstStream);
 
         using Stream stylesStream = package.GetEntry("xl/styles.xml")!.Open();
         StyleTable styles = StylesParser.Parse(stylesStream, names);
@@ -160,7 +160,7 @@ public sealed class WorksheetRangeReadIntegrationTests
         var names = new XlsxNameTable();
         var range = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(2, 2));
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(range, buffer, [], StyleTable.Default, isDate1904: false, ExcelReadMode.Values);
+        var sink = new RangeReadSink(range, buffer, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, ExcelReadMode.Values);
 
         using Stream sheetStream = package.GetEntry("xl/worksheets/sheet2.xml")!.Open();
         WorksheetScanner.Scan(sheetStream, names, ref sink);

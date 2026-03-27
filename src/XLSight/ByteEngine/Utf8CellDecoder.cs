@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Buffers.Text;
 using System.Net;
 using System.Text;
@@ -19,7 +20,7 @@ internal static class Utf8CellDecoder
         ReadOnlySpan<byte> valueBytes,
         CellDataKind kind,
         int styleIndex,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904)
     {
@@ -42,12 +43,12 @@ internal static class Utf8CellDecoder
                     return ExcelCellValue.Empty;
                 }
 
-                if ((uint)idx >= (uint)sharedStrings.Length)
+                if ((uint)idx >= (uint)sharedStrings.Count)
                 {
                     return ExcelCellValue.Empty;
                 }
 
-                return ExcelCellValue.FromText(sharedStrings[idx]);
+                return ExcelCellValue.FromText(sharedStrings.GetString(idx));
             }
 
             case CellDataKind.Boolean:

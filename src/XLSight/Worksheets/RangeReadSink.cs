@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using XLSight.Models;
 using XLSight.Models.Analysis;
 using XLSight.Styles;
@@ -8,7 +9,7 @@ internal struct RangeReadSink : IWorksheetSink
 {
     private readonly ExcelRange _range;
     private readonly ExcelCellValue[] _buffer;
-    private readonly string[] _sharedStrings;
+    private readonly SharedStringTable _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _isDate1904;
     private readonly ExcelReadMode _mode;
@@ -17,7 +18,7 @@ internal struct RangeReadSink : IWorksheetSink
     internal RangeReadSink(
         ExcelRange range,
         ExcelCellValue[] buffer,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)

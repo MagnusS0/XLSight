@@ -18,9 +18,9 @@ public sealed class SharedStringsParserTests
     {
         var names = new XlsxNameTable();
 
-        var result = SharedStringsParser.Parse(null, names);
+        var result = SharedStringsParser.Parse(null);
 
-        Assert.Same(Array.Empty<string>(), result);
+        Assert.Same(SharedStringTable.Empty, result);
     }
 
     [Fact]
@@ -35,9 +35,12 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(["Hello", "World", "!"], result);
+        Assert.Equal(3, result.Count);
+        Assert.Equal("Hello", result.GetString(0));
+        Assert.Equal("World", result.GetString(1));
+        Assert.Equal("!", result.GetString(2));
     }
 
     [Fact]
@@ -50,9 +53,10 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(["Bold Normal"], result);
+        Assert.Equal(1, result.Count);
+        Assert.Equal("Bold Normal", result.GetString(0));
     }
 
     [Fact]
@@ -66,9 +70,11 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(["", "After"], result);
+        Assert.Equal(2, result.Count);
+        Assert.Equal("", result.GetString(0));
+        Assert.Equal("After", result.GetString(1));
     }
 
     [Fact]
@@ -82,11 +88,11 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(2, result.Length);
-        Assert.Equal("First", result[0]);
-        Assert.Equal("Second", result[1]);
+        Assert.Equal(2, result.Count);
+        Assert.Equal("First", result.GetString(0));
+        Assert.Equal("Second", result.GetString(1));
     }
 
     [Fact]
@@ -101,9 +107,9 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(3, result.Length);
+        Assert.Equal(3, result.Count);
     }
 
     [Fact]
@@ -118,11 +124,11 @@ public sealed class SharedStringsParserTests
             """);
 
         // Should not throw from over-allocation and should parse actual elements
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(2, result.Length);
-        Assert.Equal("Alpha", result[0]);
-        Assert.Equal("Beta", result[1]);
+        Assert.Equal(2, result.Count);
+        Assert.Equal("Alpha", result.GetString(0));
+        Assert.Equal("Beta", result.GetString(1));
     }
 
     [Fact]
@@ -135,8 +141,9 @@ public sealed class SharedStringsParserTests
             </sst>
             """);
 
-        var result = SharedStringsParser.Parse(stream, names);
+        var result = SharedStringsParser.Parse(stream);
 
-        Assert.Equal(["Test"], result);
+        Assert.Equal(1, result.Count);
+        Assert.Equal("Test", result.GetString(0));
     }
 }

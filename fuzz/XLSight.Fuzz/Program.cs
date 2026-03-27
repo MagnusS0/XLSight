@@ -3,6 +3,7 @@ using System.Xml;
 using SharpFuzz;
 using XLSight.ByteEngine;
 using XLSight.Models;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -14,7 +15,7 @@ internal static class Program
     private const int MaxRowsToInspect = 256;
 
     private static readonly XlsxNameTable Names = new();
-    private static readonly string[] SharedStrings = [];
+    private static readonly SharedStringTable SharedStrings = SharedStringTable.Empty;
 
     public static void Main(string[] args)
     {

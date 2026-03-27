@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using XLSight.Models;
 using XLSight.Models.Analysis;
 using XLSight.Styles;
@@ -11,7 +12,7 @@ internal sealed class RangeReadSinkWrapper : IWorksheetSink
     internal RangeReadSinkWrapper(
         ExcelRange range,
         ExcelCellValue[] buffer,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)

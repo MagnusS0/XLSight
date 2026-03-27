@@ -15,7 +15,7 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
 {
     private readonly XlsxPackage _package;
     private readonly WorkbookMetadata _metadata;
-    private readonly Lazy<string[]> _sharedStrings;
+    private readonly Lazy<SharedStringTable> _sharedStrings;
     private readonly Lazy<StyleTable> _styles;
     private readonly XlsxNameTable _names;
     private volatile bool _disposed;
@@ -25,20 +25,20 @@ internal sealed class XlsxWorkbookEngine : IWorkbookEngine
         _package  = package;
         _metadata = metadata;
         _names    = names;
-        _sharedStrings = new Lazy<string[]>(LoadSharedStrings, LazyThreadSafetyMode.ExecutionAndPublication);
+        _sharedStrings = new Lazy<SharedStringTable>(LoadSharedStrings, LazyThreadSafetyMode.ExecutionAndPublication);
         _styles        = new Lazy<StyleTable>(LoadStyles,       LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    private string[] LoadSharedStrings()
+    private SharedStringTable LoadSharedStrings()
     {
         var entry = _package.GetEntry("xl/sharedStrings.xml");
         if (entry is null)
         {
-            return [];
+            return SharedStringTable.Empty;
         }
 
         using var stream = entry.OpenBuffered();
-        return SharedStringsParser.Parse(stream, _names);
+        return SharedStringsParser.Parse(stream);
     }
 
     private StyleTable LoadStyles()

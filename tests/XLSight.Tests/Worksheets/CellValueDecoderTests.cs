@@ -1,5 +1,7 @@
+using XLSight.Tests.Infrastructure;
 using Xunit;
 using XLSight.Models;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -7,8 +9,8 @@ namespace XLSight.Tests.Worksheets;
 
 public sealed class CellValueDecoderTests
 {
-    private static readonly string[] TwoStrings = ["zero", "one"];
-    private static readonly string[] EmptyStrings = [];
+    private static readonly SharedStringTable TwoStrings = SstBuilder.Make("zero", "one");
+    private static readonly SharedStringTable EmptyStrings = SharedStringTable.Empty;
 
     private static ParsedCell Cell(
         CellDataKind kind,
@@ -36,7 +38,7 @@ public sealed class CellValueDecoderTests
     [Fact]
     public void Decode_SharedString_OutOfRangeIndex_ReturnsEmpty()
     {
-        var result = CellValueDecoder.Decode(Cell(CellDataKind.SharedString, "99"), ["only"], StyleTable.Default, false, ExcelReadMode.Values);
+        var result = CellValueDecoder.Decode(Cell(CellDataKind.SharedString, "99"), SstBuilder.Make("only"), StyleTable.Default, false, ExcelReadMode.Values);
         Assert.Equal(ExcelCellValue.Empty, result);
     }
 

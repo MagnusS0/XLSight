@@ -1,7 +1,9 @@
+using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
 using XLSight.ByteEngine;
 using XLSight.Models;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 
 namespace XLSight.Tests.ByteEngine;
@@ -17,10 +19,10 @@ public sealed class SheetCursorTests
     private static MemoryStream XmlStream(string xml)
         => new(Encoding.UTF8.GetBytes(xml));
 
-    private static SheetCursor OpenCursor(string worksheetXml, string[]? sst = null, ExcelRange? range = null)
+    private static SheetCursor OpenCursor(string worksheetXml, SharedStringTable? sst = null, ExcelRange? range = null)
         => XlsxSheetScanner.OpenCursor(
             XmlStream(worksheetXml),
-            sst ?? [],
+            sst ?? SharedStringTable.Empty,
             StyleTable.Default,
             isDate1904: false,
             ExcelReadMode.Values,
@@ -195,11 +197,11 @@ public sealed class SheetCursorTests
             """;
 
         var scanRows = XlsxSheetScanner.ScanRows(
-            XmlStream(xml), [], StyleTable.Default, false,
+            XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
             ExcelReadMode.Values, ExcelRange.Unbounded).ToList();
 
         using var cursor = XlsxSheetScanner.OpenCursor(
-            XmlStream(xml), [], StyleTable.Default, false,
+            XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
             ExcelReadMode.Values, ExcelRange.Unbounded);
 
         var cursorRows = new List<ExcelRow>();
@@ -237,7 +239,7 @@ public sealed class SheetCursorTests
               </sheetData>
             </worksheet>
             """;
-        string[] sst = ["hello"];
+        var sst = SstBuilder.Make("hello");
 
         var scanRows = XlsxSheetScanner.ScanRows(
             XmlStream(xml), sst, StyleTable.Default, false,

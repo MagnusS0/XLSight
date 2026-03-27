@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -30,7 +31,7 @@ internal static class XlsxSheetScanner
     /// </summary>
     internal static IEnumerable<ExcelRow> ScanRows(
         Stream entryStream,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode,
@@ -75,7 +76,7 @@ internal static class XlsxSheetScanner
 
     internal static SheetCursor OpenCursor(
         Stream entryStream,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode,
@@ -166,7 +167,7 @@ internal static class XlsxSheetScanner
     }
 
     internal static bool FillRowCells(
-        ScanBuffer buf, int rowIndex, string[] sharedStrings, StyleTable styles,
+        ScanBuffer buf, int rowIndex, SharedStringTable sharedStrings, StyleTable styles,
         bool isDate1904, ExcelRange range, ExcelCellValue[] cellBuf,
         out int startCol, out int width)
     {
@@ -245,7 +246,7 @@ internal static class XlsxSheetScanner
 
     internal static ExcelCellValue ReadCellValue(
         ScanBuffer buf, CellDataKind kind, int styleIdx,
-        string[] sharedStrings, StyleTable styles, bool isDate1904)
+        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
     {
         if (kind == CellDataKind.InlineString) { return ReadInlineString(buf); }
 
@@ -610,7 +611,7 @@ internal static class XlsxSheetScanner
     private static void AccumulateInlineText(
         ReadOnlySpan<byte> bytes, ref string? first, ref StringBuilder? sb)
     {
-        var cell = Utf8CellDecoder.Decode(bytes, CellDataKind.InlineString, 0, [], StyleTable.Default, false);
+        var cell = Utf8CellDecoder.Decode(bytes, CellDataKind.InlineString, 0, SharedStringTable.Empty, StyleTable.Default, false);
         if (cell.CellType != ExcelCellType.Text)
         {
             return;

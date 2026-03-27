@@ -1,3 +1,4 @@
+using XLSight.SharedStrings;
 using System.Globalization;
 using XLSight.Models;
 using XLSight.Styles;
@@ -8,7 +9,7 @@ internal static class CellValueDecoder
 {
     internal static ExcelCellValue Decode(
         in ParsedCell cell,
-        string[] sharedStrings,
+        SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ExcelReadMode mode)
@@ -35,7 +36,7 @@ internal static class CellValueDecoder
         };
     }
 
-    private static ExcelCellValue DecodeSharedString(in ParsedCell cell, string[] sharedStrings)
+    private static ExcelCellValue DecodeSharedString(in ParsedCell cell, SharedStringTable sharedStrings)
     {
         // Empty <v> with t="s" MUST return Empty, NOT sharedStrings[0] (calamine #607)
         if (string.IsNullOrEmpty(cell.RawValue))
@@ -49,12 +50,12 @@ internal static class CellValueDecoder
         }
 
         // Unsigned cast handles negative index implicitly
-        if ((uint)index >= (uint)sharedStrings.Length)
+        if ((uint)index >= (uint)sharedStrings.Count)
         {
             return ExcelCellValue.Empty;
         }
 
-        return ExcelCellValue.FromText(sharedStrings[index]);
+        return ExcelCellValue.FromText(sharedStrings.GetString(index));
     }
 
     private static ExcelCellValue DecodeBoolean(in ParsedCell cell)

@@ -1,6 +1,8 @@
+using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
 using XLSight.Models;
+using XLSight.SharedStrings;
 using XLSight.Styles;
 using XLSight.Worksheets;
 
@@ -19,14 +21,14 @@ public sealed class RangeReadSinkTests
     private static ExcelCellValue[] ScanRange(
         Stream stream,
         ExcelRange range,
-        string[]? sharedStrings = null,
+        SharedStringTable? sharedStrings = null,
         StyleTable? styles = null)
     {
         var names = new XlsxNameTable();
         var buffer = new ExcelCellValue[range.Width * range.Height];
         var sink = new RangeReadSink(
             range, buffer,
-            sharedStrings ?? [],
+            sharedStrings ?? SharedStringTable.Empty,
             styles ?? StyleTable.Default,
             isDate1904: false,
             ExcelReadMode.Values);
@@ -122,7 +124,7 @@ public sealed class RangeReadSinkTests
     public void Scan_SharedStringCell_DecodesCorrectly()
     {
         using var stream = WorksheetXml("""<row r="1"><c r="A1" t="s"><v>0</v></c></row>""");
-        var buffer = ScanRange(stream, Range(1, 1, 1, 1), sharedStrings: ["Hello"]);
+        var buffer = ScanRange(stream, Range(1, 1, 1, 1), sharedStrings: SstBuilder.Make("Hello"));
 
         Assert.Single(buffer);
         Assert.Equal(ExcelCellValue.FromText("Hello"), buffer[0]);
