@@ -43,6 +43,22 @@ public readonly struct ExcelRow
         return _cells.Span[offset];
     }
 
+    /// <summary>
+    /// Returns a read-only reference to a cell by 1-based column index, avoiding a 24-byte struct copy.
+    /// Falls back to a reference to <see cref="ExcelCellValue.Empty"/> when the column is out of range.
+    /// </summary>
+    /// <param name="columnIndex">The 1-based column index to retrieve.</param>
+    public ref readonly ExcelCellValue GetCellRef(int columnIndex)
+    {
+        int offset = columnIndex - _columnOffset;
+        if ((uint)offset < (uint)_cells.Length)
+        {
+            return ref _cells.Span[offset];
+        }
+
+        return ref ExcelCellValue.Empty;
+    }
+
     /// <summary>Span access for performance-sensitive consumers.</summary>
     public ReadOnlySpan<ExcelCellValue> Cells => _cells.Span;
 

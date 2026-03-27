@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace XLSight.Models;
 
@@ -7,11 +8,13 @@ namespace XLSight.Models;
 /// Represents the decoded value of a single Excel cell.
 /// Use the factory methods to create instances and typed accessors to retrieve values.
 /// </summary>
+// Fields ordered (double, string, enum) to eliminate internal padding: 8 + 8 + 4 + 4pad = 24 bytes, no gaps.
+[StructLayout(LayoutKind.Sequential)]
 public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
 {
-    private readonly ExcelCellType _type;
     private readonly double _numeric;   // number, bool (0.0/1.0), or DateTime ticks cast to double
     private readonly string? _text;     // text, error code, or formula text
+    private readonly ExcelCellType _type;
 
     private ExcelCellValue(ExcelCellType type, double numeric, string? text)
     {

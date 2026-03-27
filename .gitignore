@@ -488,3 +488,11 @@ tools/
 trace-driver/
 traces/
 docs/engine_v2.md
+bench/calamine-harness/target/
+bench/xlsight-harness/publish/
+bench/xlsight-harness/bin/
+bench/xlsight-harness/obj/
+bench/plots/
+bench/results.json
+tests/XLSight.Tests/TestData/*_samples.tsv
+tests/XLSight.Tests/TestData/.~lock.*

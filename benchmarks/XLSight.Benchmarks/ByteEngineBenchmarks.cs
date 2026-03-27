@@ -7,47 +7,40 @@ using XLSight.Models;
 using XLSight.Packaging;
 using XLSight.SharedStrings;
 using XLSight.Styles;
-using XLSight.Worksheets;
 
-// Compares the new byte-scanner engine (XlsxSheetScanner) against the current
-// XmlReader-based engine (WorksheetScanner) on the same workload.
+// Measures the ByteEngine (XlsxSheetScanner) in isolation and through the full public API.
 //
 // Group 1 (ScannerOnly_*): SST and styles are pre-loaded in GlobalSetup.
 //   Each iteration re-opens the worksheet bytes from a MemoryStream snapshot,
-//   eliminating I/O and ZIP decompression variance so only parser throughput is
-//   measured.
+//   eliminating I/O and ZIP decompression variance so only parser throughput is measured.
 //
 // Group 2 (FullPath_*): full file open per iteration — includes ZIP open,
-//   decompression, SST/styles load, and scanning.  Mirrors production code paths.
+//   decompression, SST/styles load, and scanning. Mirrors production code paths.
 [MemoryDiagnoser]
 [ShortRunJob]
 public class ByteEngineBenchmarks
 {
-    private string _largePath    = null!;
+    private string _largePath = null!;
     private string? _xlLargePath;
 
-    // Pre-loaded for scanner-only group.
-    private SharedStringTable _largeSst         = SharedStringTable.Empty;
-    private StyleTable _largeStyles    = StyleTable.Default;
-    private byte[] _largeWsBytes       = [];
+    private SharedStringTable _largeSst = SharedStringTable.Empty;
+    private StyleTable _largeStyles = StyleTable.Default;
+    private byte[] _largeWsBytes = [];
     private bool _largeIsDate1904;
 
-    private SharedStringTable _xlLargeSst        = SharedStringTable.Empty;
-    private StyleTable _xlLargeStyles   = StyleTable.Default;
-    private byte[] _xlLargeWsBytes      = [];
+    private SharedStringTable _xlLargeSst = SharedStringTable.Empty;
+    private StyleTable _xlLargeStyles = StyleTable.Default;
+    private byte[] _xlLargeWsBytes = [];
     private bool _xlLargeIsDate1904;
-
-    private XlsxNameTable _names = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        _names       = new XlsxNameTable();
-        _largePath   = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
-        var xlLarge  = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
+        _largePath = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
+        var xlLarge = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
         _xlLargePath = File.Exists(xlLarge) ? xlLarge : null;
 
-        (_largeSst, _largeStyles, _largeWsBytes, _largeIsDate1904)     = LoadFixture(_largePath, "Numbers");
+        (_largeSst, _largeStyles, _largeWsBytes, _largeIsDate1904) = LoadFixture(_largePath, "Numbers");
         if (_xlLargePath is not null)
         {
             (_xlLargeSst, _xlLargeStyles, _xlLargeWsBytes, _xlLargeIsDate1904) =
@@ -57,21 +50,7 @@ public class ByteEngineBenchmarks
 
     // ── Group 1: Scanner-only (pre-loaded SST + styles, in-memory bytes) ────
 
-    [Benchmark(Baseline = true, Description = "XmlEngine scanner (100K)")]
-    public int ScannerOnly_XmlEngine_Large_AllRows()
-    {
-        using var ms = new MemoryStream(_largeWsBytes, writable: false);
-        int n = 0;
-        foreach (var _ in WorksheetScanner.ScanRows(
-            ms, _names, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded))
-        {
-            n++;
-        }
-        return n;
-    }
-
-    [Benchmark(Description = "ByteEngine scanner (100K)")]
+    [Benchmark(Baseline = true, Description = "ByteEngine IEnumerable (100K)")]
     public int ScannerOnly_ByteEngine_Large_AllRows()
     {
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
@@ -85,21 +64,7 @@ public class ByteEngineBenchmarks
         return n;
     }
 
-    [Benchmark(Description = "XmlEngine scanner First10 (100K)")]
-    public int ScannerOnly_XmlEngine_Large_First10()
-    {
-        using var ms = new MemoryStream(_largeWsBytes, writable: false);
-        int n = 0;
-        foreach (var _ in WorksheetScanner.ScanRows(
-            ms, _names, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded).Take(10))
-        {
-            n++;
-        }
-        return n;
-    }
-
-    [Benchmark(Description = "ByteEngine scanner First10 (100K)")]
+    [Benchmark(Description = "ByteEngine IEnumerable First10 (100K)")]
     public int ScannerOnly_ByteEngine_Large_First10()
     {
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
@@ -113,22 +78,7 @@ public class ByteEngineBenchmarks
         return n;
     }
 
-    [Benchmark(Description = "XmlEngine scanner (1M)")]
-    public int ScannerOnly_XmlEngine_XlLarge_AllRows()
-    {
-        if (_xlLargeWsBytes.Length == 0) { return -1; }
-        using var ms = new MemoryStream(_xlLargeWsBytes, writable: false);
-        int n = 0;
-        foreach (var _ in WorksheetScanner.ScanRows(
-            ms, _names, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded))
-        {
-            n++;
-        }
-        return n;
-    }
-
-    [Benchmark(Description = "ByteEngine scanner (1M)")]
+    [Benchmark(Description = "ByteEngine IEnumerable (1M)")]
     public int ScannerOnly_ByteEngine_XlLarge_AllRows()
     {
         if (_xlLargeWsBytes.Length == 0) { return -1; }
@@ -145,7 +95,7 @@ public class ByteEngineBenchmarks
 
     // ── Group 1b: Cursor (zero per-row allocation) ───────────────────────────
 
-    [Benchmark(Description = "Cursor scanner (100K)")]
+    [Benchmark(Description = "Cursor (100K)")]
     public int ScannerOnly_Cursor_Large_AllRows()
     {
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
@@ -157,7 +107,7 @@ public class ByteEngineBenchmarks
         return n;
     }
 
-    [Benchmark(Description = "Cursor scanner First10 (100K)")]
+    [Benchmark(Description = "Cursor First10 (100K)")]
     public int ScannerOnly_Cursor_Large_First10()
     {
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
@@ -169,7 +119,7 @@ public class ByteEngineBenchmarks
         return n;
     }
 
-    [Benchmark(Description = "Cursor scanner (1M)")]
+    [Benchmark(Description = "Cursor (1M)")]
     public int ScannerOnly_Cursor_XlLarge_AllRows()
     {
         if (_xlLargeWsBytes.Length == 0) { return -1; }
@@ -182,7 +132,7 @@ public class ByteEngineBenchmarks
         return n;
     }
 
-    [Benchmark(Description = "Cursor scanner First10 (1M)")]
+    [Benchmark(Description = "Cursor First10 (1M)")]
     public int ScannerOnly_Cursor_XlLarge_First10()
     {
         if (_xlLargeWsBytes.Length == 0) { return -1; }
@@ -223,9 +173,9 @@ public class ByteEngineBenchmarks
     {
         using var package = XlsxPackage.Open(File.OpenRead(path), ownsStream: true);
 
-        using var wbStream   = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
+        using var wbStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
         using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
-        var def      = WorkbookParser.Parse(wbStream);
+        var def = WorkbookParser.Parse(wbStream);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
         SharedStringTable sst = SharedStringTable.Empty;
@@ -241,10 +191,10 @@ public class ByteEngineBenchmarks
         if (stylesEntry is not null)
         {
             using var s = stylesEntry.OpenBuffered();
-            styles = StylesParser.Parse(s, _names);
+            styles = StylesParser.Parse(s);
         }
 
-        var sheet   = metadata.Sheets.First(sh => string.Equals(sh.Name, sheetName, StringComparison.Ordinal));
+        var sheet = metadata.Sheets.First(sh => string.Equals(sh.Name, sheetName, StringComparison.Ordinal));
         var wsEntry = package.GetEntry(sheet.Path)!;
         using var wsStream = wsEntry.OpenBuffered();
         var wsBytes = ReadAllBytes(wsStream);
@@ -258,6 +208,4 @@ public class ByteEngineBenchmarks
         s.CopyTo(ms);
         return ms.ToArray();
     }
-
-
 }
