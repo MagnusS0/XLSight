@@ -47,7 +47,7 @@ internal static class Utf8CellDecoder
                     return ExcelCellValue.Empty;
                 }
 
-                return ExcelCellValue.FromText(sharedStrings.GetString(idx));
+                return ExcelCellValue.FromSharedString(sharedStrings.GetString(idx), idx);
             }
 
             case CellDataKind.Boolean:

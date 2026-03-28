@@ -8,19 +8,22 @@ namespace XLSight.Models;
 /// Represents the decoded value of a single Excel cell.
 /// Use the factory methods to create instances and typed accessors to retrieve values.
 /// </summary>
-// Fields ordered (double, string, enum) to eliminate internal padding: 8 + 8 + 4 + 4pad = 24 bytes, no gaps.
+// Fields ordered to fill the natural padding slot: double(8) + string(8) + CellType(4) + int(4) = 24 bytes, no padding.
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
 {
     private readonly double _numeric;   // number, bool (0.0/1.0), or DateTime ticks cast to double
     private readonly string? _text;     // text, error code, or formula text
     private readonly CellType _type;
+    private readonly int _sstId;        // SST index for shared-string cells, -1 for all others;
+                                        // fits in the 4-byte padding slot after _type — no size change
 
-    private ExcelCellValue(CellType type, double numeric, string? text)
+    private ExcelCellValue(CellType type, double numeric, string? text, int sstId = -1)
     {
         _type = type;
         _numeric = numeric;
         _text = text;
+        _sstId = sstId;
     }
 
     /// <summary>Gets the type of data stored in this cell value.</summary>
@@ -75,6 +78,36 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Formula"/>.</returns>
     public static ExcelCellValue FromFormula(string formulaText) =>
         new(CellType.Formula, 0.0, formulaText);
+
+    /// <summary>
+    /// Creates a text cell value decoded from the Shared String Table, storing the raw
+    /// SST index alongside the string so callers can retrieve it via
+    /// <see cref="TryGetSharedStringId"/>.
+    /// </summary>
+    internal static ExcelCellValue FromSharedString(string value, int sstId) =>
+        new(CellType.Text, 0.0, value, sstId);
+
+    // ── SST identity ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the raw Shared String Table index for cells whose text came from the SST.
+    /// Two cells with the same <paramref name="id"/> contain the identical string object —
+    /// useful for zero-allocation hashing, deduplication, or ETL pipelines that never
+    /// need to materialise the string.
+    /// </summary>
+    /// <param name="id">
+    /// The SST integer index, guaranteed stable within a single workbook read session.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> if the cell is a shared-string text cell with a valid SST index;
+    /// <see langword="false"/> for inline strings, numbers, dates, booleans, errors, and
+    /// formulas (all have <paramref name="id"/> set to <c>-1</c>).
+    /// </returns>
+    public bool TryGetSharedStringId(out int id)
+    {
+        id = _sstId;
+        return _sstId >= 0;
+    }
 
     // ── Typed accessors — throw InvalidOperationException on wrong type ────────
 

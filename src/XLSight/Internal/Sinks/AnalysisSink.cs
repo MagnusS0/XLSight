@@ -81,7 +81,7 @@ internal struct AnalysisSink : IByteSheetSink
                 // so value is Empty — materialise lazily here since it's only one row.
                 if (isSharedString && value.IsEmpty)
                 {
-                    value = ExcelCellValue.FromText(_sst.GetString(rawIndex));
+                    value = ExcelCellValue.FromSharedString(_sst.GetString(rawIndex), rawIndex);
                 }
 
                 state.RecordValue(value);
@@ -98,7 +98,7 @@ internal struct AnalysisSink : IByteSheetSink
             // Ensure row-1 shared strings are materialised before storing.
             if (rawIndex >= 0 && value.IsEmpty)
             {
-                value = ExcelCellValue.FromText(_sst.GetString(rawIndex));
+                value = ExcelCellValue.FromSharedString(_sst.GetString(rawIndex), rawIndex);
             }
 
             _firstRowByColumn[column] = value;
