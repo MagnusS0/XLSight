@@ -1,10 +1,10 @@
-using XLSight.Tests.Infrastructure;
 using System.Text;
-using Xunit;
-using XLSight.Internal.Readers.Xlsx;
-using XLSight.Internal.Packaging;
-using XLSight.Models;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Packaging;
+using XLSight.Internal.Readers.Xlsx;
+using XLSight.Models;
+using XLSight.Tests.Infrastructure;
+using Xunit;
 
 namespace XLSight.Tests.ByteEngine;
 
@@ -307,6 +307,50 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal(CellType.Text, rows[0].GetCell(1).CellType);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void NumberCell_SplitAcrossReads_PreservesValue(int chunkSize)
+    {
+        var rows = ScanChunked($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1"><v>12345</v></c></row>
+              </sheetData>
+            </worksheet>
+            """, chunkSize);
+
+        Assert.Single(rows);
+        Assert.Equal(12345.0, rows[0].GetCell(1).AsNumber());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void SharedStringCell_SplitAcrossReads_PreservesValue(int chunkSize)
+    {
+        var rows = ScanChunked($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+              </sheetData>
+            </worksheet>
+            """, chunkSize, sst: SstBuilder.Make("Hello"));
+
+        Assert.Single(rows);
+        Assert.Equal("Hello", rows[0].GetCell(1).AsText());
+    }
+
     // ── Range filtering ──────────────────────────────────────────────────────
 
     [Fact]
@@ -406,6 +450,23 @@ public sealed class XlsxSheetScannerTests
             range ?? ExcelRange.Unbounded).ToList();
     }
 
+    private static List<ExcelRow> ScanChunked(
+        string worksheetXml,
+        int chunkSize,
+        SharedStringTable? sst = null,
+        ExcelRange? range = null)
+    {
+        using var inner = XmlStream(worksheetXml);
+        using var stream = new ChunkedReadStream(inner, chunkSize);
+        return XlsxSheetScanner.ScanRows(
+            stream,
+            sst ?? SharedStringTable.Empty,
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            range ?? ExcelRange.Unbounded).ToList();
+    }
+
     private static List<ExcelRow> StreamWithXmlEngine(string path)
     {
         using var wb = global::XLSight.ExcelWorkbook.Open(path);
@@ -465,6 +526,42 @@ public sealed class XlsxSheetScannerTests
             Assert.True(
                 exp.CellType == act.CellType,
                 $"{file} row[{rowIdx}] col {col}: CellType {exp.CellType} != {act.CellType}");
+        }
+    }
+
+    private sealed class ChunkedReadStream(Stream inner, int maxChunk) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
+        public override void Flush() => inner.Flush();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            inner.Read(buffer, offset, Math.Min(count, maxChunk));
+
+        public override int Read(Span<byte> buffer) =>
+            inner.Read(buffer[..Math.Min(buffer.Length, maxChunk)]);
+
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
         }
     }
 }

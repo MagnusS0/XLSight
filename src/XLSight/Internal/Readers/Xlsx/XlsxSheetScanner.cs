@@ -354,8 +354,9 @@ internal static class XlsxSheetScanner
         }
 
         var value = ExtractUntilClose(buf, TagValue);
+        var decoded = Utf8CellDecoder.Decode(value, kind, styleIdx, sharedStrings, styles, isDate1904);
         SkipToEndTag(buf, TagCell);
-        return Utf8CellDecoder.Decode(value, kind, styleIdx, sharedStrings, styles, isDate1904);
+        return decoded;
     }
 
     /// <summary>
@@ -410,8 +411,8 @@ internal static class XlsxSheetScanner
     private static ExcelCellValue ExtractFormulaValue(ScanBuffer buf)
     {
         var fb = ExtractUntilClose(buf, TagFormula);
-        SkipToEndTag(buf, TagCell);
         var text = Encoding.UTF8.GetString(fb);
+        SkipToEndTag(buf, TagCell);
         if (text.Contains('&', StringComparison.Ordinal)) { text = WebUtility.HtmlDecode(text); }
         return ExcelCellValue.FromFormula(text);
     }
@@ -423,8 +424,9 @@ internal static class XlsxSheetScanner
         buf.Advance(vMatch.EndExclusive);
         if (vMatch.IsEmptyElement) { SkipToEndTag(buf, TagCell); return ExcelCellValue.Empty; }
         var vb = ExtractUntilClose(buf, TagValue);
+        var decoded = Utf8CellDecoder.Decode(vb, kind, styleIdx, sharedStrings, styles, isDate1904);
         SkipToEndTag(buf, TagCell);
-        return Utf8CellDecoder.Decode(vb, kind, styleIdx, sharedStrings, styles, isDate1904);
+        return decoded;
     }
 
     /// <summary>
@@ -486,15 +488,25 @@ internal static class XlsxSheetScanner
         }
 
         var valueBytes = ExtractUntilClose(buf, TagValue);
+        var decoded = DecodeSharedStringValue(valueBytes, styleIdx, sharedStrings, styles, isDate1904, decode, out sstIndex);
         SkipToEndTag(buf, TagCell);
+        return decoded;
+    }
 
-        // Parse the SST index from the raw bytes — it's always a plain ASCII integer.
+    private static ExcelCellValue DecodeSharedStringValue(
+        ReadOnlySpan<byte> valueBytes,
+        int styleIdx,
+        SharedStringTable sharedStrings,
+        StyleTable styles,
+        bool isDate1904,
+        bool decode,
+        out int sstIndex)
+    {
         if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _))
         {
             sstIndex = -1;
         }
 
-        // Skip materialisation when the sink signals it doesn't need the decoded value.
         return decode
             ? Utf8CellDecoder.Decode(valueBytes, CellDataKind.SharedString, styleIdx, sharedStrings, styles, isDate1904)
             : ExcelCellValue.Empty;
@@ -678,7 +690,7 @@ internal static class XlsxSheetScanner
         while (true)
         {
             var span = buf.Span;
-            var status = TryFindEndTag(span, tagName, out int closeIdx, out int closeLen, out int partialIndex);
+            var status = TryFindEndTag(span, tagName, out int closeIdx, out int closeLen, out _);
             if (status == TagSearchResult.Found)
             {
                 var value = span[..closeIdx];
@@ -686,18 +698,8 @@ internal static class XlsxSheetScanner
                 return value;
             }
 
-            if (status == TagSearchResult.NeedMoreData)
-            {
-                if (closeIdx >= 0)
-                {
-                    buf.Advance(closeIdx);
-                    if (!buf.Refill()) { return ReadOnlySpan<byte>.Empty; }
-                }
-                else if (!RefillKeepingTagStart(buf, span, partialIndex)) { return ReadOnlySpan<byte>.Empty; }
-                continue;
-            }
-
-            if (!RefillKeepingTagStart(buf, span, partialIndex)) { return ReadOnlySpan<byte>.Empty; }
+            // Preserve all current value bytes while refilling across a split closing tag.
+            if (!buf.CanReadMore || !buf.Refill()) { return ReadOnlySpan<byte>.Empty; }
         }
     }
 
