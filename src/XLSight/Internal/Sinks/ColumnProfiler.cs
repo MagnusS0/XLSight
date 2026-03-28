@@ -42,7 +42,7 @@ internal static class ColumnProfiler
             InferredHeader = header,
             DominantType = dominantType,
             NonEmptyCount = state.NonEmptyCount,
-            DistinctValueEstimate = state.DistinctValues?.Count ?? state.DistinctEstimate,
+            DistinctValueEstimate = state.DistinctCount,
             MinNumericValue = minNum,
             MaxNumericValue = maxNum,
             MaxTextLength = maxText,

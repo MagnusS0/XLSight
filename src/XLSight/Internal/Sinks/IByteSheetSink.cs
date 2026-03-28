@@ -10,6 +10,14 @@ namespace XLSight.Internal.Sinks;
 /// </summary>
 internal interface IByteSheetSink
 {
+    /// <summary>
+    /// When <see langword="false"/>, the scanner skips <see cref="CellDataKind.SharedString"/>
+    /// string materialisation and passes <see cref="ExcelCellValue.Empty"/> for those cells,
+    /// relying on the <c>rawIndex</c> parameter in <see cref="OnCell"/> instead.
+    /// Implement as a compile-time constant so the JIT can dead-code-eliminate the decode path.
+    /// </summary>
+    public bool NeedsDecodedValue { get; }
+
     /// <summary>Called when a <c>&lt;dimension&gt;</c> element is found with the sheet's declared used range.</summary>
     public void OnDimension(in ExcelRange dimension);
 
@@ -24,7 +32,11 @@ internal interface IByteSheetSink
     /// <param name="kind">Raw cell data kind (useful for formula-column detection).</param>
     /// <param name="styleIdx">Style index from the <c>s=</c> attribute.</param>
     /// <param name="value">Already-decoded cell value.</param>
-    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value);
+    /// <param name="rawIndex">
+    /// For <see cref="CellDataKind.SharedString"/> cells: the raw SST integer index,
+    /// allowing sinks to avoid string materialisation. <c>-1</c> for all other kinds.
+    /// </param>
+    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex);
 
     /// <summary>Called for each <c>&lt;mergeCell&gt;</c> element.</summary>
     public void OnMergeCell(in MergedRegion region);

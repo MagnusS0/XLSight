@@ -1,5 +1,6 @@
 using XLSight.Internal.Metadata;
 using System.Buffers;
+using System.Buffers.Text;
 using System.Runtime.InteropServices;
 using System.Text;
 using XLSight.Models;
@@ -352,6 +353,79 @@ internal static class XlsxSheetScanner
         return Utf8CellDecoder.Decode(value, kind, styleIdx, sharedStrings, styles, isDate1904);
     }
 
+    /// <summary>
+    /// Variant of <see cref="ReadCellValue"/> for <see cref="CellDataKind.SharedString"/> cells
+    /// that also outputs the raw SST index. When <paramref name="decode"/> is <see langword="false"/>
+    /// the string is not materialised and <see cref="ExcelCellValue.Empty"/> is returned — the caller
+    /// must use <paramref name="sstIndex"/> instead.
+    /// </summary>
+    private static ExcelCellValue ReadCellValueWithSstIndex(
+        ScanBuffer buf, int styleIdx,
+        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
+        bool decode,
+        out int sstIndex)
+    {
+        // Navigate to <v> and extract bytes — same logic as ReadCellValue for SharedString.
+        while (true)
+        {
+            var span = buf.Span;
+            var valueStatus = TryFindStartTag(span, TagValue, out var valueMatch, out int valuePartial);
+            var closeStatus = TryFindEndTag(span, TagCell, out int cClose, out int cCloseLen, out int closePartial);
+
+            if (closeStatus == TagSearchResult.Found
+                && (valueStatus != TagSearchResult.Found || cClose < valueMatch.Start))
+            {
+                buf.Advance(cClose + cCloseLen);
+                sstIndex = -1;
+                return ExcelCellValue.Empty;
+            }
+
+            if (valueStatus == TagSearchResult.NotFound)
+            {
+                if (!RefillKeepingTagStart(buf, span, MaxPartial(valuePartial, closePartial)))
+                {
+                    sstIndex = -1;
+                    return ExcelCellValue.Empty;
+                }
+                continue;
+            }
+
+            if (valueStatus == TagSearchResult.NeedMoreData)
+            {
+                buf.Advance(valueMatch.Start);
+                if (!buf.Refill())
+                {
+                    sstIndex = -1;
+                    return ExcelCellValue.Empty;
+                }
+                continue;
+            }
+
+            buf.Advance(valueMatch.EndExclusive);
+            if (valueMatch.IsEmptyElement)
+            {
+                SkipToEndTag(buf, TagCell);
+                sstIndex = -1;
+                return ExcelCellValue.Empty;
+            }
+            break;
+        }
+
+        var valueBytes = ExtractUntilClose(buf, TagValue);
+        SkipToEndTag(buf, TagCell);
+
+        // Parse the SST index from the raw bytes — it's always a plain ASCII integer.
+        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _))
+        {
+            sstIndex = -1;
+        }
+
+        // Skip materialisation when the sink signals it doesn't need the decoded value.
+        return decode
+            ? Utf8CellDecoder.Decode(valueBytes, CellDataKind.SharedString, styleIdx, sharedStrings, styles, isDate1904)
+            : ExcelCellValue.Empty;
+    }
+
     internal static ExcelCellValue ReadInlineString(ScanBuffer buf)
     {
         bool seenT = false;
@@ -436,11 +510,28 @@ internal static class XlsxSheetScanner
                 continue;
             }
 
-            ExcelCellValue value = isEmpty
-                ? ExcelCellValue.Empty
-                : ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
+            ExcelCellValue value;
+            int rawIndex = -1;
 
-            if (!sink.OnCell(currentCol, kind, styleIdx, value))
+            if (isEmpty)
+            {
+                value = ExcelCellValue.Empty;
+            }
+            else if (kind == CellDataKind.SharedString)
+            {
+                // Extract the raw SST index alongside (or instead of) the decoded value.
+                // When the sink opts out of decoded values, skip GetString entirely.
+                value = ReadCellValueWithSstIndex(
+                    buf, styleIdx, sharedStrings, styles, isDate1904,
+                    decode: sink.NeedsDecodedValue,
+                    out rawIndex);
+            }
+            else
+            {
+                value = ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
+            }
+
+            if (!sink.OnCell(currentCol, kind, styleIdx, value, rawIndex))
             {
                 return false;
             }

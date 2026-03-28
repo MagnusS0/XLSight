@@ -257,7 +257,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             .i;
 
         using var sheetStream = OpenSheetStream(sheet.Path);
-        var sink = new AnalysisSink();
+        var sink = new AnalysisSink(_sharedStrings.Value);
         XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheetName, sheetIndex, []);
     }
@@ -266,7 +266,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
     {
         using var sheetStream = OpenSheetStream(sheet.Path);
 
-        var sink = new AnalysisSink();
+        var sink = new AnalysisSink(_sharedStrings.Value);
         XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ExcelRange.Unbounded, ref sink);
 
         return sink.Build(sheet.Name, sheetIndex, []);

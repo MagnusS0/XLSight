@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using XLSight.Internal.Metadata;
 using XLSight.Models;
 using XLSight.Models.Analysis;
 
@@ -21,8 +22,11 @@ internal struct AnalysisSink : IByteSheetSink
     private int _firstRowIndex;
     private Dictionary<int, ExcelCellValue>? _firstRowByColumn;
 
-    public AnalysisSink()
+    private readonly SharedStringTable _sst;
+
+    public AnalysisSink(SharedStringTable sst)
     {
+        _sst = sst;
         _minRow = int.MaxValue;
         _maxRow = int.MinValue;
         _minCol = int.MaxValue;
@@ -37,6 +41,8 @@ internal struct AnalysisSink : IByteSheetSink
         _firstRowByColumn = null;
     }
 
+    public bool NeedsDecodedValue => false;
+
     public void OnDimension(in ExcelRange dimension) { }
 
     public void OnRowStart(int rowIndex)
@@ -50,15 +56,36 @@ internal struct AnalysisSink : IByteSheetSink
         }
     }
 
-    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value)
+    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex)
     {
         UpdateBounds(_currentRow, column);
 
-        if (!value.IsEmpty)
+        bool isSharedString = rawIndex >= 0;
+        bool isCellNonEmpty = !value.IsEmpty || isSharedString;
+
+        if (isCellNonEmpty)
         {
             _cellCount++;
             var state = GetOrAddColumnState(column);
-            state.RecordValue(value);
+
+            // Fast path: shared strings are identified by SST index — no string materialisation.
+            // Skip the fast path on row 1 so _firstRowByColumn stores a real ExcelCellValue for
+            // header inference (which needs AsText() later in BuildHeaders).
+            if (isSharedString && _currentRow != _firstRowIndex)
+            {
+                state.RecordSharedString(rawIndex, _sst);
+            }
+            else
+            {
+                // For row-1 shared strings the scanner skipped decode (NeedsDecodedValue = false),
+                // so value is Empty — materialise lazily here since it's only one row.
+                if (isSharedString && value.IsEmpty)
+                {
+                    value = ExcelCellValue.FromText(_sst.GetString(rawIndex));
+                }
+
+                state.RecordValue(value);
+            }
 
             if (kind == CellDataKind.FormulaString)
             {
@@ -68,6 +95,12 @@ internal struct AnalysisSink : IByteSheetSink
 
         if (_currentRow == _firstRowIndex && _firstRowByColumn is not null)
         {
+            // Ensure row-1 shared strings are materialised before storing.
+            if (rawIndex >= 0 && value.IsEmpty)
+            {
+                value = ExcelCellValue.FromText(_sst.GetString(rawIndex));
+            }
+
             _firstRowByColumn[column] = value;
         }
 

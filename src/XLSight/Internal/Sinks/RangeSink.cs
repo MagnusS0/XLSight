@@ -18,6 +18,8 @@ internal struct RangeSink : IByteSheetSink
         _pastEnd = false;
     }
 
+    public bool NeedsDecodedValue => true;
+
     public void OnDimension(in ExcelRange dimension) { }
 
     public void OnRowStart(int rowIndex)
@@ -30,7 +32,7 @@ internal struct RangeSink : IByteSheetSink
         }
     }
 
-    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value)
+    public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex)
     {
         if (_pastEnd)
         {
