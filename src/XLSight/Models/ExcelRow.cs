@@ -1,10 +1,11 @@
+using System.Collections;
 using System.Runtime.InteropServices;
 
 namespace XLSight.Models;
 
 /// <summary>Represents a single row of cell values returned by a streaming read operation.</summary>
 [StructLayout(LayoutKind.Auto)]
-public readonly struct ExcelRow
+public readonly struct ExcelRow : IEnumerable<ExcelCellValue>
 {
     private readonly int _rowIndex;
     private readonly ReadOnlyMemory<ExcelCellValue> _cells;
@@ -61,6 +62,39 @@ public readonly struct ExcelRow
 
     /// <summary>Span access for performance-sensitive consumers.</summary>
     public ReadOnlySpan<ExcelCellValue> Cells => _cells.Span;
+
+    /// <summary>
+    /// Returns a zero-allocation struct enumerator for use in <c>foreach</c> loops.
+    /// </summary>
+    public Enumerator GetEnumerator() => new(_cells);
+
+    /// <inheritdoc/>
+    IEnumerator<ExcelCellValue> IEnumerable<ExcelCellValue>.GetEnumerator() =>
+        MemoryMarshal.ToEnumerable(_cells).GetEnumerator();
+
+    /// <inheritdoc/>
+    IEnumerator IEnumerable.GetEnumerator() =>
+        MemoryMarshal.ToEnumerable(_cells).GetEnumerator();
+
+    /// <summary>Zero-allocation struct enumerator over the row's cells.</summary>
+    [StructLayout(LayoutKind.Auto)]
+    public struct Enumerator
+    {
+        private readonly ReadOnlyMemory<ExcelCellValue> _cells;
+        private int _index;
+
+        internal Enumerator(ReadOnlyMemory<ExcelCellValue> cells)
+        {
+            _cells = cells;
+            _index = -1;
+        }
+
+        /// <summary>Advances to the next cell.</summary>
+        public bool MoveNext() => ++_index < _cells.Length;
+
+        /// <summary>Gets the cell at the current position.</summary>
+        public ExcelCellValue Current => _cells.Span[_index];
+    }
 
     /// <summary>
     /// Returns a new <see cref="ExcelRow"/> whose cells are copied into an independent array.
