@@ -1,5 +1,5 @@
-using XLSight.Internal.Metadata;
 using System.Buffers;
+using XLSight.Internal.Metadata;
 using XLSight.Models;
 
 namespace XLSight.Internal.Readers.Xlsx;
@@ -26,6 +26,7 @@ internal sealed class SheetCursor : IDisposable
     private readonly SharedStringTable _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _isDate1904;
+    private readonly ReadMode _mode;
     private readonly ExcelRange _range;
     private readonly ExcelCellValue[] _cellPool;
 
@@ -39,12 +40,14 @@ internal sealed class SheetCursor : IDisposable
         SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
+        ReadMode mode,
         ExcelRange range,
         long seekHint)
     {
         _sharedStrings = sharedStrings;
         _styles = styles;
         _isDate1904 = isDate1904;
+        _mode = mode;
         _range = range;
         _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
         _buf = new ScanBuffer(entryStream);
@@ -103,7 +106,7 @@ internal sealed class SheetCursor : IDisposable
             }
 
             if (XlsxSheetScanner.FillRowCells(
-                _buf, rowIndex, _sharedStrings, _styles, _isDate1904, _range, _cellPool,
+                _buf, rowIndex, _sharedStrings, _styles, _isDate1904, _mode, _range, _cellPool,
                 out int startCol, out int width))
             {
                 // ExcelRow wraps the shared pool memory — valid only until next MoveNext().
@@ -143,13 +146,13 @@ internal sealed class SheetCursor : IDisposable
         // Save cursor state so we can roll back cleanly if a synchronous I/O attempt is
         // skipped.  Because NoIO prevents compaction, _start is unchanged by the attempted
         // parse and this saved value is always valid for RewindTo.
-        int savedStart   = _buf.Start;
+        int savedStart = _buf.Start;
         int savedLastRow = _lastRow;
 
         _buf.IOSkipped = false;
-        _buf.NoIO      = true;
-        bool result    = MoveNext();
-        _buf.NoIO      = false;
+        _buf.NoIO = true;
+        bool result = MoveNext();
+        _buf.NoIO = false;
 
         if (result && !_buf.IOSkipped)
         {

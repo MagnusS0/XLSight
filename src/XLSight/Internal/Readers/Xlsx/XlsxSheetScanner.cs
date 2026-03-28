@@ -1,12 +1,13 @@
-using XLSight.Internal.Metadata;
 using System.Buffers;
 using System.Buffers.Text;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Internal.Metadata;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Sinks;
+using XLSight.Models;
+using XLSight.Models.Analysis;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -20,12 +21,13 @@ internal static class XlsxSheetScanner
     internal static ReadOnlySpan<byte> TagSheetData => "sheetData"u8;
     internal static ReadOnlySpan<byte> TagRow => "row"u8;
     internal static ReadOnlySpan<byte> TagCell => "c"u8;
+    internal static ReadOnlySpan<byte> TagFormula => "f"u8;
     internal static ReadOnlySpan<byte> TagValue => "v"u8;
     internal static ReadOnlySpan<byte> TagText => "t"u8;
 
     // SearchValues instances are pre-built bitmaps/SIMD vectors; AVX-512 on supported hardware.
     private static readonly SearchValues<byte> s_tagBoundaries = SearchValues.Create(">/ \t\r\n"u8);
-    private static readonly SearchValues<byte> s_xmlWhitespace  = SearchValues.Create(" \t\r\n"u8);
+    private static readonly SearchValues<byte> s_xmlWhitespace = SearchValues.Create(" \t\r\n"u8);
 
     // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -64,7 +66,7 @@ internal static class XlsxSheetScanner
                 if (!range.IsUnbounded && rowIndex > range.BottomRight.Row) { yield break; }
                 if (!range.IsUnbounded && rowIndex < range.TopLeft.Row) { SkipToEndTag(buf, TagRow); continue; }
 
-                if (FillRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, range, cellBuf,
+                if (FillRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, mode, range, cellBuf,
                     out int startCol, out int width))
                 {
                     var cells = new ExcelCellValue[width];
@@ -88,7 +90,7 @@ internal static class XlsxSheetScanner
         ReadMode mode,
         ExcelRange range,
         long seekHint = -1)
-        => new(entryStream, sharedStrings, styles, isDate1904, range, seekHint);
+        => new(entryStream, sharedStrings, styles, isDate1904, mode, range, seekHint);
 
     /// <summary>
     /// Push-based sheet scanner. Drives <paramref name="sink"/> for every decoded cell.
@@ -100,6 +102,7 @@ internal static class XlsxSheetScanner
         SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
+        ReadMode mode,
         ExcelRange range,
         ref TSink sink,
         long seekHint = -1)
@@ -131,7 +134,7 @@ internal static class XlsxSheetScanner
 
             sink.OnRowStart(rowIndex);
 
-            if (!PushRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, range, ref sink))
+            if (!PushRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, mode, range, ref sink))
             {
                 break;
             }
@@ -231,7 +234,7 @@ internal static class XlsxSheetScanner
 
     internal static bool FillRowCells(
         ScanBuffer buf, int rowIndex, SharedStringTable sharedStrings, StyleTable styles,
-        bool isDate1904, ExcelRange range, ExcelCellValue[] cellBuf,
+        bool isDate1904, ReadMode mode, ExcelRange range, ExcelCellValue[] cellBuf,
         out int startCol, out int width)
     {
         startCol = 0;
@@ -251,7 +254,9 @@ internal static class XlsxSheetScanner
 
             cellBuf[currentCol - firstCol] = isEmpty
                 ? ExcelCellValue.Empty
-                : ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
+                : mode == ReadMode.Formulas
+                    ? ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904)
+                    : ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
 
             if (currentCol > lastCol) { lastCol = currentCol; }
         }
@@ -351,6 +356,75 @@ internal static class XlsxSheetScanner
         var value = ExtractUntilClose(buf, TagValue);
         SkipToEndTag(buf, TagCell);
         return Utf8CellDecoder.Decode(value, kind, styleIdx, sharedStrings, styles, isDate1904);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="ReadCellValue"/> for <see cref="ReadMode.Formulas"/>.
+    /// Scans for <c>&lt;f&gt;</c> and <c>&lt;v&gt;</c> simultaneously; when <c>&lt;f&gt;</c>
+    /// appears first the raw formula text is returned as <see cref="ExcelCellValue.FromFormula"/>.
+    /// Falls back to the normal cached-value decode when no formula tag is present.
+    /// </summary>
+    private static ExcelCellValue ReadCellValueFormula(
+        ScanBuffer buf, CellDataKind kind, int styleIdx,
+        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
+    {
+        if (kind == CellDataKind.InlineString) { return ReadInlineString(buf); }
+
+        while (true)
+        {
+            var span = buf.Span;
+            var fStatus = TryFindStartTag(span, TagFormula, out var fMatch, out int fPartial);
+            var vStatus = TryFindStartTag(span, TagValue, out var vMatch, out int vPartial);
+            var cStatus = TryFindEndTag(span, TagCell, out int cIdx, out int cLen, out int cPartial);
+
+            if (fStatus == TagSearchResult.NeedMoreData || vStatus == TagSearchResult.NeedMoreData)
+            {
+                int partial = MaxPartial(MaxPartial(fPartial, vPartial), cPartial);
+                if (!RefillKeepingTagStart(buf, span, partial)) { return ExcelCellValue.Empty; }
+                continue;
+            }
+
+            bool fFound = fStatus == TagSearchResult.Found;
+            bool vFound = vStatus == TagSearchResult.Found;
+            bool cFound = cStatus == TagSearchResult.Found;
+            int fPos = fFound ? fMatch.Start : int.MaxValue;
+            int vPos = vFound ? vMatch.Start : int.MaxValue;
+            int cPos = cFound ? cIdx : int.MaxValue;
+
+            if (cPos < fPos && cPos < vPos) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
+
+            if (fFound && fPos < vPos)
+            {
+                buf.Advance(fMatch.EndExclusive);
+                if (!fMatch.IsEmptyElement) { return ExtractFormulaValue(buf); }
+                continue; // <f/> with no text — look for <v>
+            }
+
+            if (vFound) { return ExtractCachedValue(buf, vMatch, kind, styleIdx, sharedStrings, styles, isDate1904); }
+
+            int p = MaxPartial(MaxPartial(fPartial, vPartial), cPartial);
+            if (!RefillKeepingTagStart(buf, span, p)) { return ExcelCellValue.Empty; }
+        }
+    }
+
+    private static ExcelCellValue ExtractFormulaValue(ScanBuffer buf)
+    {
+        var fb = ExtractUntilClose(buf, TagFormula);
+        SkipToEndTag(buf, TagCell);
+        var text = Encoding.UTF8.GetString(fb);
+        if (text.Contains('&', StringComparison.Ordinal)) { text = WebUtility.HtmlDecode(text); }
+        return ExcelCellValue.FromFormula(text);
+    }
+
+    private static ExcelCellValue ExtractCachedValue(
+        ScanBuffer buf, StartTagMatch vMatch, CellDataKind kind, int styleIdx,
+        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
+    {
+        buf.Advance(vMatch.EndExclusive);
+        if (vMatch.IsEmptyElement) { SkipToEndTag(buf, TagCell); return ExcelCellValue.Empty; }
+        var vb = ExtractUntilClose(buf, TagValue);
+        SkipToEndTag(buf, TagCell);
+        return Utf8CellDecoder.Decode(vb, kind, styleIdx, sharedStrings, styles, isDate1904);
     }
 
     /// <summary>
@@ -476,7 +550,7 @@ internal static class XlsxSheetScanner
     // ── Push-based helpers for ScanSheet<TSink> ─────────────────────────────
 
     private static ReadOnlySpan<byte> TagMergeCells => "mergeCells"u8;
-    private static ReadOnlySpan<byte> TagMergeCell  => "mergeCell"u8;
+    private static ReadOnlySpan<byte> TagMergeCell => "mergeCell"u8;
 
     /// <summary>
     /// Pushes all cells in the current row to <paramref name="sink"/>.
@@ -489,6 +563,7 @@ internal static class XlsxSheetScanner
         SharedStringTable sharedStrings,
         StyleTable styles,
         bool isDate1904,
+        ReadMode mode,
         ExcelRange range,
         ref TSink sink)
         where TSink : struct, IByteSheetSink
@@ -516,6 +591,10 @@ internal static class XlsxSheetScanner
             if (isEmpty)
             {
                 value = ExcelCellValue.Empty;
+            }
+            else if (mode == ReadMode.Formulas)
+            {
+                value = ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
             }
             else if (kind == CellDataKind.SharedString)
             {
