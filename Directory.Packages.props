@@ -13,7 +13,6 @@
     <!-- Competitor benchmark packages -->
     <PackageVersion Include="MiniExcel" Version="1.43.0" />
     <PackageVersion Include="ExcelDataReader" Version="3.8.0" />
-    <PackageVersion Include="System.Text.Encoding.CodePages" Version="9.0.3" />
   </ItemGroup>
 
   <ItemGroup>

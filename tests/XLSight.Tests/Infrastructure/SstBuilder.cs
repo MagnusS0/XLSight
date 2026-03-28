@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Text;
-using XLSight.SharedStrings;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.Infrastructure;
 

@@ -38,12 +38,6 @@
         "resolved": "1.43.0",
         "contentHash": "ImtWDO4zpjNKuNdFlK5LeNcpVtN/8aWp8M0rd8LPjrCU87ND2qbUEfvIcuS9RDGw+9OxS4ZZaDI0PcHiLtb8qg=="
       },
-      "System.Text.Encoding.CodePages": {
-        "type": "Direct",
-        "requested": "[9.0.3, )",
-        "resolved": "9.0.3",
-        "contentHash": "80ABiml18jG+6PB6GmrOyMlWla66f4Tp6RgUCJXZLki1Zu+yqbflXvweT86j2xImKHXoVgivto25Z8P5+FO85w=="
-      },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
         "resolved": "0.15.8",

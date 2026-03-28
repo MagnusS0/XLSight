@@ -17,21 +17,21 @@ public class ReadBenchmarks
     }
 
     [Benchmark]
-    public ExcelCellResult ReadCell_Small()
+    public CellResult ReadCell_Small()
     {
         using var wb = ExcelWorkbook.Open(_smallPath);
         return wb.ReadCell("Sheet1", "C5");
     }
 
     [Benchmark]
-    public ExcelRangeResult ReadRange_Small_5x10()
+    public RangeResult ReadRange_Small_5x10()
     {
         using var wb = ExcelWorkbook.Open(_smallPath);
         return wb.ReadRange("Sheet1", "A1:E10");
     }
 
     [Benchmark]
-    public ExcelRangeResult ReadRange_Medium_10x1000()
+    public RangeResult ReadRange_Medium_10x1000()
     {
         using var wb = ExcelWorkbook.Open(_mediumPath);
         return wb.ReadRange("Data", "A1:J1000");

@@ -12,7 +12,6 @@
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="MiniExcel" />
     <PackageReference Include="ExcelDataReader" />
-    <PackageReference Include="System.Text.Encoding.CodePages" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,8 +1,7 @@
 using Xunit;
-using XLSight.ByteEngine;
+using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
-using XLSight.SharedStrings;
-using XLSight.Styles;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.ByteEngine;
 
@@ -40,7 +39,7 @@ public sealed class FuzzCorpusRegressionTests
         {
             using var stream = new MemoryStream(data, writable: false);
             var rows = new List<ExcelRow>(Math.Min(32, MaxRowsToInspect));
-            foreach (var row in XlsxSheetScanner.ScanRows(stream, SharedStrings, StyleTable.Default, isDate1904: false, ExcelReadMode.Values, ExcelRange.Unbounded))
+            foreach (var row in XlsxSheetScanner.ScanRows(stream, SharedStrings, StyleTable.Default, isDate1904: false, ReadMode.Values, ExcelRange.Unbounded))
             {
                 rows.Add(row);
                 if (rows.Count >= MaxRowsToInspect)

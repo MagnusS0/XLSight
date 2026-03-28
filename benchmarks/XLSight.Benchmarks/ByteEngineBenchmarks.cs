@@ -1,12 +1,10 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using XLSight;
-using XLSight.ByteEngine;
-using XLSight.Infrastructure;
+using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Packaging;
 using XLSight.Models;
-using XLSight.Packaging;
-using XLSight.SharedStrings;
-using XLSight.Styles;
+using XLSight.Internal.Metadata;
 
 // Measures the ByteEngine (XlsxSheetScanner) in isolation and through the full public API.
 //
@@ -57,7 +55,7 @@ public class ByteEngineBenchmarks
         int n = 0;
         foreach (var _ in XlsxSheetScanner.ScanRows(
             ms, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded))
+            ReadMode.Values, ExcelRange.Unbounded))
         {
             n++;
         }
@@ -71,7 +69,7 @@ public class ByteEngineBenchmarks
         int n = 0;
         foreach (var _ in XlsxSheetScanner.ScanRows(
             ms, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded).Take(10))
+            ReadMode.Values, ExcelRange.Unbounded).Take(10))
         {
             n++;
         }
@@ -86,7 +84,7 @@ public class ByteEngineBenchmarks
         int n = 0;
         foreach (var _ in XlsxSheetScanner.ScanRows(
             ms, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded))
+            ReadMode.Values, ExcelRange.Unbounded))
         {
             n++;
         }
@@ -101,7 +99,7 @@ public class ByteEngineBenchmarks
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             ms, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
         int n = 0;
         while (cursor.MoveNext()) { n++; }
         return n;
@@ -113,7 +111,7 @@ public class ByteEngineBenchmarks
         using var ms = new MemoryStream(_largeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             ms, _largeSst, _largeStyles, _largeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
         int n = 0;
         while (n < 10 && cursor.MoveNext()) { n++; }
         return n;
@@ -126,7 +124,7 @@ public class ByteEngineBenchmarks
         using var ms = new MemoryStream(_xlLargeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             ms, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
         int n = 0;
         while (cursor.MoveNext()) { n++; }
         return n;
@@ -139,7 +137,7 @@ public class ByteEngineBenchmarks
         using var ms = new MemoryStream(_xlLargeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             ms, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
         int n = 0;
         while (n < 10 && cursor.MoveNext()) { n++; }
         return n;

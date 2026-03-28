@@ -2,7 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using Xunit;
 using XLSight.Exceptions;
-using XLSight.Packaging;
+using XLSight.Internal.Packaging;
 
 namespace XLSight.Tests.Packaging;
 

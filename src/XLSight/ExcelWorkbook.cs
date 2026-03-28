@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using XLSight.Engines;
-using XLSight.Infrastructure;
+using XLSight.Internal.Readers;
+using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Packaging;
 using XLSight.Models;
-using XLSight.Packaging;
-using XLSight.Parsing;
+using XLSight.Internal.Parsing;
 
 namespace XLSight;
 
@@ -15,11 +15,11 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
 {
     private static readonly ActivitySource ActivitySource = new("XLSight", "0.1.0");
 
-    private readonly IWorkbookEngine _engine;
+    private readonly IWorkbookReader _engine;
     private bool _disposed;
     private int _busy;
 
-    private ExcelWorkbook(IWorkbookEngine engine)
+    private ExcelWorkbook(IWorkbookReader engine)
     {
         _engine = engine;
     }
@@ -117,7 +117,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
         // SST and styles are loaded lazily inside the engine on first use.
-        var engine = new XlsxWorkbookEngine(package, metadata);
+        var engine = new XlsxWorkbookReader(package, metadata);
         return new ExcelWorkbook(engine);
     }
 
@@ -136,7 +136,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    public ExcelCellResult ReadCell(string sheet, string cellAddress, ExcelReadMode mode = ExcelReadMode.Values)
+    public CellResult ReadCell(string sheet, string cellAddress, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(cellAddress);
@@ -166,7 +166,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
     /// <exception cref="Exceptions.RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
-    public ExcelRangeResult ReadRange(string sheet, string rangeAddress, ExcelReadMode mode = ExcelReadMode.Values)
+    public RangeResult ReadRange(string sheet, string rangeAddress, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(rangeAddress);
@@ -198,10 +198,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    public async Task<ExcelCellResult> ReadCellAsync(
+    public async Task<CellResult> ReadCellAsync(
         string sheet,
         string cellAddress,
-        ExcelReadMode mode = ExcelReadMode.Values,
+        ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -233,10 +233,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
     /// <exception cref="Exceptions.RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
-    public async Task<ExcelRangeResult> ReadRangeAsync(
+    public async Task<RangeResult> ReadRangeAsync(
         string sheet,
         string rangeAddress,
-        ExcelReadMode mode = ExcelReadMode.Values,
+        ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -260,7 +260,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <summary>Analyzes all sheets in the workbook and returns structural information.</summary>
     /// <returns>A workbook info object describing all sheets, named ranges, and workbook properties.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public Models.Analysis.ExcelWorkbookInfo Analyze()
+    public Models.Analysis.WorkbookInfo Analyze()
     {
         ThrowIfDisposed();
         EnterOperation();
@@ -279,7 +279,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a workbook info object.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public async Task<Models.Analysis.ExcelWorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
+    public async Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
         EnterOperation();
@@ -300,7 +300,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public Models.Analysis.ExcelSheetInfo AnalyzeSheet(string sheet)
+    public Models.Analysis.SheetInfo AnalyzeSheet(string sheet)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -326,7 +326,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public async Task<Models.Analysis.ExcelSheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
+    public async Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -353,7 +353,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     public IAsyncEnumerable<ExcelRow> StreamSheetAsync(
         string sheet,
-        ExcelReadMode mode = ExcelReadMode.Values,
+        ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -376,7 +376,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     public IAsyncEnumerable<ExcelRow> StreamRangeAsync(
         string sheet,
         string range,
-        ExcelReadMode mode = ExcelReadMode.Values,
+        ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -395,7 +395,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public IEnumerable<ExcelRow> StreamSheet(string sheet, ExcelReadMode mode = ExcelReadMode.Values)
+    public IEnumerable<ExcelRow> StreamSheet(string sheet, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -422,7 +422,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     public IEnumerable<ExcelRow> StreamRange(
         string sheet,
         string range,
-        ExcelReadMode mode = ExcelReadMode.Values)
+        ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(range);

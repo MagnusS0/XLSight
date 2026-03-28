@@ -180,7 +180,7 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlTwoSheets, RelsXmlTwoSheets, EmptySheetXml, EmptySheetXml);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelWorkbookInfo info = workbook.Analyze();
+        WorkbookInfo info = workbook.Analyze();
 
         Assert.Equal(2, info.Sheets.Count);
         Assert.Equal("Sheet1", info.Sheets[0].SheetName);
@@ -193,7 +193,7 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlWithNamedRange, RelsXmlOneSheet, EmptySheetXml);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelWorkbookInfo info = workbook.Analyze();
+        WorkbookInfo info = workbook.Analyze();
 
         Assert.False(info.HasMacros);
         Assert.False(info.IsDate1904);
@@ -208,7 +208,7 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlA1B2Data);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelSheetInfo info = workbook.AnalyzeSheet("Data");
+        SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.False(info.IsEmpty);
         Assert.Equal(2, info.RowCount);
@@ -223,7 +223,7 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, EmptySheetXml);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelSheetInfo info = workbook.AnalyzeSheet("Data");
+        SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.True(info.IsEmpty);
         Assert.Equal(0, info.CellCount);
@@ -236,10 +236,10 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlNumericColumn);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelSheetInfo info = workbook.AnalyzeSheet("Data");
+        SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.Single(info.Columns);
-        Assert.Equal(XLSight.Models.ExcelCellType.Number, info.Columns[0].DominantType);
+        Assert.Equal(XLSight.Models.CellType.Number, info.Columns[0].DominantType);
         Assert.Equal(3, info.Columns[0].NonEmptyCount);
     }
 
@@ -250,7 +250,7 @@ public sealed class WorkbookAnalysisTests
             WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlHeaderThenData, sstXml: SstXmlNameScore);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelSheetInfo info = workbook.AnalyzeSheet("Data");
+        SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.Equal(1, info.InferredHeaderRowIndex);
 
@@ -265,7 +265,7 @@ public sealed class WorkbookAnalysisTests
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlWithMerge);
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        ExcelSheetInfo info = workbook.AnalyzeSheet("Data");
+        SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.Single(info.MergedRegions);
         var region = info.MergedRegions[0];

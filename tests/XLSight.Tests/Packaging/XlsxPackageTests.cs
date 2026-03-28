@@ -1,8 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using Xunit;
-using XLSight.Infrastructure;
-using XLSight.Packaging;
+using XLSight.Internal.Packaging;
 
 namespace XLSight.Tests.Packaging;
 

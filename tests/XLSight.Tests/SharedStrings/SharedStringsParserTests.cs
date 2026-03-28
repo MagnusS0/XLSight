@@ -1,6 +1,6 @@
 using System.Text;
 using Xunit;
-using XLSight.SharedStrings;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.SharedStrings;
 

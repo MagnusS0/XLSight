@@ -1,10 +1,9 @@
 using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
-using XLSight.ByteEngine;
+using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
-using XLSight.SharedStrings;
-using XLSight.Styles;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.ByteEngine;
 
@@ -25,7 +24,7 @@ public sealed class SheetCursorTests
             sst ?? SharedStringTable.Empty,
             StyleTable.Default,
             isDate1904: false,
-            ExcelReadMode.Values,
+            ReadMode.Values,
             range ?? ExcelRange.Unbounded);
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -198,11 +197,11 @@ public sealed class SheetCursorTests
 
         var scanRows = XlsxSheetScanner.ScanRows(
             XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
-            ExcelReadMode.Values, ExcelRange.Unbounded).ToList();
+            ReadMode.Values, ExcelRange.Unbounded).ToList();
 
         using var cursor = XlsxSheetScanner.OpenCursor(
             XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
 
         var cursorRows = new List<ExcelRow>();
         foreach (var row in cursor)
@@ -243,11 +242,11 @@ public sealed class SheetCursorTests
 
         var scanRows = XlsxSheetScanner.ScanRows(
             XmlStream(xml), sst, StyleTable.Default, false,
-            ExcelReadMode.Values, ExcelRange.Unbounded).ToList();
+            ReadMode.Values, ExcelRange.Unbounded).ToList();
 
         using var cursor = XlsxSheetScanner.OpenCursor(
             XmlStream(xml), sst, StyleTable.Default, false,
-            ExcelReadMode.Values, ExcelRange.Unbounded);
+            ReadMode.Values, ExcelRange.Unbounded);
 
         var cursorRows = new List<ExcelRow>();
         foreach (var row in cursor)

@@ -1,12 +1,11 @@
 using System.IO.Compression;
 using System.Text;
 using Xunit;
-using XLSight.ByteEngine;
+using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
-using XLSight.Packaging;
-using XLSight.SharedStrings;
-using XLSight.Styles;
-using XLSight.Worksheets;
+using XLSight.Internal.Packaging;
+using XLSight.Internal.Metadata;
+using XLSight.Internal.Sinks;
 
 namespace XLSight.Tests.Integration;
 
@@ -139,7 +138,7 @@ public sealed class WorksheetRangeReadIntegrationTests
         // Scan A1:B2 of Sheet1
         var range = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(2, 2));
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(range, buffer);
+        var sink = new RangeSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry(metadata.Sheets[0].Path)!.Open();
         XlsxSheetScanner.ScanSheet(sheetStream, sharedStrings, styles, isDate1904: false, range, ref sink);
@@ -158,7 +157,7 @@ public sealed class WorksheetRangeReadIntegrationTests
 
         var range = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(2, 2));
         var buffer = new ExcelCellValue[range.Width * range.Height];
-        var sink = new RangeReadSink(range, buffer);
+        var sink = new RangeSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry("xl/worksheets/sheet2.xml")!.Open();
         XlsxSheetScanner.ScanSheet(sheetStream, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, range, ref sink);

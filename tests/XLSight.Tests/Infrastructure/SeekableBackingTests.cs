@@ -1,6 +1,6 @@
 using System.Text;
 using Xunit;
-using XLSight.Infrastructure;
+using XLSight.Internal.Packaging;
 
 namespace XLSight.Tests.Infrastructure;
 

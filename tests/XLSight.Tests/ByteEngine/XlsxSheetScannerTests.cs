@@ -1,12 +1,10 @@
 using XLSight.Tests.Infrastructure;
 using System.Text;
 using Xunit;
-using XLSight.ByteEngine;
-using XLSight.Infrastructure;
+using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Packaging;
 using XLSight.Models;
-using XLSight.Packaging;
-using XLSight.SharedStrings;
-using XLSight.Styles;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.ByteEngine;
 
@@ -85,7 +83,7 @@ public sealed class XlsxSheetScannerTests
             """);
 
         var cell = rows[0].GetCell(1);
-        Assert.Equal(ExcelCellType.Error, cell.CellType);
+        Assert.Equal(CellType.Error, cell.CellType);
         Assert.Equal("#DIV/0!", cell.AsError());
     }
 
@@ -306,7 +304,7 @@ public sealed class XlsxSheetScannerTests
         // The raw XML &amp; → & after first XML parse by browser, but here
         // we're scanning raw bytes so entity is literal &amp;lt; → &lt; in the value bytes.
         // The formula string decode path calls UnescapeXml, so &amp; → &.
-        Assert.Equal(ExcelCellType.Text, rows[0].GetCell(1).CellType);
+        Assert.Equal(CellType.Text, rows[0].GetCell(1).CellType);
     }
 
     // ── Range filtering ──────────────────────────────────────────────────────
@@ -404,7 +402,7 @@ public sealed class XlsxSheetScannerTests
             sst ?? SharedStringTable.Empty,
             StyleTable.Default,
             isDate1904: false,
-            ExcelReadMode.Values,
+            ReadMode.Values,
             range ?? ExcelRange.Unbounded).ToList();
     }
 
@@ -446,7 +444,7 @@ public sealed class XlsxSheetScannerTests
         using var wsStream = wsEntry.OpenBuffered();
         return XlsxSheetScanner.ScanRows(
             wsStream, sst, styles, metadata.UsesDate1904,
-            ExcelReadMode.Values, ExcelRange.Unbounded).ToList();
+            ReadMode.Values, ExcelRange.Unbounded).ToList();
     }
 
     private static void AssertRowsEqual(ExcelRow expected, ExcelRow actual, string file, int rowIdx)

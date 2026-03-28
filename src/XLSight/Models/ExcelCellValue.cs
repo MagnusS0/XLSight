@@ -14,9 +14,9 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
 {
     private readonly double _numeric;   // number, bool (0.0/1.0), or DateTime ticks cast to double
     private readonly string? _text;     // text, error code, or formula text
-    private readonly ExcelCellType _type;
+    private readonly CellType _type;
 
-    private ExcelCellValue(ExcelCellType type, double numeric, string? text)
+    private ExcelCellValue(CellType type, double numeric, string? text)
     {
         _type = type;
         _numeric = numeric;
@@ -24,13 +24,13 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     }
 
     /// <summary>Gets the type of data stored in this cell value.</summary>
-    public ExcelCellType CellType => _type;
+    public CellType CellType => _type;
 
     /// <summary>Gets a value indicating whether this cell is empty (no value).</summary>
-    public bool IsEmpty => _type == ExcelCellType.Empty;
+    public bool IsEmpty => _type == CellType.Empty;
 
     /// <summary>Gets a value indicating whether this cell has a non-empty value.</summary>
-    public bool HasValue => _type != ExcelCellType.Empty;
+    public bool HasValue => _type != CellType.Empty;
 
     // ── Sentinel ──────────────────────────────────────────────────────────────
 
@@ -42,115 +42,115 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
 
     /// <summary>Creates a cell value holding a numeric (double) value.</summary>
     /// <param name="value">The numeric value.</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Number"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Number"/>.</returns>
     public static ExcelCellValue FromNumber(double value) =>
-        new(ExcelCellType.Number, value, null);
+        new(CellType.Number, value, null);
 
     /// <summary>Creates a cell value holding a date/time value.</summary>
     /// <param name="value">The date/time value.</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Date"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Date"/>.</returns>
     public static ExcelCellValue FromDate(DateTime value) =>
-        new(ExcelCellType.Date, (double)value.Ticks, null);
+        new(CellType.Date, (double)value.Ticks, null);
 
     /// <summary>Creates a cell value holding a text string.</summary>
     /// <param name="value">The text string.</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Text"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Text"/>.</returns>
     public static ExcelCellValue FromText(string value) =>
-        new(ExcelCellType.Text, 0.0, value);
+        new(CellType.Text, 0.0, value);
 
     /// <summary>Creates a cell value holding a boolean value.</summary>
     /// <param name="value">The boolean value.</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Boolean"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Boolean"/>.</returns>
     public static ExcelCellValue FromBoolean(bool value) =>
-        new(ExcelCellType.Boolean, value ? 1.0 : 0.0, null);
+        new(CellType.Boolean, value ? 1.0 : 0.0, null);
 
     /// <summary>Creates a cell value holding an Excel error code.</summary>
     /// <param name="errorCode">The error code string, e.g. "#REF!".</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Error"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Error"/>.</returns>
     public static ExcelCellValue FromError(string errorCode) =>
-        new(ExcelCellType.Error, 0.0, errorCode);
+        new(CellType.Error, 0.0, errorCode);
 
     /// <summary>Creates a cell value holding a formula string.</summary>
     /// <param name="formulaText">The raw formula text, e.g. "=SUM(A1:A10)".</param>
-    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="ExcelCellType.Formula"/>.</returns>
+    /// <returns>A new <see cref="ExcelCellValue"/> of type <see cref="CellType.Formula"/>.</returns>
     public static ExcelCellValue FromFormula(string formulaText) =>
-        new(ExcelCellType.Formula, 0.0, formulaText);
+        new(CellType.Formula, 0.0, formulaText);
 
     // ── Typed accessors — throw InvalidOperationException on wrong type ────────
 
-    /// <summary>Returns the numeric value. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Number"/>.</summary>
+    /// <summary>Returns the numeric value. Throws if <see cref="CellType"/> is not <see cref="CellType.Number"/>.</summary>
     /// <returns>The double value stored in this cell.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Number.</exception>
     public double AsNumber()
     {
-        if (_type != ExcelCellType.Number)
+        if (_type != CellType.Number)
         {
-            ThrowWrongType(ExcelCellType.Number);
+            ThrowWrongType(CellType.Number);
         }
 
         return _numeric;
     }
 
-    /// <summary>Returns the date/time value. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Date"/>.</summary>
+    /// <summary>Returns the date/time value. Throws if <see cref="CellType"/> is not <see cref="CellType.Date"/>.</summary>
     /// <returns>The <see cref="DateTime"/> stored in this cell.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Date.</exception>
     public DateTime AsDate()
     {
-        if (_type != ExcelCellType.Date)
+        if (_type != CellType.Date)
         {
-            ThrowWrongType(ExcelCellType.Date);
+            ThrowWrongType(CellType.Date);
         }
 
         return new DateTime((long)_numeric);
     }
 
-    /// <summary>Returns the text value. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Text"/>.</summary>
+    /// <summary>Returns the text value. Throws if <see cref="CellType"/> is not <see cref="CellType.Text"/>.</summary>
     /// <returns>The string stored in this cell.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Text.</exception>
     public string AsText()
     {
-        if (_type != ExcelCellType.Text)
+        if (_type != CellType.Text)
         {
-            ThrowWrongType(ExcelCellType.Text);
+            ThrowWrongType(CellType.Text);
         }
 
         return _text!;
     }
 
-    /// <summary>Returns the boolean value. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Boolean"/>.</summary>
+    /// <summary>Returns the boolean value. Throws if <see cref="CellType"/> is not <see cref="CellType.Boolean"/>.</summary>
     /// <returns>The bool stored in this cell.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Boolean.</exception>
     public bool AsBoolean()
     {
-        if (_type != ExcelCellType.Boolean)
+        if (_type != CellType.Boolean)
         {
-            ThrowWrongType(ExcelCellType.Boolean);
+            ThrowWrongType(CellType.Boolean);
         }
 
         return _numeric != 0.0;
     }
 
-    /// <summary>Returns the error code string. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Error"/>.</summary>
+    /// <summary>Returns the error code string. Throws if <see cref="CellType"/> is not <see cref="CellType.Error"/>.</summary>
     /// <returns>The error code string, e.g. "#REF!".</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Error.</exception>
     public string AsError()
     {
-        if (_type != ExcelCellType.Error)
+        if (_type != CellType.Error)
         {
-            ThrowWrongType(ExcelCellType.Error);
+            ThrowWrongType(CellType.Error);
         }
 
         return _text!;
     }
 
-    /// <summary>Returns the formula text. Throws if <see cref="CellType"/> is not <see cref="ExcelCellType.Formula"/>.</summary>
+    /// <summary>Returns the formula text. Throws if <see cref="CellType"/> is not <see cref="CellType.Formula"/>.</summary>
     /// <returns>The raw formula string, e.g. "=SUM(A1:A10)".</returns>
     /// <exception cref="InvalidOperationException">Thrown when the cell type is not Formula.</exception>
     public string AsFormula()
     {
-        if (_type != ExcelCellType.Formula)
+        if (_type != CellType.Formula)
         {
-            ThrowWrongType(ExcelCellType.Formula);
+            ThrowWrongType(CellType.Formula);
         }
 
         return _text!;
@@ -163,7 +163,7 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>True if this cell holds a number; otherwise false.</returns>
     public bool TryGetNumber(out double value)
     {
-        if (_type == ExcelCellType.Number)
+        if (_type == CellType.Number)
         {
             value = _numeric;
             return true;
@@ -178,7 +178,7 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>True if this cell holds a date; otherwise false.</returns>
     public bool TryGetDate(out DateTime value)
     {
-        if (_type == ExcelCellType.Date)
+        if (_type == CellType.Date)
         {
             value = new DateTime((long)_numeric);
             return true;
@@ -193,7 +193,7 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>True if this cell holds text; otherwise false.</returns>
     public bool TryGetText([NotNullWhen(true)] out string? value)
     {
-        if (_type == ExcelCellType.Text)
+        if (_type == CellType.Text)
         {
             value = _text!;
             return true;
@@ -208,7 +208,7 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>True if this cell holds a boolean; otherwise false.</returns>
     public bool TryGetBoolean(out bool value)
     {
-        if (_type == ExcelCellType.Boolean)
+        if (_type == CellType.Boolean)
         {
             value = _numeric != 0.0;
             return true;
@@ -224,13 +224,13 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// <returns>A string representation suitable for display or debugging.</returns>
     public override string ToString() => _type switch
     {
-        ExcelCellType.Empty   => "Empty",
-        ExcelCellType.Number  => _numeric.ToString("G", CultureInfo.InvariantCulture),
-        ExcelCellType.Date    => new DateTime((long)_numeric).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-        ExcelCellType.Text    => _text ?? string.Empty,
-        ExcelCellType.Boolean => _numeric != 0.0 ? "TRUE" : "FALSE",
-        ExcelCellType.Error   => $"#ERROR: {_text}",
-        ExcelCellType.Formula => $"={_text}",
+        CellType.Empty   => "Empty",
+        CellType.Number  => _numeric.ToString("G", CultureInfo.InvariantCulture),
+        CellType.Date    => new DateTime((long)_numeric).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        CellType.Text    => _text ?? string.Empty,
+        CellType.Boolean => _numeric != 0.0 ? "TRUE" : "FALSE",
+        CellType.Error   => $"#ERROR: {_text}",
+        CellType.Formula => $"={_text}",
         _                     => string.Empty,
     };
 
@@ -260,7 +260,7 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private void ThrowWrongType(ExcelCellType expected) =>
+    private void ThrowWrongType(CellType expected) =>
         throw new InvalidOperationException(
             $"Cannot access cell value as {expected}; actual type is {_type}.");
 }

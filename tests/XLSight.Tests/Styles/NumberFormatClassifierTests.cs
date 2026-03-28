@@ -1,5 +1,5 @@
 using Xunit;
-using XLSight.Styles;
+using XLSight.Internal.Metadata;
 
 namespace XLSight.Tests.Styles;
 

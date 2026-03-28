@@ -1,11 +1,10 @@
 using System.Text;
 using SharpFuzz;
-using XLSight.ByteEngine;
+using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
 using XLSight.Models.Analysis;
-using XLSight.SharedStrings;
-using XLSight.Styles;
-using XLSight.Worksheets;
+using XLSight.Internal.Metadata;
+using XLSight.Internal.Sinks;
 
 namespace XLSight.Fuzz;
 
@@ -54,7 +53,7 @@ internal static class Program
                 SharedStrings,
                 StyleTable.Default,
                 isDate1904: false,
-                ExcelReadMode.Values,
+                ReadMode.Values,
                 ExcelRange.Unbounded));
             return true;
         }
@@ -113,7 +112,7 @@ internal static class Program
         public void OnDimension(in ExcelRange dimension) { }
         public void OnRowStart(int rowIndex) { }
         public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value) => true;
-        public void OnMergeCell(in ExcelMergedRegion region) { }
+        public void OnMergeCell(in MergedRegion region) { }
         public void OnEnd() { }
     }
 }

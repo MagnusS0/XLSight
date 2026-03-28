@@ -19,21 +19,21 @@ public class AnalyzeBenchmarks
     }
 
     [Benchmark]
-    public ExcelSheetInfo AnalyzeSheet_Small()
+    public SheetInfo AnalyzeSheet_Small()
     {
         using var wb = ExcelWorkbook.Open(_smallPath);
         return wb.AnalyzeSheet("Sheet1");
     }
 
     [Benchmark]
-    public ExcelSheetInfo AnalyzeSheet_Medium()
+    public SheetInfo AnalyzeSheet_Medium()
     {
         using var wb = ExcelWorkbook.Open(_mediumPath);
         return wb.AnalyzeSheet("Data");
     }
 
     [Benchmark]
-    public ExcelWorkbookInfo AnalyzeWorkbook_NamedRanges()
+    public WorkbookInfo AnalyzeWorkbook_NamedRanges()
     {
         using var wb = ExcelWorkbook.Open(_namedRangesPath);
         return wb.Analyze();

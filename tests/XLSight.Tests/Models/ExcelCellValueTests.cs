@@ -10,7 +10,7 @@ public sealed class ExcelCellValueTests
     [Fact]
     public void Empty_HasCellTypeEmpty()
     {
-        Assert.Equal(ExcelCellType.Empty, ExcelCellValue.Empty.CellType);
+        Assert.Equal(CellType.Empty, ExcelCellValue.Empty.CellType);
     }
 
     [Fact]
@@ -37,27 +37,27 @@ public sealed class ExcelCellValueTests
 
     [Fact]
     public void FromNumber_HasCellTypeNumber() =>
-        Assert.Equal(ExcelCellType.Number, ExcelCellValue.FromNumber(42.0).CellType);
+        Assert.Equal(CellType.Number, ExcelCellValue.FromNumber(42.0).CellType);
 
     [Fact]
     public void FromDate_HasCellTypeDate() =>
-        Assert.Equal(ExcelCellType.Date, ExcelCellValue.FromDate(DateTime.Today).CellType);
+        Assert.Equal(CellType.Date, ExcelCellValue.FromDate(DateTime.Today).CellType);
 
     [Fact]
     public void FromText_HasCellTypeText() =>
-        Assert.Equal(ExcelCellType.Text, ExcelCellValue.FromText("hello").CellType);
+        Assert.Equal(CellType.Text, ExcelCellValue.FromText("hello").CellType);
 
     [Fact]
     public void FromBoolean_HasCellTypeBoolean() =>
-        Assert.Equal(ExcelCellType.Boolean, ExcelCellValue.FromBoolean(true).CellType);
+        Assert.Equal(CellType.Boolean, ExcelCellValue.FromBoolean(true).CellType);
 
     [Fact]
     public void FromError_HasCellTypeError() =>
-        Assert.Equal(ExcelCellType.Error, ExcelCellValue.FromError("#REF!").CellType);
+        Assert.Equal(CellType.Error, ExcelCellValue.FromError("#REF!").CellType);
 
     [Fact]
     public void FromFormula_HasCellTypeFormula() =>
-        Assert.Equal(ExcelCellType.Formula, ExcelCellValue.FromFormula("SUM(A1:A10)").CellType);
+        Assert.Equal(CellType.Formula, ExcelCellValue.FromFormula("SUM(A1:A10)").CellType);
 
     // ── Typed accessors — correct values ──────────────────────────────────────
 

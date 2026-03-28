@@ -2,7 +2,7 @@ using Xunit;
 using XLSight;
 using XLSight.Exceptions;
 using XLSight.Models;
-using XLSight.Parsing;
+using XLSight.Internal.Parsing;
 
 namespace XLSight.Tests.Parsing;
 
