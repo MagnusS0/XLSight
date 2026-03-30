@@ -1,8 +1,7 @@
-using Xunit;
-using XLSight;
 using XLSight.Exceptions;
-using XLSight.Models;
 using XLSight.Internal.Parsing;
+using XLSight.Models;
+using Xunit;
 
 namespace XLSight.Tests.Parsing;
 

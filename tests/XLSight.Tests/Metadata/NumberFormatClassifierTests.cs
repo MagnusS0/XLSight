@@ -1,7 +1,7 @@
-using Xunit;
 using XLSight.Internal.Metadata;
+using Xunit;
 
-namespace XLSight.Tests.Styles;
+namespace XLSight.Tests.Metadata;
 
 public sealed class NumberFormatClassifierTests
 {

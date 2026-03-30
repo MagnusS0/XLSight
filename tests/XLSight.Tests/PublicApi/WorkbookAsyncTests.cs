@@ -1,9 +1,10 @@
 using System.IO.Compression;
 using System.Text;
-using Xunit;
 using XLSight.Models;
+using XLSight.Models.Analysis;
+using Xunit;
 
-namespace XLSight.Tests.Async;
+namespace XLSight.Tests.PublicApi;
 
 public sealed class WorkbookAsyncTests
 {
@@ -141,7 +142,7 @@ public sealed class WorkbookAsyncTests
 
             Assert.Equal(2, result.Width);
             Assert.Equal(2, result.Height);
-            Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+            Assert.Equal(ExcelCellValue.FromNumber(42), result[0, 0]); // A1
             Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
         }
         finally
@@ -159,9 +160,9 @@ public sealed class WorkbookAsyncTests
 
         Assert.Equal(2, result.Width);
         Assert.Equal(2, result.Height);
-        Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+        Assert.Equal(ExcelCellValue.FromNumber(42), result[0, 0]); // A1
         Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
-        Assert.Equal(ExcelCellValue.FromNumber(3.14),  result[1, 0]); // A2
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), result[1, 0]); // A2
         Assert.Equal(ExcelCellValue.FromBoolean(true), result[1, 1]); // B2
     }
 
@@ -203,6 +204,21 @@ public sealed class WorkbookAsyncTests
         Assert.Equal(2, info.Sheets.Count);
         Assert.False(info.HasMacros);
         Assert.False(info.IsDate1904);
+    }
+
+    [Fact]
+    public async Task AnalyzeSheetAsync_ExactLevel_ReturnsExactMetadataOnly()
+    {
+        using var ms = CreateWorkbook();
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+
+        var info = await workbook.AnalyzeSheetAsync("Sheet1", AnalysisLevel.Exact);
+
+        Assert.Equal(AnalysisLevel.Exact, info.Level);
+        Assert.False(info.HasObserved);
+        Assert.False(info.HasInferred);
+        Assert.NotNull(info.Exact.DeclaredDimension);
+        Assert.Throws<InvalidOperationException>(() => _ = info.RowCount);
     }
 
     [Fact]

@@ -1,11 +1,10 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
-using Xunit;
-using XLSight.Exceptions;
 using XLSight.Models;
+using Xunit;
 
-namespace XLSight.Tests.Streaming;
+namespace XLSight.Tests.PublicApi;
 
 public sealed class WorksheetStreamingTests
 {

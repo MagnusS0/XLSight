@@ -1,11 +1,11 @@
 using System.IO.Compression;
 using System.Text;
-using Xunit;
-using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
-using XLSight.Internal.Packaging;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Packaging;
+using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
+using XLSight.Models;
+using Xunit;
 
 namespace XLSight.Tests.Integration;
 
@@ -141,11 +141,11 @@ public sealed class WorksheetRangeReadIntegrationTests
         var sink = new RangeSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry(metadata.Sheets[0].Path)!.Open();
-        XlsxSheetScanner.ScanSheet(sheetStream, sharedStrings, styles, isDate1904: false, range, ref sink);
+        XlsxSheetScanner.ScanSheet(sheetStream, sharedStrings, styles, isDate1904: false, ReadMode.Values, range, ref sink);
 
-        Assert.Equal(ExcelCellValue.FromNumber(42),    buffer[0]); // A1
+        Assert.Equal(ExcelCellValue.FromNumber(42), buffer[0]); // A1
         Assert.Equal(ExcelCellValue.FromText("Hello"), buffer[1]); // B1
-        Assert.Equal(ExcelCellValue.FromNumber(3.14),  buffer[2]); // A2
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), buffer[2]); // A2
         Assert.Equal(ExcelCellValue.FromBoolean(true), buffer[3]); // B2
     }
 
@@ -160,7 +160,7 @@ public sealed class WorksheetRangeReadIntegrationTests
         var sink = new RangeSink(range, buffer);
 
         using Stream sheetStream = package.GetEntry("xl/worksheets/sheet2.xml")!.Open();
-        XlsxSheetScanner.ScanSheet(sheetStream, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, range, ref sink);
+        XlsxSheetScanner.ScanSheet(sheetStream, SharedStringTable.Empty, StyleTable.Default, isDate1904: false, ReadMode.Values, range, ref sink);
 
         Assert.All(buffer, cell => Assert.Equal(ExcelCellValue.Empty, cell));
     }

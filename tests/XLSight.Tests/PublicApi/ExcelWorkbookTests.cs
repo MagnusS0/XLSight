@@ -1,10 +1,10 @@
 using System.IO.Compression;
 using System.Text;
-using Xunit;
 using XLSight.Exceptions;
 using XLSight.Models;
+using Xunit;
 
-namespace XLSight.Tests.ExcelWorkbook;
+namespace XLSight.Tests.PublicApi;
 
 public sealed class ExcelWorkbookTests
 {
@@ -151,7 +151,7 @@ public sealed class ExcelWorkbookTests
 
             Assert.Equal(2, result.Width);
             Assert.Equal(2, result.Height);
-            Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+            Assert.Equal(ExcelCellValue.FromNumber(42), result[0, 0]); // A1
             Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
         }
         finally
@@ -217,9 +217,9 @@ public sealed class ExcelWorkbookTests
 
         Assert.Equal(2, result.Width);
         Assert.Equal(2, result.Height);
-        Assert.Equal(ExcelCellValue.FromNumber(42),    result[0, 0]); // A1
+        Assert.Equal(ExcelCellValue.FromNumber(42), result[0, 0]); // A1
         Assert.Equal(ExcelCellValue.FromText("Hello"), result[0, 1]); // B1
-        Assert.Equal(ExcelCellValue.FromNumber(3.14),  result[1, 0]); // A2
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), result[1, 0]); // A2
         Assert.Equal(ExcelCellValue.FromBoolean(true), result[1, 1]); // B2
     }
 

@@ -1,8 +1,8 @@
 using System.Text;
-using Xunit;
 using XLSight.Internal.Metadata;
+using Xunit;
 
-namespace XLSight.Tests.SharedStrings;
+namespace XLSight.Tests.Metadata;
 
 public sealed class SharedStringsParserTests
 {

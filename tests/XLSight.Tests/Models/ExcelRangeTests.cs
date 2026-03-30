@@ -1,5 +1,5 @@
-using Xunit;
 using XLSight.Models;
+using Xunit;
 
 namespace XLSight.Tests.Models;
 
@@ -8,10 +8,10 @@ public sealed class ExcelRangeTests
     // ── ExcelAddress.ToString column-letter conversion ──────────────────────
 
     [Theory]
-    [InlineData(1,     "A")]
-    [InlineData(26,    "Z")]
-    [InlineData(27,    "AA")]
-    [InlineData(703,   "AAA")]
+    [InlineData(1, "A")]
+    [InlineData(26, "Z")]
+    [InlineData(27, "AA")]
+    [InlineData(703, "AAA")]
     [InlineData(16384, "XFD")]
     public void Address_ToString_ProducesCorrectColumnLetters(int column, string expectedLetters)
     {

@@ -1,5 +1,5 @@
-using Xunit;
 using XLSight.Models;
+using Xunit;
 
 namespace XLSight.Tests.Models;
 
