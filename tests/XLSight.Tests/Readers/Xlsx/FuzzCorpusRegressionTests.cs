@@ -1,9 +1,9 @@
-using Xunit;
+using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
-using XLSight.Internal.Metadata;
+using Xunit;
 
-namespace XLSight.Tests.ByteEngine;
+namespace XLSight.Tests.Readers.Xlsx;
 
 public sealed class FuzzCorpusRegressionTests
 {

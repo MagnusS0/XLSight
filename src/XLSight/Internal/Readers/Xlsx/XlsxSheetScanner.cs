@@ -1,13 +1,11 @@
 using System.Buffers;
-using System.Buffers.Text;
-using System.Net;
-using System.Runtime.InteropServices;
 using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Sinks;
 using XLSight.Models;
 using XLSight.Models.Analysis;
+using static XLSight.Internal.Readers.Xlsx.XmlByteReader;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -16,7 +14,7 @@ namespace XLSight.Internal.Readers.Xlsx;
 /// bypassing XmlReader entirely. Uses SIMD-accelerated ReadOnlySpan&lt;byte&gt;.IndexOf
 /// via the runtime's vectorised implementation.
 /// </summary>
-internal static class XlsxSheetScanner
+internal static partial class XlsxSheetScanner
 {
     internal static ReadOnlySpan<byte> TagSheetData => "sheetData"u8;
     internal static ReadOnlySpan<byte> TagRow => "row"u8;
@@ -25,9 +23,9 @@ internal static class XlsxSheetScanner
     internal static ReadOnlySpan<byte> TagValue => "v"u8;
     internal static ReadOnlySpan<byte> TagText => "t"u8;
 
-    // SearchValues instances are pre-built bitmaps/SIMD vectors; AVX-512 on supported hardware.
-    private static readonly SearchValues<byte> s_tagBoundaries = SearchValues.Create(">/ \t\r\n"u8);
-    private static readonly SearchValues<byte> s_xmlWhitespace = SearchValues.Create(" \t\r\n"u8);
+    private static ReadOnlySpan<byte> TagDimension => "dimension"u8;
+    private static ReadOnlySpan<byte> RefAttr => "ref="u8;
+    private static ReadOnlySpan<byte> TAttr => "t="u8;
 
     // ── Entry points ─────────────────────────────────────────────────────────
 
@@ -48,7 +46,7 @@ internal static class XlsxSheetScanner
     {
         using var buf = new ScanBuffer(entryStream);
 
-        if (!SeekToSheetData(buf, entryStream, seekHint))
+        if (!SeekToSheetData(buf, entryStream, seekHint, out _))
         {
             yield break;
         }
@@ -60,7 +58,8 @@ internal static class XlsxSheetScanner
         {
             while (true)
             {
-                if (!TryReadRowStart(buf, ref lastRow)) { yield break; }
+                if (!TryReadRowStart(buf, ref lastRow, out bool emptyRow)) { yield break; }
+                if (emptyRow) { continue; }
 
                 int rowIndex = lastRow;
                 if (!range.IsUnbounded && rowIndex > range.BottomRight.Row) { yield break; }
@@ -110,17 +109,23 @@ internal static class XlsxSheetScanner
     {
         using var buf = new ScanBuffer(entryStream);
 
-        if (!SeekToSheetData(buf, entryStream, seekHint))
+        if (!SeekToSheetData(buf, entryStream, seekHint, out ExcelRange? dimension))
         {
             sink.OnEnd();
             return;
+        }
+
+        if (dimension.HasValue)
+        {
+            sink.OnDimension(dimension.Value);
         }
 
         int lastRow = 0;
 
         while (true)
         {
-            if (!TryReadRowStart(buf, ref lastRow)) { break; }
+            if (!TryReadRowStart(buf, ref lastRow, out bool emptyRow)) { break; }
+            if (emptyRow) { continue; }
 
             int rowIndex = lastRow;
 
@@ -140,11 +145,11 @@ internal static class XlsxSheetScanner
             }
         }
 
-        // Scan for merge regions after </sheetData> (only relevant when range is unbounded,
-        // i.e. Analyze calls; RangeSink ignores OnMergeCell).
+        // Scan for merge regions, CF, DV, and hyperlinks after </sheetData>.
+        // Only relevant for analysis sinks (range.IsUnbounded); RangeSink no-ops these callbacks.
         if (range.IsUnbounded)
         {
-            TryScanMergeCells(buf, ref sink);
+            TryScanPostSheetData(buf, ref sink);
         }
 
         sink.OnEnd();
@@ -152,46 +157,87 @@ internal static class XlsxSheetScanner
 
     // ── Navigation helpers (internal so SheetCursor can call them) ──────────
 
-    internal static bool SeekToSheetData(ScanBuffer buf, Stream stream, long seekHint)
+    internal static bool SeekToSheetData(ScanBuffer buf, Stream stream, long seekHint, out ExcelRange? dimension)
     {
         if (seekHint >= 0 && stream.CanSeek)
         {
             stream.Seek(seekHint, SeekOrigin.Begin);
             buf.Reset();
+            dimension = null;
             return true;
         }
 
-        return ScanForSheetData(buf);
+        return ScanForSheetData(buf, out dimension);
     }
 
-    internal static bool ScanForSheetData(ScanBuffer buf)
+    internal static bool ScanForSheetData(ScanBuffer buf, out ExcelRange? dimension)
     {
+        dimension = null;
         while (true)
         {
             var span = buf.Span;
-            var status = TryFindStartTag(span, TagSheetData, out var match, out int partialIndex);
-            if (status == TagSearchResult.NotFound)
+            var dimStatus = TryFindStartTag(span, TagDimension, out var dimMatch, out int dimPartial);
+            var sdStatus = TryFindStartTag(span, TagSheetData, out var sdMatch, out int sdPartial);
+            bool dimFound = dimStatus == TagSearchResult.Found;
+            bool sdFound = sdStatus == TagSearchResult.Found;
+            int dimPos = dimFound ? dimMatch.Start : int.MaxValue;
+            int sdPos = sdFound ? sdMatch.Start : int.MaxValue;
+            int minPos = Math.Min(dimPos, sdPos);
+
+            // If a NeedMoreData tag precedes the earliest found tag, advance and refill
+            if (dimStatus == TagSearchResult.NeedMoreData && dimMatch.Start < minPos)
             {
-                if (!RefillKeepingTagStart(buf, span, partialIndex)) { return false; }
+                if (!RefillKeepingTagStart(buf, span, dimMatch.Start)) { return false; }
                 continue;
             }
 
-            if (status == TagSearchResult.NeedMoreData)
+            if (sdStatus == TagSearchResult.NeedMoreData && sdMatch.Start < minPos)
             {
-                buf.Advance(match.Start);
-                if (!buf.Refill()) { return false; }
+                if (!RefillKeepingTagStart(buf, span, sdMatch.Start)) { return false; }
                 continue;
             }
 
-            if (match.IsEmptyElement) { return false; }
+            if (!dimFound && !sdFound)
+            {
+                if (!RefillKeepingTagStart(buf, span, MaxPartial(dimPartial, sdPartial))) { return false; }
+                continue;
+            }
 
-            buf.Advance(match.EndExclusive);
+            if (dimFound && dimPos < sdPos)
+            {
+                var attrs = span.Slice(dimMatch.AfterName, dimMatch.EndExclusive - dimMatch.AfterName);
+                if (CellAttributeParser.TryGetAttributeValue(attrs, RefAttr, out var refBytes))
+                {
+                    dimension = TryParseRangeBytes(refBytes);
+                }
+
+                buf.Advance(dimMatch.EndExclusive);
+                continue;
+            }
+
+            if (sdMatch.IsEmptyElement) { return false; }
+            buf.Advance(sdMatch.EndExclusive);
             return true;
         }
     }
 
-    internal static bool TryReadRowStart(ScanBuffer buf, ref int rowIndex)
+    private static ExcelRange? TryParseRangeBytes(ReadOnlySpan<byte> valueBytes)
     {
+        Span<char> charBuf = stackalloc char[Math.Min(64, valueBytes.Length)];
+        if (valueBytes.Length > charBuf.Length)
+        {
+            return Parsing.AddressParser.TryParse(
+                System.Text.Encoding.UTF8.GetString(valueBytes).AsSpan(),
+                out ExcelRange r) ? r : null;
+        }
+
+        int chars = System.Text.Encoding.UTF8.GetChars(valueBytes, charBuf);
+        return Parsing.AddressParser.TryParse(charBuf[..chars], out ExcelRange parsed) ? parsed : null;
+    }
+
+    internal static bool TryReadRowStart(ScanBuffer buf, ref int rowIndex, out bool isSelfClosing)
+    {
+        isSelfClosing = false;
         while (true)
         {
             var span = buf.Span;
@@ -212,8 +258,7 @@ internal static class XlsxSheetScanner
 
             if (rowStatus == TagSearchResult.NeedMoreData)
             {
-                buf.Advance(rowMatch.Start);
-                if (!buf.Refill()) { return false; }
+                if (!RefillKeepingTagStart(buf, span, rowMatch.Start)) { return false; }
                 continue;
             }
 
@@ -222,11 +267,12 @@ internal static class XlsxSheetScanner
             if (hasR && parsedRow > ExcelLimits.MaxRows)
             {
                 buf.Advance(rowMatch.EndExclusive);
-                SkipToEndTag(buf, TagRow);
+                if (!rowMatch.IsEmptyElement) { SkipToEndTag(buf, TagRow); }
                 continue;
             }
 
             rowIndex = hasR && parsedRow > 0 ? parsedRow : rowIndex + 1;
+            isSelfClosing = rowMatch.IsEmptyElement;
             buf.Advance(rowMatch.EndExclusive);
             return true;
         }
@@ -247,8 +293,17 @@ internal static class XlsxSheetScanner
         {
             if (currentCol > ExcelLimits.MaxColumns) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
 
-            bool inRange = range.IsUnbounded || range.Contains(new ExcelAddress(currentCol, rowIndex));
-            if (!inRange) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
+            if (!range.IsUnbounded)
+            {
+                if (currentCol > range.BottomRight.Column)
+                {
+                    // Columns are ascending — nothing further in this row can be in range.
+                    if (!isEmpty) { SkipToEndTag(buf, TagCell); }
+                    SkipToEndTag(buf, TagRow);
+                    break;
+                }
+                if (currentCol < range.TopLeft.Column) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
+            }
 
             if (firstCol == 0) { firstCol = currentCol; }
 
@@ -279,11 +334,14 @@ internal static class XlsxSheetScanner
         while (true)
         {
             var span = buf.Span;
-            var closeStatus = TryFindEndTag(span, TagRow, out int closeRow, out int closeRowLen, out int closePartial);
             var cellStatus = TryFindStartTag(span, TagCell, out var cellMatch, out int cellPartial);
 
-            if (closeStatus == TagSearchResult.Found
-                && (cellStatus != TagSearchResult.Found || closeRow < cellMatch.Start))
+            // Limit the </row> search to the span before the first <c>, so we don't burn CPU
+            // scanning past cell content looking for a row close that can't be there yet.
+            int rowSearchLimit = cellStatus == TagSearchResult.Found ? cellMatch.Start : span.Length;
+            var closeStatus = TryFindEndTag(span[..rowSearchLimit], TagRow, out int closeRow, out int closeRowLen, out int closePartial);
+
+            if (closeStatus == TagSearchResult.Found)
             {
                 buf.Advance(closeRow + closeRowLen);
                 return false;
@@ -297,8 +355,7 @@ internal static class XlsxSheetScanner
 
             if (cellStatus == TagSearchResult.NeedMoreData)
             {
-                buf.Advance(cellMatch.Start);
-                if (!buf.Refill()) { return false; }
+                if (!RefillKeepingTagStart(buf, span, cellMatch.Start)) { return false; }
                 continue;
             }
 
@@ -310,259 +367,13 @@ internal static class XlsxSheetScanner
         }
     }
 
-    // ── Cell value readers ──────────────────────────────────────────────────
-
-    internal static ExcelCellValue ReadCellValue(
-        ScanBuffer buf, CellDataKind kind, int styleIdx,
-        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
-    {
-        if (kind == CellDataKind.InlineString) { return ReadInlineString(buf); }
-
-        while (true)
-        {
-            var span = buf.Span;
-            var valueStatus = TryFindStartTag(span, TagValue, out var valueMatch, out int valuePartial);
-            var closeStatus = TryFindEndTag(span, TagCell, out int cClose, out int cCloseLen, out int closePartial);
-
-            if (closeStatus == TagSearchResult.Found
-                && (valueStatus != TagSearchResult.Found || cClose < valueMatch.Start))
-            {
-                buf.Advance(cClose + cCloseLen);
-                return ExcelCellValue.Empty;
-            }
-
-            if (valueStatus == TagSearchResult.NotFound)
-            {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(valuePartial, closePartial))) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
-            if (valueStatus == TagSearchResult.NeedMoreData)
-            {
-                buf.Advance(valueMatch.Start);
-                if (!buf.Refill()) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
-            buf.Advance(valueMatch.EndExclusive);
-            if (valueMatch.IsEmptyElement)
-            {
-                SkipToEndTag(buf, TagCell);
-                return ExcelCellValue.Empty;
-            }
-            break;
-        }
-
-        var value = ExtractUntilClose(buf, TagValue);
-        var decoded = Utf8CellDecoder.Decode(value, kind, styleIdx, sharedStrings, styles, isDate1904);
-        SkipToEndTag(buf, TagCell);
-        return decoded;
-    }
-
-    /// <summary>
-    /// Variant of <see cref="ReadCellValue"/> for <see cref="ReadMode.Formulas"/>.
-    /// Scans for <c>&lt;f&gt;</c> and <c>&lt;v&gt;</c> simultaneously; when <c>&lt;f&gt;</c>
-    /// appears first the raw formula text is returned as <see cref="ExcelCellValue.FromFormula"/>.
-    /// Falls back to the normal cached-value decode when no formula tag is present.
-    /// </summary>
-    private static ExcelCellValue ReadCellValueFormula(
-        ScanBuffer buf, CellDataKind kind, int styleIdx,
-        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
-    {
-        if (kind == CellDataKind.InlineString) { return ReadInlineString(buf); }
-
-        while (true)
-        {
-            var span = buf.Span;
-            var fStatus = TryFindStartTag(span, TagFormula, out var fMatch, out int fPartial);
-            var vStatus = TryFindStartTag(span, TagValue, out var vMatch, out int vPartial);
-            var cStatus = TryFindEndTag(span, TagCell, out int cIdx, out int cLen, out int cPartial);
-
-            if (fStatus == TagSearchResult.NeedMoreData || vStatus == TagSearchResult.NeedMoreData)
-            {
-                int partial = MaxPartial(MaxPartial(fPartial, vPartial), cPartial);
-                if (!RefillKeepingTagStart(buf, span, partial)) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
-            bool fFound = fStatus == TagSearchResult.Found;
-            bool vFound = vStatus == TagSearchResult.Found;
-            bool cFound = cStatus == TagSearchResult.Found;
-            int fPos = fFound ? fMatch.Start : int.MaxValue;
-            int vPos = vFound ? vMatch.Start : int.MaxValue;
-            int cPos = cFound ? cIdx : int.MaxValue;
-
-            if (cPos < fPos && cPos < vPos) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
-
-            if (fFound && fPos < vPos)
-            {
-                buf.Advance(fMatch.EndExclusive);
-                if (!fMatch.IsEmptyElement) { return ExtractFormulaValue(buf); }
-                continue; // <f/> with no text — look for <v>
-            }
-
-            if (vFound) { return ExtractCachedValue(buf, vMatch, kind, styleIdx, sharedStrings, styles, isDate1904); }
-
-            int p = MaxPartial(MaxPartial(fPartial, vPartial), cPartial);
-            if (!RefillKeepingTagStart(buf, span, p)) { return ExcelCellValue.Empty; }
-        }
-    }
-
-    private static ExcelCellValue ExtractFormulaValue(ScanBuffer buf)
-    {
-        var fb = ExtractUntilClose(buf, TagFormula);
-        var text = Encoding.UTF8.GetString(fb);
-        SkipToEndTag(buf, TagCell);
-        if (text.Contains('&', StringComparison.Ordinal)) { text = WebUtility.HtmlDecode(text); }
-        return ExcelCellValue.FromFormula(text);
-    }
-
-    private static ExcelCellValue ExtractCachedValue(
-        ScanBuffer buf, StartTagMatch vMatch, CellDataKind kind, int styleIdx,
-        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904)
-    {
-        buf.Advance(vMatch.EndExclusive);
-        if (vMatch.IsEmptyElement) { SkipToEndTag(buf, TagCell); return ExcelCellValue.Empty; }
-        var vb = ExtractUntilClose(buf, TagValue);
-        var decoded = Utf8CellDecoder.Decode(vb, kind, styleIdx, sharedStrings, styles, isDate1904);
-        SkipToEndTag(buf, TagCell);
-        return decoded;
-    }
-
-    /// <summary>
-    /// Variant of <see cref="ReadCellValue"/> for <see cref="CellDataKind.SharedString"/> cells
-    /// that also outputs the raw SST index. When <paramref name="decode"/> is <see langword="false"/>
-    /// the string is not materialised and <see cref="ExcelCellValue.Empty"/> is returned — the caller
-    /// must use <paramref name="sstIndex"/> instead.
-    /// </summary>
-    private static ExcelCellValue ReadCellValueWithSstIndex(
-        ScanBuffer buf, int styleIdx,
-        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
-        bool decode,
-        out int sstIndex)
-    {
-        // Navigate to <v> and extract bytes — same logic as ReadCellValue for SharedString.
-        while (true)
-        {
-            var span = buf.Span;
-            var valueStatus = TryFindStartTag(span, TagValue, out var valueMatch, out int valuePartial);
-            var closeStatus = TryFindEndTag(span, TagCell, out int cClose, out int cCloseLen, out int closePartial);
-
-            if (closeStatus == TagSearchResult.Found
-                && (valueStatus != TagSearchResult.Found || cClose < valueMatch.Start))
-            {
-                buf.Advance(cClose + cCloseLen);
-                sstIndex = -1;
-                return ExcelCellValue.Empty;
-            }
-
-            if (valueStatus == TagSearchResult.NotFound)
-            {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(valuePartial, closePartial)))
-                {
-                    sstIndex = -1;
-                    return ExcelCellValue.Empty;
-                }
-                continue;
-            }
-
-            if (valueStatus == TagSearchResult.NeedMoreData)
-            {
-                buf.Advance(valueMatch.Start);
-                if (!buf.Refill())
-                {
-                    sstIndex = -1;
-                    return ExcelCellValue.Empty;
-                }
-                continue;
-            }
-
-            buf.Advance(valueMatch.EndExclusive);
-            if (valueMatch.IsEmptyElement)
-            {
-                SkipToEndTag(buf, TagCell);
-                sstIndex = -1;
-                return ExcelCellValue.Empty;
-            }
-            break;
-        }
-
-        var valueBytes = ExtractUntilClose(buf, TagValue);
-        var decoded = DecodeSharedStringValue(valueBytes, styleIdx, sharedStrings, styles, isDate1904, decode, out sstIndex);
-        SkipToEndTag(buf, TagCell);
-        return decoded;
-    }
-
-    private static ExcelCellValue DecodeSharedStringValue(
-        ReadOnlySpan<byte> valueBytes,
-        int styleIdx,
-        SharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        bool decode,
-        out int sstIndex)
-    {
-        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _))
-        {
-            sstIndex = -1;
-        }
-
-        return decode
-            ? Utf8CellDecoder.Decode(valueBytes, CellDataKind.SharedString, styleIdx, sharedStrings, styles, isDate1904)
-            : ExcelCellValue.Empty;
-    }
-
-    internal static ExcelCellValue ReadInlineString(ScanBuffer buf)
-    {
-        bool seenT = false;
-        string? first = null;
-        StringBuilder? sb = null;
-
-        while (true)
-        {
-            var span = buf.Span;
-            var closeStatus = TryFindEndTag(span, TagCell, out int cClose, out int cCloseLen, out int closePartial);
-            var textStatus = TryFindStartTag(span, TagText, out var textMatch, out int textPartial);
-
-            if (closeStatus == TagSearchResult.Found
-                && (textStatus != TagSearchResult.Found || cClose < textMatch.Start))
-            {
-                buf.Advance(cClose + cCloseLen);
-                break;
-            }
-
-            if (textStatus == TagSearchResult.NotFound)
-            {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(closePartial, textPartial))) { break; }
-                continue;
-            }
-
-            if (textStatus == TagSearchResult.NeedMoreData)
-            {
-                buf.Advance(textMatch.Start);
-                if (!buf.Refill()) { break; }
-                continue;
-            }
-
-            seenT = true;
-            buf.Advance(textMatch.EndExclusive);
-            if (textMatch.IsEmptyElement) { continue; }
-
-            var textBytes = ExtractUntilClose(buf, TagText);
-            if (!textBytes.IsEmpty) { AccumulateInlineText(textBytes, ref first, ref sb); }
-        }
-
-        var result = sb?.ToString() ?? first;
-        if (result is not null) { return ExcelCellValue.FromText(result); }
-        return seenT ? ExcelCellValue.FromText(string.Empty) : ExcelCellValue.Empty;
-    }
-
-    // ── Buffer helpers ──────────────────────────────────────────────────────
-
     // ── Push-based helpers for ScanSheet<TSink> ─────────────────────────────
 
     private static ReadOnlySpan<byte> TagMergeCells => "mergeCells"u8;
     private static ReadOnlySpan<byte> TagMergeCell => "mergeCell"u8;
+    private static ReadOnlySpan<byte> TagConditionalFormatting => "conditionalFormatting"u8;
+    private static ReadOnlySpan<byte> TagDataValidation => "dataValidation"u8;
+    private static ReadOnlySpan<byte> TagHyperlink => "hyperlink"u8;
 
     /// <summary>
     /// Pushes all cells in the current row to <paramref name="sink"/>.
@@ -590,37 +401,23 @@ internal static class XlsxSheetScanner
                 continue;
             }
 
-            bool inRange = range.IsUnbounded || range.Contains(new ExcelAddress(currentCol, rowIndex));
+            bool inRange = range.IsUnbounded || (currentCol >= range.TopLeft.Column && currentCol <= range.BottomRight.Column);
             if (!inRange)
             {
                 if (!isEmpty) { SkipToEndTag(buf, TagCell); }
+                if (!range.IsUnbounded && currentCol > range.BottomRight.Column)
+                {
+                    SkipToEndTag(buf, TagRow);
+                    break;
+                }
                 continue;
             }
 
-            ExcelCellValue value;
-            int rawIndex = -1;
+            // Formula detection is merged into the value scan — no separate peek needed.
+            var value = ReadCellValueForSink(buf, kind, styleIdx, sharedStrings, styles, isDate1904, mode, isEmpty, ref sink, out int rawIndex, out bool formulaFound, out bool isArrayFormula);
 
-            if (isEmpty)
-            {
-                value = ExcelCellValue.Empty;
-            }
-            else if (mode == ReadMode.Formulas)
-            {
-                value = ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
-            }
-            else if (kind == CellDataKind.SharedString)
-            {
-                // Extract the raw SST index alongside (or instead of) the decoded value.
-                // When the sink opts out of decoded values, skip GetString entirely.
-                value = ReadCellValueWithSstIndex(
-                    buf, styleIdx, sharedStrings, styles, isDate1904,
-                    decode: sink.NeedsDecodedValue,
-                    out rawIndex);
-            }
-            else
-            {
-                value = ReadCellValue(buf, kind, styleIdx, sharedStrings, styles, isDate1904);
-            }
+            // OnFormula before OnCell so sinks see formula info before the cell value.
+            if (formulaFound) { sink.OnFormula(currentCol, isArrayFormula); }
 
             if (!sink.OnCell(currentCol, kind, styleIdx, value, rawIndex))
             {
@@ -632,11 +429,10 @@ internal static class XlsxSheetScanner
     }
 
     /// <summary>
-    /// Scans bytes remaining after <c>&lt;/sheetData&gt;</c> for <c>&lt;mergeCell&gt;</c>
-    /// elements and calls <see cref="IByteSheetSink.OnMergeCell"/> for each one found.
-    /// Stops at <c>&lt;/mergeCells&gt;</c> or EOF.
+    /// Scans bytes remaining after <c>&lt;/sheetData&gt;</c> for merge cells, conditional
+    /// formatting, data validations, and hyperlinks, calling the appropriate sink callbacks.
     /// </summary>
-    private static void TryScanMergeCells<TSink>(ScanBuffer buf, ref TSink sink)
+    private static void TryScanPostSheetData<TSink>(ScanBuffer buf, ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
         Span<char> refCharBuf = stackalloc char[32];
@@ -645,345 +441,97 @@ internal static class XlsxSheetScanner
         {
             var span = buf.Span;
 
-            // Bail out early when we hit </mergeCells>.
-            var closeStatus = TryFindEndTag(span, TagMergeCells, out int closeIdx, out int closeLen, out int closePartial);
             var mergeStatus = TryFindStartTag(span, TagMergeCell, out var mergeMatch, out int mergePartial);
+            var cfStatus = TryFindStartTag(span, TagConditionalFormatting, out var cfMatch, out int cfPartial);
+            var dvStatus = TryFindStartTag(span, TagDataValidation, out var dvMatch, out int dvPartial);
+            var hyperStatus = TryFindStartTag(span, TagHyperlink, out var hyperMatch, out int hyperPartial);
 
-            if (closeStatus == TagSearchResult.Found
-                && (mergeStatus != TagSearchResult.Found || closeIdx < mergeMatch.Start))
-            {
-                break;
-            }
+            int mergePos = mergeStatus == TagSearchResult.Found ? mergeMatch.Start : int.MaxValue;
+            int cfPos = cfStatus == TagSearchResult.Found ? cfMatch.Start : int.MaxValue;
+            int dvPos = dvStatus == TagSearchResult.Found ? dvMatch.Start : int.MaxValue;
+            int hyperPos = hyperStatus == TagSearchResult.Found ? hyperMatch.Start : int.MaxValue;
+            int minFoundPos = Math.Min(Math.Min(mergePos, cfPos), Math.Min(dvPos, hyperPos));
 
-            if (mergeStatus == TagSearchResult.NotFound)
+            int needMoreStart = NeedMoreMin(mergeStatus, mergeMatch, cfStatus, cfMatch, dvStatus, dvMatch, hyperStatus, hyperMatch);
+
+            if (minFoundPos == int.MaxValue)
             {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(closePartial, mergePartial))) { break; }
+                // Nothing found at all
+                if (needMoreStart != int.MaxValue) { if (!RefillKeepingTagStart(buf, span, needMoreStart)) { break; } continue; }
+                int partial = MaxPartial(MaxPartial(mergePartial, cfPartial), MaxPartial(dvPartial, hyperPartial));
+                if (!RefillKeepingTagStart(buf, span, partial)) { break; }
                 continue;
             }
 
-            if (mergeStatus == TagSearchResult.NeedMoreData)
-            {
-                buf.Advance(mergeMatch.Start);
-                if (!buf.Refill()) { break; }
-                continue;
-            }
+            if (needMoreStart < minFoundPos) { if (!RefillKeepingTagStart(buf, span, needMoreStart)) { break; } continue; }
 
-            // Extract and parse the ref="A1:B2" attribute.
+            DispatchPostSheetTag(span, buf, ref sink, refCharBuf, minFoundPos, mergePos, cfPos, dvPos, mergeMatch, cfMatch, dvMatch, hyperMatch);
+        }
+    }
+
+    private static int NeedMoreMin(
+        TagSearchResult s1, StartTagMatch m1,
+        TagSearchResult s2, StartTagMatch m2,
+        TagSearchResult s3, StartTagMatch m3,
+        TagSearchResult s4, StartTagMatch m4)
+    {
+        int min = int.MaxValue;
+        if (s1 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m1.Start); }
+        if (s2 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m2.Start); }
+        if (s3 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m3.Start); }
+        if (s4 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m4.Start); }
+        return min;
+    }
+
+    private static void DispatchPostSheetTag<TSink>(
+        ReadOnlySpan<byte> span, ScanBuffer buf, ref TSink sink, Span<char> refCharBuf,
+        int minPos, int mergePos, int cfPos, int dvPos,
+        StartTagMatch mergeMatch, StartTagMatch cfMatch, StartTagMatch dvMatch, StartTagMatch hyperMatch)
+        where TSink : struct, IByteSheetSink
+    {
+        if (minPos == mergePos)
+        {
             var attrBytes = span.Slice(mergeMatch.AfterName, mergeMatch.EndExclusive - mergeMatch.AfterName);
             if (CellAttributeParser.TryGetRefAttribute(attrBytes, out var refBytes))
             {
-                int charLen = Encoding.UTF8.GetChars(refBytes, refCharBuf);
-                if (AddressParser.TryParse(refCharBuf[..charLen], out var mergeRange))
+                if (refBytes.Length <= refCharBuf.Length)
                 {
-                    sink.OnMergeCell(new MergedRegion(
-                        mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
-                        mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
+                    int charLen = Encoding.UTF8.GetChars(refBytes, refCharBuf);
+                    if (AddressParser.TryParse(refCharBuf[..charLen], out var mergeRange))
+                    {
+                        sink.OnMergeCell(new MergedRegion(
+                            mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
+                            mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
+                    }
+                }
+                else
+                {
+                    var refText = Encoding.UTF8.GetString(refBytes);
+                    if (AddressParser.TryParse(refText.AsSpan(), out var mergeRange))
+                    {
+                        sink.OnMergeCell(new MergedRegion(
+                            mergeRange.TopLeft.Row, mergeRange.TopLeft.Column,
+                            mergeRange.BottomRight.Row, mergeRange.BottomRight.Column));
+                    }
                 }
             }
-
             buf.Advance(mergeMatch.EndExclusive);
         }
-    }
-
-    internal static ReadOnlySpan<byte> ExtractUntilClose(ScanBuffer buf, ReadOnlySpan<byte> tagName)
-    {
-        while (true)
+        else if (minPos == cfPos)
         {
-            var span = buf.Span;
-            var status = TryFindEndTag(span, tagName, out int closeIdx, out int closeLen, out _);
-            if (status == TagSearchResult.Found)
-            {
-                var value = span[..closeIdx];
-                buf.Advance(closeIdx + closeLen);
-                return value;
-            }
-
-            // Preserve all current value bytes while refilling across a split closing tag.
-            if (!buf.CanReadMore || !buf.Refill()) { return ReadOnlySpan<byte>.Empty; }
+            sink.OnConditionalFormatting();
+            buf.Advance(cfMatch.EndExclusive);
         }
-    }
-
-    internal static void SkipToEndTag(ScanBuffer buf, ReadOnlySpan<byte> tagName)
-    {
-        while (true)
+        else if (minPos == dvPos)
         {
-            var span = buf.Span;
-            var status = TryFindEndTag(span, tagName, out int idx, out int len, out int partialIndex);
-            if (status == TagSearchResult.Found)
-            {
-                buf.Advance(idx + len);
-                return;
-            }
-
-            if (status == TagSearchResult.NeedMoreData)
-            {
-                if (idx >= 0)
-                {
-                    buf.Advance(idx);
-                    if (!buf.Refill()) { return; }
-                }
-                else if (!RefillKeepingTagStart(buf, span, partialIndex)) { return; }
-                continue;
-            }
-
-            if (!RefillKeepingTagStart(buf, span, partialIndex)) { return; }
-        }
-    }
-
-    private static bool RefillSkipping(ScanBuffer buf, ReadOnlySpan<byte> span, int overlap)
-    {
-        int safe = span.Length - overlap;
-        buf.Advance(safe > 0 ? safe : span.Length);
-        return buf.Refill();
-    }
-
-    private static bool RefillKeepingTagStart(ScanBuffer buf, ReadOnlySpan<byte> span, int partialIndex)
-    {
-        int keepIndex = partialIndex;
-        if (keepIndex < 0)
-        {
-            keepIndex = span.LastIndexOf((byte)'<');
-        }
-
-        if (keepIndex > 0)
-        {
-            buf.Advance(keepIndex);
-            return buf.Refill();
-        }
-
-        if (keepIndex == 0 && buf.CanReadMore)
-        {
-            return buf.Refill();
-        }
-
-        if (partialIndex >= 0)
-        {
-            buf.Advance(Math.Min(1, span.Length));
-            return buf.Refill();
-        }
-
-        return RefillSkipping(buf, span, overlap: 0);
-    }
-
-    private static TagSearchResult TryFindStartTag(
-        ReadOnlySpan<byte> span,
-        ReadOnlySpan<byte> localName,
-        out StartTagMatch match,
-        out int partialIndex)
-    {
-        match = default;
-        partialIndex = -1;
-
-        int search = 0;
-        while (true)
-        {
-            int idx = span[search..].IndexOf(localName);
-            if (idx < 0) { return TagSearchResult.NotFound; }
-
-            idx += search;
-            int nameEnd = idx + localName.Length;
-
-            if (nameEnd >= span.Length)
-            {
-                partialIndex = -1; // RefillKeepingTagStart will find last '<'
-                return TagSearchResult.NeedMoreData;
-            }
-
-            byte boundary = span[nameEnd];
-            if (!IsTagNameBoundary(boundary))
-            {
-                search = idx + 1;
-                continue;
-            }
-
-            if (!TryGetOpenTagStart(span, idx, out int tagStart))
-            {
-                if (tagStart == NeedMoreDataSentinel) { partialIndex = -1; return TagSearchResult.NeedMoreData; }
-                search = idx + 1;
-                continue;
-            }
-
-            int gt = span[nameEnd..].IndexOf((byte)'>');
-            if (gt < 0)
-            {
-                match = new StartTagMatch(tagStart, nameEnd, 0, false);
-                partialIndex = tagStart;
-                return TagSearchResult.NeedMoreData;
-            }
-
-            int endExclusive = nameEnd + gt + 1;
-            match = new StartTagMatch(tagStart, nameEnd, endExclusive, IsSelfClosing(span, nameEnd, endExclusive - 1));
-            return TagSearchResult.Found;
-        }
-    }
-
-    private static TagSearchResult TryFindEndTag(
-        ReadOnlySpan<byte> span,
-        ReadOnlySpan<byte> localName,
-        out int tagStart,
-        out int tagLength,
-        out int partialIndex)
-    {
-        tagStart = -1;
-        tagLength = 0;
-        partialIndex = -1;
-
-        int search = 0;
-        while (true)
-        {
-            int idx = span[search..].IndexOf(localName);
-            if (idx < 0) { return TagSearchResult.NotFound; }
-
-            idx += search;
-            int nameEnd = idx + localName.Length;
-
-            if (nameEnd >= span.Length) { partialIndex = -1; return TagSearchResult.NeedMoreData; }
-
-            int closeGt = FindCloseAngleBracket(span, nameEnd);
-            if (closeGt == -2) { search = idx + 1; continue; }
-            if (closeGt == -1) { partialIndex = -1; return TagSearchResult.NeedMoreData; }
-
-            if (!TryGetCloseTagStart(span, idx, out tagStart))
-            {
-                if (tagStart == NeedMoreDataSentinel) { tagStart = -1; partialIndex = -1; return TagSearchResult.NeedMoreData; }
-                tagStart = -1;
-                search = idx + 1;
-                continue;
-            }
-
-            tagLength = closeGt - tagStart + 1;
-            return TagSearchResult.Found;
-        }
-    }
-
-    /// <summary>
-    /// Starting at <paramref name="cursor"/>, skips optional whitespace and returns the
-    /// index of the closing '&gt;'. Returns -1 if span is exhausted (need more data),
-    /// or -2 if a non-whitespace/non-'&gt;' char is found (not a valid end tag).
-    /// </summary>
-    private static int FindCloseAngleBracket(ReadOnlySpan<byte> span, int cursor)
-    {
-        var slice = span[cursor..];
-        int idx = slice.IndexOfAnyExcept(s_xmlWhitespace);
-        if (idx < 0)
-        {
-            return -1;
-        }
-
-        return slice[idx] == (byte)'>' ? cursor + idx : -2;
-    }
-
-    private const int NeedMoreDataSentinel = int.MinValue;
-
-    /// <summary>
-    /// Looks backward from <paramref name="nameIdx"/> to confirm a start tag opening.
-    /// Sets <paramref name="tagStart"/> to the '&lt;' index on success.
-    /// Returns false with <see cref="NeedMoreDataSentinel"/> if there is not enough preceding context.
-    /// </summary>
-    private static bool TryGetOpenTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
-    {
-        tagStart = NeedMoreDataSentinel;
-        if (nameIdx == 0) { return false; }
-
-        byte before = span[nameIdx - 1];
-        if (before == (byte)'<') { tagStart = nameIdx - 1; return true; }
-
-        if (before == (byte)':')
-        {
-            int i = nameIdx - 2;
-            while (i >= 0 && IsValidPrefixChar(span[i])) { i--; }
-            if (i < 0) { return false; } // need more context
-            if (span[i] == (byte)'<') { tagStart = i; return true; }
-        }
-
-        tagStart = -2;
-        return false;
-    }
-
-    /// <summary>
-    /// Looks backward from <paramref name="nameIdx"/> to confirm an end tag opening.
-    /// Sets <paramref name="tagStart"/> to the '&lt;' index on success.
-    /// Returns false with <see cref="NeedMoreDataSentinel"/> if there is not enough preceding context.
-    /// </summary>
-    private static bool TryGetCloseTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
-    {
-        tagStart = NeedMoreDataSentinel;
-        if (nameIdx < 2) { return false; }
-
-        byte before = span[nameIdx - 1];
-        if (before == (byte)'/' && span[nameIdx - 2] == (byte)'<') { tagStart = nameIdx - 2; return true; }
-
-        if (before == (byte)':')
-        {
-            int i = nameIdx - 2;
-            while (i >= 0 && IsValidPrefixChar(span[i])) { i--; }
-            if (i < 1) { return false; } // need more context
-            if (span[i] == (byte)'/' && span[i - 1] == (byte)'<') { tagStart = i - 1; return true; }
-        }
-
-        tagStart = -2;
-        return false;
-    }
-
-    private static bool IsSelfClosing(ReadOnlySpan<byte> span, int attrStart, int gtIndex)
-    {
-        for (int i = gtIndex - 1; i >= attrStart; i--)
-        {
-            byte ch = span[i];
-            if (IsXmlWhitespace(ch)) { continue; }
-            return ch == (byte)'/';
-        }
-
-        return false;
-    }
-
-    private static bool IsTagNameBoundary(byte ch) => s_tagBoundaries.Contains(ch);
-
-    private static bool IsXmlWhitespace(byte ch) => s_xmlWhitespace.Contains(ch);
-
-    private static bool IsValidPrefixChar(byte ch) =>
-        ch is >= (byte)'a' and <= (byte)'z'
-            or >= (byte)'A' and <= (byte)'Z'
-            or >= (byte)'0' and <= (byte)'9'
-            or (byte)'_'
-            or (byte)'-'
-            or (byte)'.';
-
-    private static int MaxPartial(int left, int right) => left >= right ? left : right;
-
-    private static void AccumulateInlineText(
-        ReadOnlySpan<byte> bytes, ref string? first, ref StringBuilder? sb)
-    {
-        var cell = Utf8CellDecoder.Decode(bytes, CellDataKind.InlineString, 0, SharedStringTable.Empty, StyleTable.Default, false);
-        if (cell.CellType != CellType.Text)
-        {
-            return;
-        }
-
-        var text = cell.AsText();
-        if (first is null)
-        {
-            first = text;
+            sink.OnDataValidation();
+            buf.Advance(dvMatch.EndExclusive);
         }
         else
         {
-            (sb ??= new StringBuilder(first)).Append(text);
+            sink.OnHyperlink();
+            buf.Advance(hyperMatch.EndExclusive);
         }
     }
 
-    private enum TagSearchResult
-    {
-        NotFound,
-        Found,
-        NeedMoreData,
-    }
-
-    [StructLayout(LayoutKind.Auto)]
-    private readonly struct StartTagMatch(int start, int afterName, int endExclusive, bool isEmptyElement)
-    {
-        internal int Start { get; } = start;
-        internal int AfterName { get; } = afterName;
-        internal int EndExclusive { get; } = endExclusive;
-        internal bool IsEmptyElement { get; } = isEmptyElement;
-    }
 }

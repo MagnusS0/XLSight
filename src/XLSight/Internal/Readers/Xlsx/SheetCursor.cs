@@ -1,6 +1,7 @@
 using System.Buffers;
 using XLSight.Internal.Metadata;
 using XLSight.Models;
+using static XLSight.Internal.Readers.Xlsx.XmlByteReader;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -52,7 +53,7 @@ internal sealed class SheetCursor : IDisposable
         _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
         _buf = new ScanBuffer(entryStream);
 
-        if (!XlsxSheetScanner.SeekToSheetData(_buf, entryStream, seekHint))
+        if (!XlsxSheetScanner.SeekToSheetData(_buf, entryStream, seekHint, out _))
         {
             _done = true;
         }
@@ -85,11 +86,13 @@ internal sealed class SheetCursor : IDisposable
 
         while (true)
         {
-            if (!XlsxSheetScanner.TryReadRowStart(_buf, ref _lastRow))
+            if (!XlsxSheetScanner.TryReadRowStart(_buf, ref _lastRow, out bool emptyRow))
             {
                 _done = true;
                 return false;
             }
+
+            if (emptyRow) { continue; }
 
             int rowIndex = _lastRow;
 
@@ -101,7 +104,7 @@ internal sealed class SheetCursor : IDisposable
 
             if (!_range.IsUnbounded && rowIndex < _range.TopLeft.Row)
             {
-                XlsxSheetScanner.SkipToEndTag(_buf, XlsxSheetScanner.TagRow);
+                SkipToEndTag(_buf, XlsxSheetScanner.TagRow);
                 continue;
             }
 

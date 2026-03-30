@@ -1,9 +1,9 @@
-using XLSight.Internal.Metadata;
 using System.Buffers.Text;
 using System.Net;
 using System.Text;
-using XLSight.Models;
+using XLSight.Internal.Metadata;
 using XLSight.Internal.Sinks;
+using XLSight.Models;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -31,46 +31,46 @@ internal static class Utf8CellDecoder
         switch (kind)
         {
             case CellDataKind.Number:
-            {
-                return DecodeNumber(valueBytes, styleIndex, styles, isDate1904);
-            }
+                {
+                    return DecodeNumber(valueBytes, styleIndex, styles, isDate1904);
+                }
 
             case CellDataKind.SharedString:
-            {
-                if (!Utf8Parser.TryParse(valueBytes, out int idx, out _))
                 {
-                    return ExcelCellValue.Empty;
-                }
+                    if (!Utf8Parser.TryParse(valueBytes, out int idx, out _))
+                    {
+                        return ExcelCellValue.Empty;
+                    }
 
-                if ((uint)idx >= (uint)sharedStrings.Count)
-                {
-                    return ExcelCellValue.Empty;
-                }
+                    if ((uint)idx >= (uint)sharedStrings.Count)
+                    {
+                        return ExcelCellValue.Empty;
+                    }
 
-                return ExcelCellValue.FromSharedString(sharedStrings.GetString(idx), idx);
-            }
+                    return ExcelCellValue.FromSharedString(sharedStrings.GetString(idx), idx);
+                }
 
             case CellDataKind.Boolean:
-            {
-                return ExcelCellValue.FromBoolean(valueBytes[0] == (byte)'1');
-            }
+                {
+                    return ExcelCellValue.FromBoolean(valueBytes[0] == (byte)'1');
+                }
 
             case CellDataKind.Error:
-            {
-                return ExcelCellValue.FromError(Encoding.UTF8.GetString(valueBytes));
-            }
+                {
+                    return ExcelCellValue.FromError(Encoding.UTF8.GetString(valueBytes));
+                }
 
             case CellDataKind.FormulaString:
             case CellDataKind.InlineString:
-            {
-                // Slow path: allocate string and unescape XML entities via WebUtility.HtmlDecode.
-                return ExcelCellValue.FromText(UnescapeXml(Encoding.UTF8.GetString(valueBytes)));
-            }
+                {
+                    // Slow path: allocate string and unescape XML entities via WebUtility.HtmlDecode.
+                    return ExcelCellValue.FromText(UnescapeXml(Encoding.UTF8.GetString(valueBytes)));
+                }
 
             default:
-            {
-                return ExcelCellValue.Empty;
-            }
+                {
+                    return ExcelCellValue.Empty;
+                }
         }
     }
 

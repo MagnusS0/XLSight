@@ -1,11 +1,11 @@
-using XLSight.Tests.Infrastructure;
 using System.Text;
-using Xunit;
+using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Models;
-using XLSight.Internal.Metadata;
+using XLSight.Tests.Infrastructure;
+using Xunit;
 
-namespace XLSight.Tests.ByteEngine;
+namespace XLSight.Tests.Readers.Xlsx;
 
 /// <summary>
 /// Correctness tests for <see cref="SheetCursor"/>.

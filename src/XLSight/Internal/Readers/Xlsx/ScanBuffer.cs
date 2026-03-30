@@ -44,6 +44,7 @@ internal sealed class ScanBuffer : IDisposable
     /// <summary>Current start index — saved by <see cref="SheetCursor.TryParseNext"/> for rollback.</summary>
     internal int Start => _start;
 
+
     /// <summary>
     /// Restores the start index to a previously saved value.
     /// Only valid when <see cref="NoIO"/> was true during the parse attempt (no compaction occurred).
