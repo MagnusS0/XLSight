@@ -1,7 +1,7 @@
 using System.IO.Compression;
 using System.Text;
-using Xunit;
 using XLSight.Internal.Packaging;
+using Xunit;
 
 namespace XLSight.Tests.Packaging;
 
@@ -59,6 +59,21 @@ public sealed class XlsxPackageTests
         Assert.Equal("xl/workbook.xml", PathNormalizer.Normalize("xl\\workbook.xml"));
     }
 
+
+    [Fact]
+    public async Task OpenAsync_WithInvalidZip_ThrowsAndDisposesOwnedStream()
+    {
+        var stream = new ThrowOnDisposeMemoryStream(Encoding.UTF8.GetBytes("not-a-zip"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        {
+            await XlsxPackage.OpenAsync(stream, ownsStream: true, cancellationToken: TestContext.Current.CancellationToken);
+        });
+
+        Assert.True(stream.DisposeCalled);
+    }
+
+
     private static MemoryStream CreatePackage(params (string Path, string Content)[] entries)
     {
         var stream = new MemoryStream();
@@ -76,4 +91,26 @@ public sealed class XlsxPackageTests
         stream.Position = 0;
         return stream;
     }
+
+
+    private sealed class ThrowOnDisposeMemoryStream : MemoryStream
+    {
+        public bool DisposeCalled { get; private set; }
+
+        public ThrowOnDisposeMemoryStream(byte[] buffer)
+            : base(buffer, writable: false)
+        {
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                DisposeCalled = true;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
 }

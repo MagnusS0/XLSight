@@ -71,14 +71,7 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
 
-        string normalizedPath = PathNormalizer.Normalize(path);
-        return _archive.GetEntry(normalizedPath)
-            ?? _archive.GetEntry(path)
-            ?? _archive.Entries.FirstOrDefault(entry =>
-                string.Equals(
-                    PathNormalizer.Normalize(entry.FullName),
-                    normalizedPath,
-                    StringComparison.OrdinalIgnoreCase));
+        return FindEntry(_archive, path);
     }
 
     /// <summary>
@@ -97,11 +90,7 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
                                 bufferSize: 4096, useAsync: false);
         var zip = new ZipArchive(fs, ZipArchiveMode.Read, leaveOpen: false);
 
-        string normalizedPath = PathNormalizer.Normalize(entryPath);
-        var entry = zip.GetEntry(normalizedPath)
-            ?? zip.GetEntry(entryPath)
-            ?? zip.Entries.FirstOrDefault(e =>
-                string.Equals(PathNormalizer.Normalize(e.FullName), normalizedPath, StringComparison.OrdinalIgnoreCase));
+        var entry = FindEntry(zip, entryPath);
 
         if (entry is null)
         {
@@ -110,6 +99,18 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         }
 
         return new OwnedEntryStream(new BufferedStream(entry.Open(), 65536), zip);
+    }
+
+    private static ZipArchiveEntry? FindEntry(ZipArchive archive, string path)
+    {
+        string normalizedPath = PathNormalizer.Normalize(path);
+        return archive.GetEntry(normalizedPath)
+            ?? archive.GetEntry(path)
+            ?? archive.Entries.FirstOrDefault(entry =>
+                string.Equals(
+                    PathNormalizer.Normalize(entry.FullName),
+                    normalizedPath,
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     public void Dispose()
@@ -151,10 +152,10 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
 /// </summary>
 file sealed class OwnedEntryStream(Stream inner, IDisposable owner) : Stream
 {
-    public override bool CanRead  => inner.CanRead;
-    public override bool CanSeek  => inner.CanSeek;
+    public override bool CanRead => inner.CanRead;
+    public override bool CanSeek => inner.CanSeek;
     public override bool CanWrite => inner.CanWrite;
-    public override long Length   => inner.Length;
+    public override long Length => inner.Length;
 
     public override long Position
     {
@@ -162,12 +163,12 @@ file sealed class OwnedEntryStream(Stream inner, IDisposable owner) : Stream
         set => inner.Position = value;
     }
 
-    public override void  Flush()                                              => inner.Flush();
-    public override int   Read(byte[] buffer, int offset, int count)           => inner.Read(buffer, offset, count);
-    public override int   Read(Span<byte> buffer)                              => inner.Read(buffer);
-    public override long  Seek(long offset, SeekOrigin origin)                 => inner.Seek(offset, origin);
-    public override void  SetLength(long value)                                => inner.SetLength(value);
-    public override void  Write(byte[] buffer, int offset, int count)          => inner.Write(buffer, offset, count);
+    public override void Flush() => inner.Flush();
+    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+    public override int Read(Span<byte> buffer) => inner.Read(buffer);
+    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+    public override void SetLength(long value) => inner.SetLength(value);
+    public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
         => inner.ReadAsync(buffer, offset, count, ct);
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)

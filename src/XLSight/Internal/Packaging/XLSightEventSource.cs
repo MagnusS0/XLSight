@@ -25,9 +25,4 @@ internal sealed class XLSightEventSource : EventSource
     [Event(6, Level = EventLevel.Verbose)]
     internal void AnalyzeSheetStop() => WriteEvent(6);
 
-    [Event(7, Level = EventLevel.Verbose)]
-    internal void ScanStart(string entryPath) => WriteEvent(7, entryPath);
-
-    [Event(8, Level = EventLevel.Verbose)]
-    internal void ScanStop() => WriteEvent(8);
 }
