@@ -18,6 +18,13 @@ internal interface IByteSheetSink
     /// </summary>
     public bool NeedsDecodedValue { get; }
 
+    /// <summary>
+    /// When <see langword="true"/>, the scanner peeks inside each cell for a <c>&lt;f&gt;</c> tag
+    /// and calls <see cref="OnFormula"/> when one is found.
+    /// Implement as a compile-time constant so the JIT can dead-code-eliminate the peek.
+    /// </summary>
+    public bool TracksFormulas { get; }
+
     /// <summary>Called when a <c>&lt;dimension&gt;</c> element is found with the sheet's declared used range.</summary>
     public void OnDimension(in ExcelRange dimension);
 
@@ -38,8 +45,23 @@ internal interface IByteSheetSink
     /// </param>
     public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex);
 
+    /// <summary>
+    /// Called when a formula (<c>&lt;f&gt;</c>) is detected inside a cell.
+    /// Only called when <see cref="TracksFormulas"/> is <see langword="true"/>.
+    /// </summary>
+    public void OnFormula(int column, bool isArray);
+
     /// <summary>Called for each <c>&lt;mergeCell&gt;</c> element.</summary>
     public void OnMergeCell(in MergedRegion region);
+
+    /// <summary>Called for each <c>&lt;conditionalFormatting&gt;</c> element found after <c>&lt;/sheetData&gt;</c>.</summary>
+    public void OnConditionalFormatting();
+
+    /// <summary>Called for each <c>&lt;dataValidation&gt;</c> element found after <c>&lt;/sheetData&gt;</c>.</summary>
+    public void OnDataValidation();
+
+    /// <summary>Called for each <c>&lt;hyperlink&gt;</c> element found after <c>&lt;/sheetData&gt;</c>.</summary>
+    public void OnHyperlink();
 
     /// <summary>Called when scanning completes (normal end or early termination).</summary>
     public void OnEnd();

@@ -1,13 +1,16 @@
 using System.IO.Compression;
 using System.Text;
-using Xunit;
 using XLSight.Models.Analysis;
+using Xunit;
 
 namespace XLSight.Tests.Analysis;
 
 public sealed class WorkbookAnalysisTests
 {
     // --- Shared XML fragments ---
+
+    private static string TestFilePath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, "TestData", fileName);
 
     private const string RelsXmlTwoSheets = """
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -276,6 +279,40 @@ public sealed class WorkbookAnalysisTests
     }
 
     [Fact]
+    public void AnalyzeSheet_ExactLevel_ReturnsOnlyExactMetadata()
+    {
+        using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlWithMerge);
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+
+        SheetInfo info = workbook.AnalyzeSheet("Data", AnalysisLevel.Exact);
+
+        Assert.Equal(AnalysisLevel.Exact, info.Level);
+        Assert.False(info.HasObserved);
+        Assert.False(info.HasInferred);
+        Assert.Single(info.MergedRegions);
+        Assert.Throws<InvalidOperationException>(() => _ = info.RowCount);
+        Assert.Throws<InvalidOperationException>(() => _ = info.InferredHeaderRowIndex);
+    }
+
+    [Fact]
+    public void AnalyzeSheet_ObservedLevel_ReturnsObservedWithoutInference()
+    {
+        using var ms = BuildWorkbook(
+            WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlHeaderThenData, sstXml: SstXmlNameScore);
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+
+        SheetInfo info = workbook.AnalyzeSheet("Data", AnalysisLevel.Observed);
+
+        Assert.Equal(AnalysisLevel.Observed, info.Level);
+        Assert.True(info.HasObserved);
+        Assert.False(info.HasInferred);
+        Assert.Equal(2, info.RowCount);
+        Assert.Equal(2, info.Columns.Count);
+        Assert.All(info.Columns, column => Assert.Null(column.InferredHeader));
+        Assert.Throws<InvalidOperationException>(() => _ = info.InferredHeaderRowIndex);
+    }
+
+    [Fact]
     public void AnalyzeSheet_AfterDispose_ThrowsObjectDisposedException()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, EmptySheetXml);
@@ -283,5 +320,82 @@ public sealed class WorkbookAnalysisTests
         workbook.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => workbook.AnalyzeSheet("Data"));
+    }
+
+    [Fact]
+    public void Analyze_ComplexWorkbook_SurfacesChartsAndSheetArtifacts()
+    {
+        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+
+        WorkbookInfo info = workbook.Analyze();
+
+        Assert.Equal(4, info.Sheets.Count);
+        Assert.Equal(3, info.Charts.Count);
+        Assert.Single(info.PivotTables);
+
+        SheetInfo calculator = Assert.Single(
+            info.Sheets,
+            s => string.Equals(s.SheetName, "Calculator", StringComparison.Ordinal));
+        Assert.Equal(2, calculator.Exact.ConditionalFormattingCount);
+        Assert.Contains(
+            calculator.Observed.FormulaColumns,
+            c => string.Equals(c.ColumnLabel, "J", StringComparison.Ordinal) && c.FormulaCount == 42);
+        Assert.NotEmpty(calculator.Inferred.Regions);
+
+        SheetInfo charts = Assert.Single(
+            info.Sheets,
+            s => string.Equals(s.SheetName, "Charts", StringComparison.Ordinal));
+        Assert.Equal(1, charts.Exact.DrawingCount);
+        Assert.Equal(3, charts.Exact.Charts.Count);
+        Assert.Contains(charts.Exact.Charts, c => c.PartPath.EndsWith("chart1.xml", StringComparison.Ordinal));
+        Assert.Contains(charts.Inferred.Regions, region => region.ColumnCount >= 3);
+
+        SheetInfo pivotSheet = Assert.Single(
+            info.Sheets,
+            s => string.Equals(s.SheetName, "Pivot-Analysis", StringComparison.Ordinal));
+        Assert.Single(pivotSheet.Exact.PivotTables);
+        Assert.Equal("Pivot-Analysis", pivotSheet.Exact.PivotTables[0].Sheet);
+    }
+
+    [Fact]
+    public void Analyze_ComplexWorkbook_SeparatesValueAndDeclaredRanges()
+    {
+        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+
+        SheetInfo info = workbook.AnalyzeSheet("Calculator");
+
+        Assert.NotNull(info.Exact.DeclaredDimension);
+        Assert.NotNull(info.Observed.ValueUsedRange);
+        Assert.NotEqual(info.Exact.DeclaredDimension, info.Observed.ValueUsedRange);
+        Assert.Contains(
+            info.Inferred.Warnings,
+            warning => string.Equals(warning.Code, "declared-dimension-mismatch", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ComplexWorkbook_ExactLevel_SkipsObservedAndInference()
+    {
+        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+
+        WorkbookInfo info = workbook.Analyze(AnalysisLevel.Exact);
+
+        Assert.Equal(AnalysisLevel.Exact, info.Level);
+        Assert.False(info.HasObserved);
+        Assert.False(info.HasInferred);
+        Assert.Equal(3, info.Charts.Count);
+        Assert.Single(info.PivotTables);
+
+        SheetInfo charts = Assert.Single(
+            info.Sheets,
+            s => string.Equals(s.SheetName, "Charts", StringComparison.Ordinal));
+        Assert.Equal(1, charts.Exact.DrawingCount);
+        Assert.Equal(3, charts.Exact.Charts.Count);
+        Assert.Throws<InvalidOperationException>(() => _ = charts.UsedRange);
+
+        SheetInfo pivotSheet = Assert.Single(
+            info.Sheets,
+            s => string.Equals(s.SheetName, "Pivot-Analysis", StringComparison.Ordinal));
+        Assert.Single(pivotSheet.Exact.PivotTables);
+        Assert.Throws<InvalidOperationException>(() => _ = pivotSheet.RowCount);
     }
 }

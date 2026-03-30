@@ -19,6 +19,7 @@ internal struct RangeSink : IByteSheetSink
     }
 
     public bool NeedsDecodedValue => true;
+    public bool TracksFormulas => false;
 
     public void OnDimension(in ExcelRange dimension) { }
 
@@ -51,6 +52,10 @@ internal struct RangeSink : IByteSheetSink
         return true;
     }
 
+    public void OnFormula(int column, bool isArray) { }
     public void OnMergeCell(in MergedRegion region) { }
+    public void OnConditionalFormatting() { }
+    public void OnDataValidation() { }
+    public void OnHyperlink() { }
     public void OnEnd() { }
 }

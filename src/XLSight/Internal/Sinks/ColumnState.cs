@@ -15,19 +15,38 @@ internal sealed class ColumnState
     internal int MaxTextLength;
     internal bool HasFormulas;
 
-    // Distinct tracking: shared strings use integer SST index (zero alloc);
-    // inline strings and other scalar types fall back to string representation.
-    internal HashSet<int>?    DistinctSstIds     = new();
-    internal HashSet<string>? DistinctOtherValues = new(StringComparer.Ordinal);
+    // Distinct tracking — typed per-kind to avoid string allocations.
+    // SST: integer index (zero-alloc read); Numbers: double bits; Dates: double bits;
+    // Booleans: two-bit flags; Errors: int code; Inline strings: string (unavoidable).
+    // Each set is nulled out once it hits DistinctCap and DistinctEstimate is latched.
+    internal HashSet<int>? DistinctSstIds = new();
+    internal HashSet<long>? DistinctNumbers = new();  // BitConverter.DoubleToInt64Bits
+    internal HashSet<long>? DistinctDates = new();    // BitConverter.DoubleToInt64Bits
+    internal HashSet<string>? DistinctInlineStrings = new(StringComparer.Ordinal);
+    internal byte BooleanSeen;   // bit 0 = false seen, bit 1 = true seen
     internal int DistinctEstimate;
 
-    /// <summary>Combined distinct count across SST IDs and other values, or the capped estimate.</summary>
-    internal int DistinctCount =>
-        DistinctSstIds is not null || DistinctOtherValues is not null
-            ? (DistinctSstIds?.Count ?? 0) + (DistinctOtherValues?.Count ?? 0)
-            : DistinctEstimate;
-
     private const int DistinctCap = 1000;
+
+    /// <summary>Combined distinct count across all typed sets, or the capped estimate.</summary>
+    internal int DistinctCount
+    {
+        get
+        {
+            if (DistinctEstimate > 0)
+            {
+                return DistinctEstimate;
+            }
+
+            int count = 0;
+            if (DistinctSstIds is not null) { count += DistinctSstIds.Count; }
+            if (DistinctNumbers is not null) { count += DistinctNumbers.Count; }
+            if (DistinctDates is not null) { count += DistinctDates.Count; }
+            if (DistinctInlineStrings is not null) { count += DistinctInlineStrings.Count; }
+            count += BooleanCount > 0 ? System.Numerics.BitOperations.PopCount(BooleanSeen) : 0;
+            return count;
+        }
+    }
 
     /// <summary>
     /// Fast path for <see cref="CellDataKind.SharedString"/> cells.
@@ -50,9 +69,8 @@ internal sealed class ColumnState
             DistinctSstIds.Add(sstIndex);
             if (DistinctSstIds.Count >= DistinctCap)
             {
-                DistinctEstimate = DistinctSstIds.Count;
-                DistinctSstIds = null;
-                DistinctOtherValues = null;
+                DistinctEstimate = DistinctCount;
+                NullAllSets();
             }
         }
     }
@@ -68,7 +86,6 @@ internal sealed class ColumnState
         }
 
         NonEmptyCount++;
-        TrackDistinctOther(value);
 
         switch (value.CellType)
         {
@@ -86,46 +103,61 @@ internal sealed class ColumnState
                     if (num < MinNumeric) { MinNumeric = num; }
                     if (num > MaxNumeric) { MaxNumeric = num; }
                 }
+
+                TrackDistinctLong(ref DistinctNumbers, System.Runtime.CompilerServices.Unsafe.BitCast<double, long>(num));
                 break;
 
             case Models.CellType.Date:
                 DateCount++;
+                TrackDistinctLong(ref DistinctDates, value.AsDate().Ticks);
                 break;
 
             case Models.CellType.Text:
                 TextCount++;
-                int len = value.AsText().Length;
+                string text = value.AsText();
+                int len = text.Length;
                 if (len > MaxTextLength) { MaxTextLength = len; }
+                TrackDistinctString(text);
                 break;
 
             case Models.CellType.Boolean:
                 BooleanCount++;
+                BooleanSeen |= value.AsBoolean() ? (byte)2 : (byte)1;
                 break;
 
             case Models.CellType.Error:
                 ErrorCount++;
                 break;
-
-            case Models.CellType.Formula:
-                HasFormulas = true;
-                break;
         }
     }
 
-    private void TrackDistinctOther(Models.ExcelCellValue value)
+    private void TrackDistinctLong(ref HashSet<long>? set, long key)
     {
-        if (DistinctOtherValues is null)
+        if (set is null) { return; }
+        set.Add(key);
+        if (set.Count >= DistinctCap)
         {
-            return;
+            DistinctEstimate = DistinctCount;
+            NullAllSets();
         }
+    }
 
-        DistinctOtherValues.Add(value.ToString());
-
-        if (DistinctOtherValues.Count >= DistinctCap)
+    private void TrackDistinctString(string value)
+    {
+        if (DistinctInlineStrings is null) { return; }
+        DistinctInlineStrings.Add(value);
+        if (DistinctInlineStrings.Count >= DistinctCap)
         {
-            DistinctEstimate = DistinctOtherValues.Count;
-            DistinctSstIds = null;
-            DistinctOtherValues = null;
+            DistinctEstimate = DistinctCount;
+            NullAllSets();
         }
+    }
+
+    private void NullAllSets()
+    {
+        DistinctSstIds = null;
+        DistinctNumbers = null;
+        DistinctDates = null;
+        DistinctInlineStrings = null;
     }
 }

@@ -1,3 +1,4 @@
+using System.Buffers;
 using XLSight.Models;
 using XLSight.Models.Analysis;
 
@@ -11,24 +12,35 @@ internal static class ColumnProfiler
     /// </summary>
     internal static IReadOnlyList<ColumnProfile> BuildProfiles(
         Dictionary<int, ColumnState> columnStates,
-        Dictionary<int, string> headersByColumn)
+        Dictionary<int, string> headersByColumn,
+        Dictionary<int, int>? formulaCountsByColumn = null)
     {
-        if (columnStates.Count == 0)
+        int count = columnStates.Count;
+        if (count == 0)
         {
             return [];
         }
 
-        var profiles = new List<ColumnProfile>(columnStates.Count);
-        foreach (var (col, state) in columnStates.OrderBy(kv => kv.Key))
+        // Sort column keys without LINQ: rent an int[], sort it, build profiles in order.
+        int[] keys = ArrayPool<int>.Shared.Rent(count);
+        int idx = 0;
+        foreach (int k in columnStates.Keys) { keys[idx++] = k; }
+        Array.Sort(keys, 0, count);
+
+        var profiles = new List<ColumnProfile>(count);
+        for (int i = 0; i < count; i++)
         {
+            int col = keys[i];
             headersByColumn.TryGetValue(col, out string? header);
-            profiles.Add(BuildProfile(col, state, header));
+            bool hasFormulas = formulaCountsByColumn?.ContainsKey(col) ?? false;
+            profiles.Add(BuildProfile(col, columnStates[col], header, hasFormulas));
         }
 
+        ArrayPool<int>.Shared.Return(keys);
         return profiles;
     }
 
-    private static ColumnProfile BuildProfile(int columnIndex, ColumnState state, string? header)
+    private static ColumnProfile BuildProfile(int columnIndex, ColumnState state, string? header, bool hasFormulas)
     {
         var dominantType = ResolveDominantType(state);
 
@@ -46,7 +58,7 @@ internal static class ColumnProfiler
             MinNumericValue = minNum,
             MaxNumericValue = maxNum,
             MaxTextLength = maxText,
-            HasFormulas = state.HasFormulas,
+            HasFormulas = hasFormulas,
         };
     }
 

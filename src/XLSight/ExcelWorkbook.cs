@@ -1,9 +1,9 @@
 using System.Diagnostics;
+using XLSight.Internal.Packaging;
+using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Internal.Packaging;
 using XLSight.Models;
-using XLSight.Internal.Parsing;
 
 namespace XLSight;
 
@@ -92,7 +92,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         XLSightEventSource.Log.WorkbookOpened("stream");
         var package = await XlsxPackage.OpenAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-        return await CreateFromPackageAsync(package, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        return CreateFromPackageSync(package);
     }
 
     private static async Task<ExcelWorkbook> OpenFileAsyncCore(string filePath, CancellationToken ct)
@@ -100,7 +101,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         XLSightEventSource.Log.WorkbookOpened(filePath);
         var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var package = await XlsxPackage.OpenAsync(fileStream, ownsStream: true, ct).ConfigureAwait(false);
-        return await CreateFromPackageAsync(package, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        return CreateFromPackageSync(package);
     }
 
     private static ExcelWorkbook Create(Stream stream, bool ownsStream = false)
@@ -119,12 +121,6 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         // SST and styles are loaded lazily inside the engine on first use.
         var engine = new XlsxWorkbookReader(package, metadata);
         return new ExcelWorkbook(engine);
-    }
-
-    private static Task<ExcelWorkbook> CreateFromPackageAsync(XlsxPackage package, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        return Task.FromResult(CreateFromPackageSync(package));
     }
 
     /// <summary>Reads a single cell value synchronously.</summary>
@@ -258,16 +254,26 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Analyzes all sheets in the workbook and returns structural information.</summary>
+    /// <param name="level">The analysis depth to execute.</param>
+    /// <param name="maxDegreeOfParallelism">
+    /// Maximum number of sheets to scan concurrently. Pass <c>1</c> to force sequential execution
+    /// (useful in thread-pool-constrained environments such as heavily loaded ASP.NET Core servers).
+    /// Pass <c>-1</c> (default) to let the library choose automatically based on CPU count.
+    /// Only applies when the workbook was opened from a file path.
+    /// </param>
     /// <returns>A workbook info object describing all sheets, named ranges, and workbook properties.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public Models.Analysis.WorkbookInfo Analyze()
+    public Models.Analysis.WorkbookInfo Analyze(
+        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+        int maxDegreeOfParallelism = -1)
     {
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("Analyze");
+        activity?.SetTag("level", level.ToString());
         try
         {
-            return _engine.Analyze();
+            return _engine.Analyze(level, maxDegreeOfParallelism);
         }
         finally
         {
@@ -279,14 +285,32 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a workbook info object.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public async Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(CancellationToken ct = default)
+    public Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(CancellationToken ct)
+        => AnalyzeAsync(Models.Analysis.AnalysisLevel.Full, ct: ct);
+
+    /// <summary>Analyzes all sheets in the workbook asynchronously and returns structural information.</summary>
+    /// <param name="level">The analysis depth to execute.</param>
+    /// <param name="maxDegreeOfParallelism">
+    /// Maximum number of sheets to scan concurrently. Pass <c>1</c> to force sequential execution
+    /// (useful in thread-pool-constrained environments such as heavily loaded ASP.NET Core servers).
+    /// Pass <c>-1</c> (default) to let the library choose automatically. Only applies when the
+    /// workbook was opened from a file path.
+    /// </param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns a workbook info object.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    public async Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(
+        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+        int maxDegreeOfParallelism = -1,
+        CancellationToken ct = default)
     {
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("Analyze");
+        activity?.SetTag("level", level.ToString());
         try
         {
-            return await _engine.AnalyzeAsync(ct).ConfigureAwait(false);
+            return await _engine.AnalyzeAsync(level, maxDegreeOfParallelism, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -296,11 +320,14 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
 
     /// <summary>Analyzes a single sheet and returns its structural information.</summary>
     /// <param name="sheet">The sheet name.</param>
+    /// <param name="level">The analysis depth to execute.</param>
     /// <returns>A sheet info object describing columns, merged regions, tables, and inferred headers.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public Models.Analysis.SheetInfo AnalyzeSheet(string sheet)
+    public Models.Analysis.SheetInfo AnalyzeSheet(
+        string sheet,
+        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -308,9 +335,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         XLSightEventSource.Log.AnalyzeSheetStart(sheet);
         using var activity = ActivitySource.StartActivity("AnalyzeSheet");
         activity?.SetTag("sheet", sheet);
+        activity?.SetTag("level", level.ToString());
         try
         {
-            return _engine.AnalyzeSheet(sheet);
+            return _engine.AnalyzeSheet(sheet, level);
         }
         finally
         {
@@ -326,16 +354,31 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public async Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct = default)
+    public Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct)
+        => AnalyzeSheetAsync(sheet, Models.Analysis.AnalysisLevel.Full, ct);
+
+    /// <summary>Analyzes a single sheet asynchronously and returns its structural information.</summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="level">The analysis depth to execute.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns a sheet info object.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public async Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(
+        string sheet,
+        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("AnalyzeSheet");
         activity?.SetTag("sheet", sheet);
+        activity?.SetTag("level", level.ToString());
         try
         {
-            return await _engine.AnalyzeSheetAsync(sheet, ct).ConfigureAwait(false);
+            return await _engine.AnalyzeSheetAsync(sheet, level, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -358,8 +401,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        // Known limitation: the busy lock is not held across async enumeration.
-        // Concurrent access during iteration is the caller's responsibility.
+        // Each enumeration opens its own stream — concurrent iterations are safe.
         return _engine.StreamRangeAsync(sheet, ExcelRange.Unbounded, mode, ct);
     }
 
@@ -382,8 +424,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(range);
         ThrowIfDisposed();
-        // Known limitation: the busy lock is not held across async enumeration.
-        // Concurrent access during iteration is the caller's responsibility.
+        // Each enumeration opens its own stream — concurrent iterations are safe.
         var parsedRange = AddressParser.Parse(range.AsSpan());
         return _engine.StreamRangeAsync(sheet, parsedRange, mode, ct);
     }
@@ -399,15 +440,9 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
-        EnterOperation();
-        try
-        {
-            return _engine.StreamRange(sheet, ExcelRange.Unbounded, mode);
-        }
-        finally
-        {
-            ExitOperation();
-        }
+        // Each enumeration opens its own stream — concurrent iterations are safe.
+        // The busy guard is intentionally omitted: it would release before iteration begins anyway.
+        return _engine.StreamRange(sheet, ExcelRange.Unbounded, mode);
     }
 
     /// <summary>Streams a range of rows synchronously without buffering.</summary>
@@ -427,16 +462,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(range);
         ThrowIfDisposed();
-        EnterOperation();
-        try
-        {
-            var parsedRange = AddressParser.Parse(range.AsSpan());
-            return _engine.StreamRange(sheet, parsedRange, mode);
-        }
-        finally
-        {
-            ExitOperation();
-        }
+        // Each enumeration opens its own stream — concurrent iterations are safe.
+        // The busy guard is intentionally omitted: it would release before iteration begins anyway.
+        var parsedRange = AddressParser.Parse(range.AsSpan());
+        return _engine.StreamRange(sheet, parsedRange, mode);
     }
 
     /// <summary>Releases all resources used by this workbook.</summary>
