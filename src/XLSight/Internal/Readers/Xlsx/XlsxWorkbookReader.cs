@@ -121,10 +121,46 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         };
     }
 
-    public Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct)
+    public async Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(ReadRangeCore(sheetName, range, mode));
+        ThrowIfDisposed();
+
+        if (range.IsUnbounded)
+        {
+            throw new RangeTooLargeException(0, ExcelLimits.MaxCells);
+        }
+
+        long cellCount = (long)range.Width * range.Height;
+        if (cellCount > ExcelLimits.MaxCells)
+        {
+            throw new RangeTooLargeException(cellCount, ExcelLimits.MaxCells);
+        }
+
+        int startRow = range.TopLeft.Row;
+        int startCol = range.TopLeft.Column;
+        int endCol = range.BottomRight.Column;
+        int width = range.Width;
+        var buffer = new ExcelCellValue[cellCount];
+
+        await foreach (var row in StreamRangeAsync(sheetName, range, mode, ct).ConfigureAwait(false))
+        {
+            int rowOffset = (row.RowIndex - startRow) * width;
+            for (int c = startCol; c <= endCol; c++)
+            {
+                buffer[rowOffset + (c - startCol)] = row.GetCell(c);
+            }
+        }
+
+        return new RangeResult
+        {
+            Sheet = sheetName,
+            StartRow = startRow,
+            StartColumn = startCol,
+            Width = width,
+            Height = range.Height,
+            Cells = buffer,
+        };
     }
 
     public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1)
@@ -192,7 +228,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             foreach (var (sheet, i) in _metadata.Sheets.Select((s, i) => (s, i)))
             {
                 ct.ThrowIfCancellationRequested();
-                sheets.Add(await AnalyzeSheetAsync(sheet, level, analysisMetadata, i, ct).ConfigureAwait(false));
+                sheets.Add(await Task.Run(() => AnalyzeSheetCore(sheet, i, analysisMetadata, level), ct).ConfigureAwait(false));
             }
         }
 
@@ -220,29 +256,14 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         return [.. results];
     }
 
-    public async Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, CancellationToken ct)
+    public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
         AnalyzerMetadata analysisMetadata = _analyzerMetadata.Value;
         var (sheet, sheetIndex) = FindSheetWithIndex(sheetName);
-        return await AnalyzeSheetAsync(sheet, level, analysisMetadata, sheetIndex, ct).ConfigureAwait(false);
-    }
-
-    private async Task<SheetInfo> AnalyzeSheetAsync(
-        WorkbookMetadata.WorkbookSheetInfo sheet,
-        AnalysisLevel level,
-        AnalyzerMetadata analysisMetadata,
-        int sheetIndex,
-        CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-
-        using var sheetStream = OpenSheetStream(sheet.Path);
-        var sink = new AnalysisSink(_sharedStrings.Value, level);
-        XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
-        return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
+        return Task.Run(() => AnalyzeSheetCore(sheet, sheetIndex, analysisMetadata, level), ct);
     }
 
     private SheetInfo AnalyzeSheetCore(

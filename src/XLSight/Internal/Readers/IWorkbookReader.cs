@@ -14,7 +14,6 @@ internal interface IWorkbookReader : IDisposable, IAsyncDisposable
     public CellResult ReadCell(string sheetName, ExcelAddress address, ReadMode mode);
     public RangeResult ReadRange(string sheetName, ExcelRange range, ReadMode mode);
 
-    // Async read — true async comes in Phase 7; delegates to sync for now
     public Task<CellResult> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct);
     public Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct);
 
