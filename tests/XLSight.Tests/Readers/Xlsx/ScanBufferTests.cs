@@ -200,6 +200,77 @@ public sealed class ScanBufferTests
         Assert.False(buf.CanReadMore);
     }
 
+    // ── Partial-read stream ──────────────────────────────────────────────────
+
+    [Fact]
+    public void Refill_WithPartialReadStream_FillsBufferCompletely()
+    {
+        // A stream that returns at most 1 byte per Read call (simulating DeflateStream).
+        // Bug: Refill does a single Read, so only 1 byte would be added to the buffer
+        // instead of filling the available space.
+        const int BufferSize = 65536;
+        using var stream = new ChunkedStream(new byte[BufferSize], chunkSize: 1);
+        using var buf = new ScanBuffer(stream);
+
+        // The initial prime should fill the full buffer, not stop after 1 byte.
+        Assert.Equal(BufferSize, buf.Span.Length);
+    }
+
+    [Fact]
+    public async Task RefillAsync_WithPartialReadStream_FillsBufferCompletely()
+    {
+        const int BufferSize = 65536;
+        const int Remaining = 100;
+        var data = new byte[BufferSize + Remaining];
+        using var stream = new ChunkedStream(data, chunkSize: 1);
+        using var buf = new ScanBuffer(stream);
+        buf.Advance(buf.Span.Length); // consume the initial fill
+
+        bool hasMore = await buf.RefillAsync();
+
+        Assert.True(hasMore);
+        // Should have filled up to Remaining bytes (all that's left), not just 1.
+        Assert.Equal(Remaining, buf.Span.Length);
+    }
+
+    /// <summary>
+    /// A stream that returns at most <c>chunkSize</c> bytes per Read call,
+    /// simulating the partial-read behaviour of <see cref="System.IO.Compression.DeflateStream"/>.
+    /// </summary>
+    private sealed class ChunkedStream(byte[] data, int chunkSize) : Stream
+    {
+        private int _pos;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position { get => _pos; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_pos >= data.Length) { return 0; }
+            int n = Math.Min(chunkSize, Math.Min(count, data.Length - _pos));
+            data.AsSpan(_pos, n).CopyTo(buffer.AsSpan(offset, n));
+            _pos += n;
+            return n;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_pos >= data.Length) { return ValueTask.FromResult(0); }
+            int n = Math.Min(chunkSize, Math.Min(buffer.Length, data.Length - _pos));
+            data.AsSpan(_pos, n).CopyTo(buffer.Span);
+            _pos += n;
+            return ValueTask.FromResult(n);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     // ── Reset ────────────────────────────────────────────────────────────────
 
     [Fact]

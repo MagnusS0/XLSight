@@ -105,21 +105,21 @@ internal sealed class ScanBuffer : IDisposable
             _end = remaining;
         }
 
-        // Fill the rest of the buffer from the stream.
+        // Fill the rest of the buffer from the stream, looping to handle partial reads
+        // (e.g. DeflateStream may return fewer bytes than requested per call).
         if (!_streamDone)
         {
             int space = BufferSize - _end;
-            if (space > 0)
+            while (space > 0)
             {
                 int bytesRead = _source.Read(_buf, _end, space);
                 if (bytesRead == 0)
                 {
                     _streamDone = true;
+                    break;
                 }
-                else
-                {
-                    _end += bytesRead;
-                }
+                _end += bytesRead;
+                space -= bytesRead;
             }
         }
 
@@ -152,17 +152,16 @@ internal sealed class ScanBuffer : IDisposable
         if (!_streamDone)
         {
             int space = _buf.Length - _end;
-            if (space > 0)
+            while (space > 0)
             {
                 int bytesRead = await _source.ReadAsync(_buf.AsMemory(_end, space), ct).ConfigureAwait(false);
                 if (bytesRead == 0)
                 {
                     _streamDone = true;
+                    break;
                 }
-                else
-                {
-                    _end += bytesRead;
-                }
+                _end += bytesRead;
+                space -= bytesRead;
             }
         }
 
