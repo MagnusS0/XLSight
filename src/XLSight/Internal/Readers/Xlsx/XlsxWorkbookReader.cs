@@ -357,8 +357,8 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             return;
         }
 
-        _package.Dispose();
         _disposed = true;
+        _package.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -368,8 +368,8 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             return;
         }
 
-        await _package.DisposeAsync().ConfigureAwait(false);
         _disposed = true;
+        await _package.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>

@@ -187,7 +187,14 @@ file sealed class OwnedEntryStream(Stream inner, IDisposable owner) : Stream
     public override async ValueTask DisposeAsync()
     {
         await inner.DisposeAsync().ConfigureAwait(false);
-        owner.Dispose();
+        if (owner is IAsyncDisposable asyncOwner)
+        {
+            await asyncOwner.DisposeAsync().ConfigureAwait(false);
+        }
+        else
+        {
+            owner.Dispose();
+        }
         await base.DisposeAsync().ConfigureAwait(false);
     }
 }

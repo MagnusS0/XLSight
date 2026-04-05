@@ -511,7 +511,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    private void ExitOperation() => Volatile.Write(ref _busy, 0);
+    private void ExitOperation()
+    {
+        if (!_engine.IsFileBacked)
+        {
+            Volatile.Write(ref _busy, 0);
+        }
+    }
 
     private void ThrowIfDisposed()
     {
