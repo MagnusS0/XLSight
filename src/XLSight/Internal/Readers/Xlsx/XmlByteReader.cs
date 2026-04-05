@@ -296,7 +296,7 @@ internal static class XmlByteReader
         return false;
     }
 
-    private static bool IsValidPrefixChar(byte ch) =>
+    internal static bool IsValidPrefixChar(byte ch) =>
         ch is >= (byte)'a' and <= (byte)'z'
             or >= (byte)'A' and <= (byte)'Z'
             or >= (byte)'0' and <= (byte)'9'

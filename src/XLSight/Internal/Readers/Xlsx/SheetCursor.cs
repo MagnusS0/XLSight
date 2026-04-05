@@ -127,53 +127,29 @@ internal sealed class SheetCursor : IDisposable
     /// (check <see cref="IsSheetDone"/>).
     /// </summary>
     /// <remarks>
-    /// <para>
     /// Implements the inner-sync half of the outer-async / inner-sync streaming loop.
-    /// The buffer's <see cref="ScanBuffer.NoIO"/> flag is set for the duration of the
-    /// <see cref="MoveNext"/> call so that any synchronous <see cref="ScanBuffer.Refill"/>
-    /// call inside the scanner is a no-op.  If a refill was skipped (<see cref="ScanBuffer.IOSkipped"/>),
-    /// the buffer start pointer is restored via <see cref="ScanBuffer.RewindTo"/> so that
-    /// <see cref="RefillAsync"/> can compact from the original position and reload data.
-    /// </para>
-    /// <para>
     /// Rows whose XML spans a buffer boundary (extremely rare with the 64 KB buffer) will
     /// trigger a roll-back and retry after the next async refill — they are never skipped
     /// or partially yielded.
-    /// </para>
     /// </remarks>
     internal bool TryParseNext(out ExcelRow row)
     {
         row = default;
         if (_done) { return false; }
 
-        // Save cursor state so we can roll back cleanly if a synchronous I/O attempt is
-        // skipped.  Because NoIO prevents compaction, _start is unchanged by the attempted
-        // parse and this saved value is always valid for RewindTo.
-        int savedStart = _buf.Start;
         int savedLastRow = _lastRow;
 
-        _buf.IOSkipped = false;
-        _buf.NoIO = true;
-        bool result = MoveNext();
-        _buf.NoIO = false;
+        bool parsed = _buf.TryWithoutIO(MoveNext);
 
-        if (result && !_buf.IOSkipped)
+        if (parsed)
         {
-            // Complete row decoded entirely from buffered data — safe to yield.
             row = _current;
             return true;
         }
 
-        // If sync I/O was skipped, roll back and let the outer async loop refill.
-        // If I/O was not skipped and MoveNext returned false, keep _done as-is so
-        // the async loop can terminate instead of spinning forever.
-        if (_buf.IOSkipped)
-        {
-            _buf.RewindTo(savedStart);
-            _lastRow = savedLastRow;
-            _done = false;
-        }
-
+        // Roll back row counter so it is re-parsed correctly after the next refill.
+        _lastRow = savedLastRow;
+        _done = false;
         return false;
     }
 

@@ -17,8 +17,8 @@ internal static class SharedStringsByteParser
 
     internal static SharedStringTable Parse(Stream stream)
     {
-        byte[] arenaBuf = ArrayPool<byte>.Shared.Rent(16 * 1024 * 1024);
-        long[] infoBuf = ArrayPool<long>.Shared.Rent(1024 * 1024);
+        byte[] arenaBuf = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        long[] infoBuf = ArrayPool<long>.Shared.Rent(512);
         int arenaOffset = 0;
         int infoCount = 0;
 
@@ -459,13 +459,7 @@ internal static class SharedStringsByteParser
         infoBuf = bigger;
     }
 
-    private static bool IsTagNameBoundary(byte b) =>
-        b == (byte)'>' || b == (byte)'/' || b == (byte)' ' ||
-        b == (byte)'\t' || b == (byte)'\r' || b == (byte)'\n';
+    private static bool IsTagNameBoundary(byte b) => XmlByteReader.IsTagNameBoundary(b);
 
-    private static bool IsValidPrefixChar(byte b) =>
-        (b >= (byte)'a' && b <= (byte)'z') ||
-        (b >= (byte)'A' && b <= (byte)'Z') ||
-        (b >= (byte)'0' && b <= (byte)'9') ||
-        b == (byte)'_' || b == (byte)'-' || b == (byte)'.';
+    private static bool IsValidPrefixChar(byte b) => XmlByteReader.IsValidPrefixChar(b);
 }
