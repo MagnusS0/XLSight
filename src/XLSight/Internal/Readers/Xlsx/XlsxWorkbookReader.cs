@@ -30,28 +30,10 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
                 : AnalyzerMetadataReader.Read(_package, _metadata),
             LazyThreadSafetyMode.ExecutionAndPublication);
         _sheetNames = new Lazy<string[]>(() => _metadata.Sheets.Select(s => s.Name).ToArray(), LazyThreadSafetyMode.PublicationOnly);
-
-        // Warm SST and styles in the background; file-backed packages support concurrent opens.
-        if (package.IsFileBacked)
-        {
-            _ = Task.Run(() => _sharedStrings.Value);
-            _ = Task.Run(() => _styles.Value);
-        }
     }
 
     private SharedStringTable LoadSharedStrings()
     {
-        // Prefer a fresh independent stream so this is safe to call concurrently
-        // (e.g. from the background warm-up task) without touching the shared ZipArchive.
-        var freshStream = _package.TryOpenFreshEntry("xl/sharedStrings.xml");
-        if (freshStream is not null)
-        {
-            using (freshStream)
-            {
-                return SharedStringsParser.Parse(freshStream);
-            }
-        }
-
         var entry = _package.GetEntry("xl/sharedStrings.xml");
         if (entry is null)
         {
@@ -64,15 +46,6 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
 
     private StyleTable LoadStyles()
     {
-        var freshStream = _package.TryOpenFreshEntry("xl/styles.xml");
-        if (freshStream is not null)
-        {
-            using (freshStream)
-            {
-                return StylesParser.Parse(freshStream);
-            }
-        }
-
         var entry = _package.GetEntry("xl/styles.xml");
         if (entry is null)
         {
