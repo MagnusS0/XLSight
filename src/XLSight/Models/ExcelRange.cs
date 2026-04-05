@@ -28,11 +28,15 @@ public readonly record struct ExcelRange
     /// </summary>
     public static readonly ExcelRange Unbounded = new(isUnbounded: true);
 
-    /// <summary>Constructs a bounded rectangular range.</summary>
+    /// <summary>Constructs a bounded rectangular range, normalizing so TopLeft &lt;= BottomRight.</summary>
     public ExcelRange(ExcelAddress topLeft, ExcelAddress bottomRight)
     {
-        TopLeft = topLeft;
-        BottomRight = bottomRight;
+        int minCol = Math.Min(topLeft.Column, bottomRight.Column);
+        int minRow = Math.Min(topLeft.Row, bottomRight.Row);
+        int maxCol = Math.Max(topLeft.Column, bottomRight.Column);
+        int maxRow = Math.Max(topLeft.Row, bottomRight.Row);
+        TopLeft = new ExcelAddress(minCol, minRow);
+        BottomRight = new ExcelAddress(maxCol, maxRow);
         _isUnbounded = false;
     }
 
