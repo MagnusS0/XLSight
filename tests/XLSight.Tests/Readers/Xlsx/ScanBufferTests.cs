@@ -60,26 +60,33 @@ public sealed class ScanBufferTests
         Assert.True(buf.Span.IsEmpty);
     }
 
-    // ── Start / RewindTo ─────────────────────────────────────────────────────
+    // ── TryWithoutIO ─────────────────────────────────────────────────────────
 
     [Fact]
-    public void Start_ReturnsCurrentStartIndex()
+    public void Span_StartsAtFirstByte_OnConstruction()
     {
         using var stream = MakeStream("hello");
         using var buf = new ScanBuffer(stream);
-        int start = buf.Start;
-        Assert.Equal(0, start);
+        Assert.Equal((byte)'h', buf.Span[0]);
     }
 
     [Fact]
-    public void RewindTo_RestoresStartAfterAdvance()
+    public void TryWithoutIO_RevertsToSavedPosition_WhenRefillNeeded()
     {
         using var stream = MakeStream("hello");
         using var buf = new ScanBuffer(stream);
-        int saved = buf.Start;
-        buf.Advance(3);
-        buf.RewindTo(saved);
-        Assert.Equal((byte)'h', buf.Span[0]);
+        buf.Advance(3); // 'l' is at front
+        byte firstByte = buf.Span[0]; // 'l'
+
+        // Parse lambda exhausts the buffer and calls Refill, triggering the IO-skip path.
+        bool result = buf.TryWithoutIO(() =>
+        {
+            buf.Advance(buf.Span.Length);
+            return buf.Refill(); // sets IOSkipped in noIO mode, returns false
+        });
+
+        Assert.False(result);
+        Assert.Equal(firstByte, buf.Span[0]); // start rewound to pre-parse position
     }
 
     // ── Refill (synchronous) ─────────────────────────────────────────────────
@@ -105,45 +112,66 @@ public sealed class ScanBufferTests
         Assert.Equal((byte)' ', buf.Span[0]);
     }
 
-    // ── NoIO mode ────────────────────────────────────────────────────────────
+    // ── TryWithoutIO / noIO mode ─────────────────────────────────────────────
 
     [Fact]
-    public void Refill_WhenNoIOIsTrue_SetsIOSkippedAndReturnsFalse()
+    public void TryWithoutIO_ReturnsFalse_WhenParseNeedsRefill()
     {
         using var stream = MakeStream("hello");
         using var buf = new ScanBuffer(stream);
-        buf.NoIO = true;
-        bool result = buf.Refill();
+
+        bool result = buf.TryWithoutIO(() =>
+        {
+            buf.Advance(buf.Span.Length); // exhaust buffered bytes
+            return buf.Refill();           // Refill in noIO mode → returns false
+        });
+
         Assert.False(result);
-        Assert.True(buf.IOSkipped);
     }
 
     [Fact]
-    public void Refill_WhenNoIOIsTrue_DoesNotChangeBufferLayout()
+    public void TryWithoutIO_SpanUnchanged_WhenRefillNeeded()
     {
         using var stream = MakeStream("hello");
         using var buf = new ScanBuffer(stream);
-        buf.Advance(2); // start at 'l'
-        int startBefore = buf.Start;
-        buf.NoIO = true;
-        buf.Refill();
-        Assert.Equal(startBefore, buf.Start); // no compaction happened
+        buf.Advance(2); // 'l' is at front
+        byte firstByte = buf.Span[0];
+
+        buf.TryWithoutIO(() =>
+        {
+            buf.Advance(buf.Span.Length);
+            return buf.Refill();
+        });
+
+        // Span start rewound — buffer layout unchanged from before the parse
+        Assert.Equal(firstByte, buf.Span[0]);
     }
 
     // ── RefillAsync ──────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task RefillAsync_ClearsIOSkipped()
+    public async Task TryWithoutIO_SucceedsAfterRefillAsync_WhenMoreDataAvailable()
     {
-        using var stream = MakeStream("hello");
+        // Stream larger than one buffer: constructor fills buffer with first part.
+        const int BufferSize = 65536;
+        var data = new byte[BufferSize + 5];
+        data.AsSpan(BufferSize).Fill((byte)'Z');
+        using var stream = new MemoryStream(data);
         using var buf = new ScanBuffer(stream);
-        buf.NoIO = true;
-        buf.Refill(); // sets IOSkipped = true
-        Assert.True(buf.IOSkipped);
 
+        // Consume the initial fill so the buffer is empty without I/O.
+        buf.Advance(buf.Span.Length);
+
+        bool before = buf.TryWithoutIO(() => !buf.Span.IsEmpty);
+        Assert.False(before); // no buffered data → fails
+
+        // RefillAsync loads the remaining 5 bytes.
         await buf.RefillAsync();
+        Assert.Equal(5, buf.Span.Length);
 
-        Assert.False(buf.IOSkipped);
+        // Now TryWithoutIO succeeds from buffered data.
+        bool after = buf.TryWithoutIO(() => !buf.Span.IsEmpty);
+        Assert.True(after);
     }
 
     [Fact]
@@ -203,34 +231,39 @@ public sealed class ScanBufferTests
     // ── Partial-read stream ──────────────────────────────────────────────────
 
     [Fact]
-    public void Refill_WithPartialReadStream_FillsBufferCompletely()
+    public void Refill_WithPartialReadStream_AcceptsPartialFill()
     {
-        // A stream that returns at most 1 byte per Read call (simulating DeflateStream).
-        // Bug: Refill does a single Read, so only 1 byte would be added to the buffer
-        // instead of filling the available space.
-        const int BufferSize = 65536;
-        using var stream = new ChunkedStream(new byte[BufferSize], chunkSize: 1);
+        // Sync Refill issues a single Read and accepts however many bytes the
+        // stream returns, rather than blocking until the buffer is full.
+        // This prevents the parser stalling while waiting for zlib-ng to produce
+        // a full 64 KB chunk.
+        const int chunkSize = 1024;
+        using var stream = new ChunkedStream(new byte[65536 * 2], chunkSize: chunkSize);
         using var buf = new ScanBuffer(stream);
 
-        // The initial prime should fill the full buffer, not stop after 1 byte.
-        Assert.Equal(BufferSize, buf.Span.Length);
+        // The initial prime should have accepted exactly one chunk, not the full buffer.
+        Assert.Equal(chunkSize, buf.Span.Length);
     }
 
     [Fact]
     public async Task RefillAsync_WithPartialReadStream_FillsBufferCompletely()
     {
+        // Async RefillAsync loops until the buffer is full, unlike sync Refill.
         const int BufferSize = 65536;
-        const int Remaining = 100;
-        var data = new byte[BufferSize + Remaining];
-        using var stream = new ChunkedStream(data, chunkSize: 1);
+        const int chunkSize = 1024;
+        var data = new byte[BufferSize * 2]; // enough data to fill one buffer after the initial prime
+        using var stream = new ChunkedStream(data, chunkSize: chunkSize);
         using var buf = new ScanBuffer(stream);
-        buf.Advance(buf.Span.Length); // consume the initial fill
+
+        // Constructor primed with one sync chunk.
+        Assert.Equal(chunkSize, buf.Span.Length);
+        buf.Advance(buf.Span.Length);
 
         bool hasMore = await buf.RefillAsync();
 
         Assert.True(hasMore);
-        // Should have filled up to Remaining bytes (all that's left), not just 1.
-        Assert.Equal(Remaining, buf.Span.Length);
+        // RefillAsync fills the entire buffer, not just one chunk.
+        Assert.Equal(BufferSize, buf.Span.Length);
     }
 
     /// <summary>

@@ -241,40 +241,53 @@ internal static partial class XlsxSheetScanner
         while (true)
         {
             var span = buf.Span;
-            var closeStatus = TryFindEndTag(span, TagSheetData, out int closeIdx, out int closeLen, out int closePartial);
-            var rowStatus = TryFindStartTag(span, TagRow, out var rowMatch, out int rowPartial);
-
-            if (closeStatus == TagSearchResult.Found
-                && (rowStatus != TagSearchResult.Found || closeIdx < rowMatch.Start))
+            int lt = span.IndexOf((byte)'<');
+            if (lt < 0)
             {
-                return false;
-            }
-
-            if (rowStatus == TagSearchResult.NotFound)
-            {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(closePartial, rowPartial))) { return false; }
+                buf.Advance(span.Length);
+                if (!buf.Refill()) { return false; }
                 continue;
             }
 
-            if (rowStatus == TagSearchResult.NeedMoreData)
+            if (lt > 0) { buf.Advance(lt); }
+            span = buf.Span;
+
+            // Check for </sheetData> (only when we actually see '</')
+            var endResult = TryMatchEndTagAt(span, TagSheetData, out int endLen);
+            if (endResult == TagSearchResult.Found) { return false; }
+            if (endResult == TagSearchResult.NeedMoreData)
             {
-                if (!RefillKeepingTagStart(buf, span, rowMatch.Start)) { return false; }
+                if (!buf.Refill()) { return false; }
                 continue;
             }
 
-            var attrBytes = span.Slice(rowMatch.AfterName, rowMatch.EndExclusive - rowMatch.AfterName);
-            bool hasR = CellAttributeParser.ParseRowIndex(attrBytes, out int parsedRow);
-            if (hasR && parsedRow > ExcelLimits.MaxRows)
+            // Check for <row ...>
+            var startResult = TryMatchStartTagAt(span, TagRow, out int afterName, out int endExcl, out bool selfClose);
+            if (startResult == TagSearchResult.Found)
             {
-                buf.Advance(rowMatch.EndExclusive);
-                if (!rowMatch.IsEmptyElement) { SkipToEndTag(buf, TagRow); }
+                var attrBytes = span[afterName..endExcl];
+                bool hasR = CellAttributeParser.ParseRowIndex(attrBytes, out int parsedRow);
+                if (hasR && parsedRow > ExcelLimits.MaxRows)
+                {
+                    buf.Advance(endExcl);
+                    if (!selfClose) { SkipToEndTag(buf, TagRow); }
+                    continue;
+                }
+
+                rowIndex = hasR && parsedRow > 0 ? parsedRow : rowIndex + 1;
+                isSelfClosing = selfClose;
+                buf.Advance(endExcl);
+                return true;
+            }
+
+            if (startResult == TagSearchResult.NeedMoreData)
+            {
+                if (!buf.Refill()) { return false; }
                 continue;
             }
 
-            rowIndex = hasR && parsedRow > 0 ? parsedRow : rowIndex + 1;
-            isSelfClosing = rowMatch.IsEmptyElement;
-            buf.Advance(rowMatch.EndExclusive);
-            return true;
+            // Neither target — skip past this tag's '>'
+            SkipPastClosingBracket(buf);
         }
     }
 
@@ -334,36 +347,50 @@ internal static partial class XlsxSheetScanner
         while (true)
         {
             var span = buf.Span;
-            var cellStatus = TryFindStartTag(span, TagCell, out var cellMatch, out int cellPartial);
-
-            // Limit the </row> search to the span before the first <c>, so we don't burn CPU
-            // scanning past cell content looking for a row close that can't be there yet.
-            int rowSearchLimit = cellStatus == TagSearchResult.Found ? cellMatch.Start : span.Length;
-            var closeStatus = TryFindEndTag(span[..rowSearchLimit], TagRow, out int closeRow, out int closeRowLen, out int closePartial);
-
-            if (closeStatus == TagSearchResult.Found)
+            int lt = span.IndexOf((byte)'<');
+            if (lt < 0)
             {
-                buf.Advance(closeRow + closeRowLen);
+                buf.Advance(span.Length);
+                if (!buf.Refill()) { return false; }
+                continue;
+            }
+
+            if (lt > 0) { buf.Advance(lt); }
+            span = buf.Span;
+
+            // Check for </row>
+            var endResult = TryMatchEndTagAt(span, TagRow, out int endLen);
+            if (endResult == TagSearchResult.Found)
+            {
+                buf.Advance(endLen);
                 return false;
             }
 
-            if (cellStatus == TagSearchResult.NotFound)
+            if (endResult == TagSearchResult.NeedMoreData)
             {
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(closePartial, cellPartial))) { return false; }
+                if (!buf.Refill()) { return false; }
                 continue;
             }
 
-            if (cellStatus == TagSearchResult.NeedMoreData)
+            // Check for <c ...>
+            var startResult = TryMatchStartTagAt(span, TagCell, out int afterName, out int endExcl, out _);
+            if (startResult == TagSearchResult.Found)
             {
-                if (!RefillKeepingTagStart(buf, span, cellMatch.Start)) { return false; }
+                var attrBytes = span[afterName..endExcl];
+                CellAttributeParser.ParseCellAttrs(attrBytes, out int parsedCol, out _, out kind, out styleIdx, out isEmpty);
+                col = parsedCol > 0 ? parsedCol : col + 1;
+                buf.Advance(endExcl);
+                return true;
+            }
+
+            if (startResult == TagSearchResult.NeedMoreData)
+            {
+                if (!buf.Refill()) { return false; }
                 continue;
             }
 
-            var attrBytes = span.Slice(cellMatch.AfterName, cellMatch.EndExclusive - cellMatch.AfterName);
-            CellAttributeParser.ParseCellAttrs(attrBytes, out int parsedCol, out _, out kind, out styleIdx, out isEmpty);
-            col = parsedCol > 0 ? parsedCol : col + 1;
-            buf.Advance(cellMatch.EndExclusive);
-            return true;
+            // Neither target — skip past this tag (e.g. <v>, </v>, </c>)
+            SkipPastClosingBracket(buf);
         }
     }
 

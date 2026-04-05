@@ -304,4 +304,162 @@ internal static class XmlByteReader
             or (byte)'-'
             or (byte)'.';
 
+    // ── <-first tag matching ─────────────────────────────────────────────────
+    // These helpers inspect a span starting at '<' and determine whether it
+    // matches a given local name (with optional namespace prefix).  Used by
+    // the hot-path row/cell scanner to avoid full-buffer substring searches.
+
+    /// <summary>
+    /// Given a span whose first byte is <c>'&lt;'</c>, checks whether this is
+    /// a start tag whose local name (ignoring any namespace prefix) equals
+    /// <paramref name="localName"/>.
+    /// All positions in the out parameters are relative to <paramref name="spanFromLt"/>[0].
+    /// </summary>
+    internal static TagSearchResult TryMatchStartTagAt(
+        ReadOnlySpan<byte> spanFromLt,
+        ReadOnlySpan<byte> localName,
+        out int afterName,
+        out int endExclusive,
+        out bool isSelfClosing)
+    {
+        afterName = 0;
+        endExclusive = 0;
+        isSelfClosing = false;
+
+        int len = spanFromLt.Length;
+        if (len < 2)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        // Not a start tag — end tag, PI, or comment/CDATA.
+        byte first = spanFromLt[1];
+        if (first is (byte)'/' or (byte)'?' or (byte)'!')
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        // Walk past the full tag name (optional prefix + ':' + local name).
+        int cursor = 1;
+        int colonPos = -1;
+
+        while (cursor < len)
+        {
+            byte ch = spanFromLt[cursor];
+            if (ch == (byte)':') { colonPos = cursor; cursor++; continue; }
+            if (IsTagNameBoundary(ch)) { break; }
+            cursor++;
+        }
+
+        if (cursor >= len)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        // Extract and compare the local-name portion.
+        int localStart = colonPos >= 0 ? colonPos + 1 : 1;
+        int localLen = cursor - localStart;
+
+        if (localLen != localName.Length ||
+            !spanFromLt.Slice(localStart, localLen).SequenceEqual(localName))
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        // Tag name matches — find closing '>'.
+        afterName = cursor;
+        int gt = spanFromLt[cursor..].IndexOf((byte)'>');
+        if (gt < 0)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        endExclusive = cursor + gt + 1;
+        isSelfClosing = IsSelfClosing(spanFromLt, cursor, cursor + gt);
+        return TagSearchResult.Found;
+    }
+
+    /// <summary>
+    /// Given a span whose first byte is <c>'&lt;'</c>, checks whether this is
+    /// an end tag whose local name (ignoring any namespace prefix) equals
+    /// <paramref name="localName"/>.
+    /// <paramref name="tagLength"/> is the total length from <c>'&lt;'</c>
+    /// through (and including) <c>'&gt;'</c>.
+    /// </summary>
+    internal static TagSearchResult TryMatchEndTagAt(
+        ReadOnlySpan<byte> spanFromLt,
+        ReadOnlySpan<byte> localName,
+        out int tagLength)
+    {
+        tagLength = 0;
+        int len = spanFromLt.Length;
+
+        if (len < 3)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        if (spanFromLt[1] != (byte)'/')
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        // Walk past the full tag name after '</'.
+        int cursor = 2;
+        int colonPos = -1;
+
+        while (cursor < len)
+        {
+            byte ch = spanFromLt[cursor];
+            if (ch == (byte)':') { colonPos = cursor; cursor++; continue; }
+            if (ch == (byte)'>' || s_xmlWhitespace.Contains(ch)) { break; }
+            cursor++;
+        }
+
+        if (cursor >= len)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        int localStart = colonPos >= 0 ? colonPos + 1 : 2;
+        int localLen = cursor - localStart;
+
+        if (localLen != localName.Length ||
+            !spanFromLt.Slice(localStart, localLen).SequenceEqual(localName))
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        // Expect '>' (possibly preceded by whitespace).
+        int closeGt = FindCloseAngleBracket(spanFromLt, cursor);
+        if (closeGt == -1)
+        {
+            return TagSearchResult.NeedMoreData;
+        }
+
+        if (closeGt == -2)
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        tagLength = closeGt + 1;
+        return TagSearchResult.Found;
+    }
+
+    /// <summary>
+    /// Advances <paramref name="buf"/> past the next <c>'&gt;'</c>.
+    /// Used to skip irrelevant tags in the &lt;-first scanner.
+    /// </summary>
+    internal static void SkipPastClosingBracket(ScanBuffer buf)
+    {
+        while (true)
+        {
+            var span = buf.Span;
+            int gt = span.IndexOf((byte)'>');
+            if (gt >= 0) { buf.Advance(gt + 1); return; }
+            buf.Advance(span.Length);
+            if (!buf.Refill()) { return; }
+        }
+    }
+
 }

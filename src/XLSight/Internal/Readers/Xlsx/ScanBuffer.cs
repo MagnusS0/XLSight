@@ -100,21 +100,23 @@ internal sealed class ScanBuffer : IDisposable
             _end = remaining;
         }
 
-        // Fill the rest of the buffer from the stream, looping to handle partial reads
-        // (e.g. DeflateStream may return fewer bytes than requested per call).
+        // Read once from the stream — accept partial fills so the parser can process
+        // rows immediately instead of blocking until the full 64 KB buffer is filled.
+        // (DeflateStream/zlib-ng returns data in variable-size chunks.)
         if (!_streamDone)
         {
             int space = BufferSize - _end;
-            while (space > 0)
+            if (space > 0)
             {
                 int bytesRead = _source.Read(_buf, _end, space);
                 if (bytesRead == 0)
                 {
                     _streamDone = true;
-                    break;
                 }
-                _end += bytesRead;
-                space -= bytesRead;
+                else
+                {
+                    _end += bytesRead;
+                }
             }
         }
 
