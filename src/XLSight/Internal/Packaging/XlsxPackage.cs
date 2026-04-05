@@ -87,7 +87,7 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         }
 
         var fs = new FileStream(backingFs.Name, FileMode.Open, FileAccess.Read, FileShare.Read,
-                                bufferSize: 1, useAsync: false);
+                                bufferSize: 4096, useAsync: false);
         var zip = new ZipArchive(fs, ZipArchiveMode.Read, leaveOpen: false);
 
         var entry = FindEntry(zip, entryPath);
