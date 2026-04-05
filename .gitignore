@@ -60,6 +60,10 @@ dlldata.c
 # Benchmark Results
 BenchmarkDotNet.Artifacts/
 
+# Local-only directories (development artifacts, not for upstream)
+bench/
+docs/
+
 # .NET
 project.lock.json
 project.fragment.lock.json
