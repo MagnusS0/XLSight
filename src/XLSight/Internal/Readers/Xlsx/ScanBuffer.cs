@@ -24,6 +24,12 @@ internal sealed class ScanBuffer : IDisposable
     private bool _noIO;
     private bool _ioSkipped;
 
+    /// <summary>
+    /// True when the most recent <see cref="TryWithoutIO"/> call was interrupted by a
+    /// needed refill (buffer was rewound). False when the parse completed without I/O.
+    /// </summary>
+    internal bool LastParseNeededIO => _ioSkipped;
+
     internal ScanBuffer(Stream source)
     {
         _source = source;

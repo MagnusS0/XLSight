@@ -147,9 +147,14 @@ internal sealed class SheetCursor : IDisposable
             return true;
         }
 
-        // Roll back row counter so it is re-parsed correctly after the next refill.
-        _lastRow = savedLastRow;
-        _done = false;
+        // If IO was needed the buffer was rewound — roll back and reset so we retry after
+        // the next refill.  If MoveNext completed without IO (e.g. found </sheetData>
+        // entirely within the buffer) it set _done = true legitimately; don't erase that.
+        if (_buf.LastParseNeededIO)
+        {
+            _lastRow = savedLastRow;
+            _done = false;
+        }
         return false;
     }
 
