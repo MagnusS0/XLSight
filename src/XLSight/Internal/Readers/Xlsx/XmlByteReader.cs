@@ -39,35 +39,31 @@ internal static class XmlByteReader
         while (true)
         {
             var span = buf.Span;
-            var status = TryFindEndTag(span, tagName, out int idx, out int len, out int partialIndex);
-            if (status == TagSearchResult.Found)
+            int lt = span.IndexOf((byte)'<');
+            if (lt < 0)
             {
-                buf.Advance(idx + len);
-                return;
-            }
-
-            if (status == TagSearchResult.NeedMoreData)
-            {
-                if (idx >= 0)
-                {
-                    buf.Advance(idx);
-                    if (!buf.Refill())
-                    {
-                        return;
-                    }
-                }
-                else if (!RefillKeepingTagStart(buf, span, partialIndex))
-                {
-                    return;
-                }
-
+                buf.Advance(span.Length);
+                if (!buf.Refill()) { return; }
                 continue;
             }
 
-            if (!RefillKeepingTagStart(buf, span, partialIndex))
+            if (lt > 0) { buf.Advance(lt); }
+            span = buf.Span;
+
+            var result = TryMatchEndTagAt(span, tagName, out int tagLength);
+            if (result == TagSearchResult.Found)
             {
+                buf.Advance(tagLength);
                 return;
             }
+            if (result == TagSearchResult.NeedMoreData)
+            {
+                if (!buf.CanReadMore || !buf.Refill()) { return; }
+                continue;
+            }
+
+            // Not our end tag — skip past this tag's '>'.
+            SkipPastClosingBracket(buf);
         }
     }
 
