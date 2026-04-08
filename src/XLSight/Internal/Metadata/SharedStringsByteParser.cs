@@ -6,369 +6,312 @@ namespace XLSight.Internal.Metadata;
 
 /// <summary>
 /// Allocation-free SST parser that scans raw UTF-8 bytes instead of using XmlReader.
-/// XML entities (<c>&amp;amp;</c>, <c>&amp;lt;</c>, numeric refs, etc.) are resolved
-/// during the parse so the arena always contains clean UTF-8. No entity work is
-/// needed at read time in <see cref="SharedStringTable"/>.
+/// Each <c>&lt;si&gt;</c> entry is assembled in a 256 KB staging buffer, then committed
+/// atomically to a 64 KB arena chunk (below the LOH threshold). XML entities are
+/// resolved into the staging buffer so the arena always contains clean UTF-8.
 /// </summary>
 internal static class SharedStringsByteParser
 {
-    // Bytes of context kept at the tail of the scan window when no pattern is found,
-    // so that tags straddling a buffer boundary are not missed.
-    // Must be > max(prefix + ':' + '<') length, i.e. > ~11 bytes for any realistic prefix.
+    // 256 KB covers Excel's maximum cell size (32 767 chars ≈ 131 KB UTF-8) with margin.
+    private const int StagingCapacity = 256 * 1024;
+
+    // Bytes of context kept when scanning across buffer boundaries.
     private const int ContextKeep = 20;
 
     internal static SharedStringTable Parse(Stream stream)
     {
-        byte[] arenaBuf = ArrayPool<byte>.Shared.Rent(64 * 1024);
-        long[] infoBuf = ArrayPool<long>.Shared.Rent(512);
-        int arenaOffset = 0;
-        int infoCount = 0;
-
+        byte[] stagingBuf = ArrayPool<byte>.Shared.Rent(StagingCapacity);
         try
         {
+            var state = new ParseState(stagingBuf);
             using var buf = new ScanBuffer(stream);
-            ScanDocument(buf, ref arenaBuf, ref arenaOffset, ref infoBuf, ref infoCount);
+
+            while (FindNextSiCandidate(buf))
+            {
+                DispatchSiElement(buf, state);
+            }
+
             return new SharedStringTable(
-                arenaBuf.AsSpan(0, arenaOffset).ToArray(),
-                infoBuf.AsSpan(0, infoCount).ToArray());
+                [.. state.ArenaChunks],
+                [.. state.InfoChunks],
+                state.TotalStrings);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(arenaBuf, clearArray: false);
-            ArrayPool<long>.Shared.Return(infoBuf, clearArray: false);
+            ArrayPool<byte>.Shared.Return(stagingBuf, clearArray: false);
         }
     }
 
-    // Phase 1: SIMD-scan for <si> elements across the whole document.
-    private static void ScanDocument(
-        ScanBuffer buf,
-        ref byte[] arenaBuf,
-        ref int arenaOffset,
-        ref long[] infoBuf,
-        ref int infoCount)
+    // ── Parse state ───────────────────────────────────────────────────────────
+
+    private sealed class ParseState
     {
-        while (FindNextSiCandidate(buf))
+        public const int ArenaChunkSize = 65536; // 64 KB — below LOH threshold
+        public const int InfoChunkSize  = 8192;  // 8 192 × 8 bytes = 64 KB
+
+        public readonly List<byte[]> ArenaChunks = [new byte[ArenaChunkSize]];
+        public readonly List<long[]> InfoChunks  = [new long[InfoChunkSize]];
+        public int ArenaChunkIdx;
+        public int ArenaChunkOffset;
+        public int InfoChunkIdx;
+        public int InfoChunkOffset;
+        public int TotalStrings;
+
+        public readonly byte[] StagingBuf;
+        public int StagingLen;
+
+        public ParseState(byte[] stagingBuf) => StagingBuf = stagingBuf;
+
+        /// <summary>
+        /// Atomically places the staging content into the arena and records the info entry.
+        /// Because the string is fully assembled before this call, it is guaranteed to land
+        /// contiguously inside one chunk — no cross-chunk string split is possible.
+        /// </summary>
+        public void CommitEntry()
         {
-            DispatchSiElement(buf, ref arenaBuf, ref arenaOffset, ref infoBuf, ref infoCount);
+            int length = StagingLen;
+            StagingLen = 0;
+
+            // Move to a new arena chunk if the string does not fit.
+            // Strings larger than one chunk (> 64 KB) are extremely rare in valid XLSX
+            // but are handled by allocating a dedicated oversized chunk.
+            if (ArenaChunkOffset + length > ArenaChunkSize)
+            {
+                ArenaChunkIdx++;
+                ArenaChunkOffset = 0;
+                ArenaChunks.Add(new byte[Math.Max(ArenaChunkSize, length)]);
+            }
+
+            if (length > 0)
+            {
+                StagingBuf.AsSpan(0, length).CopyTo(ArenaChunks[ArenaChunkIdx].AsSpan(ArenaChunkOffset));
+            }
+
+            // Global offset encodes chunk position: (chunkIdx << 16) | chunkOffset.
+            // Max arena: 65 535 chunks × 64 KB ≈ 4 GB — sufficient for any real workbook.
+            int globalOffset = (ArenaChunkIdx << 16) | ArenaChunkOffset;
+            long packed      = ((long)globalOffset << 32) | (uint)length;
+
+            if (InfoChunkOffset >= InfoChunkSize)
+            {
+                InfoChunkIdx++;
+                InfoChunks.Add(new long[InfoChunkSize]);
+                InfoChunkOffset = 0;
+            }
+
+            InfoChunks[InfoChunkIdx][InfoChunkOffset++] = packed;
+            ArenaChunkOffset += length;
+            TotalStrings++;
         }
     }
 
-    // Scans forward until the buffer is positioned just after the "si" of a valid <si…> tag.
-    // Returns false when the stream is exhausted with no further <si> tags.
+    // ── Phase 1: locate <si> elements ────────────────────────────────────────
+
     private static bool FindNextSiCandidate(ScanBuffer buf)
     {
         while (true)
         {
-            if (buf.IsExhausted)
-            {
-                return false;
-            }
+            if (buf.IsExhausted) { return false; }
+
             ReadOnlySpan<byte> span = buf.Span;
-            if (span.IsEmpty)
-            {
-                buf.Refill();
-                continue;
-            }
+            if (span.IsEmpty) { buf.Refill(); continue; }
+
             int siIdx = span.IndexOf("si"u8);
             if (siIdx < 0)
             {
                 int keep = Math.Min(ContextKeep, span.Length);
                 buf.Advance(span.Length - keep);
-                if (buf.CanReadMore)
-                {
-                    buf.Refill();
-                    continue;
-                }
+                if (buf.CanReadMore) { buf.Refill(); continue; }
                 return false;
             }
-            // With ContextKeep bytes preserved, valid '<si' will have siIdx >= 1.
-            if (siIdx == 0)
-            {
-                buf.Advance(1);
-                continue;
-            }
-            if (!CheckBackwardContext(span, siIdx))
-            {
-                buf.Advance(siIdx + 2);
-                continue;
-            }
-            int afterSiIdx = siIdx + 2;
-            if (afterSiIdx >= span.Length)
+
+            if (siIdx == 0) { buf.Advance(1); continue; }
+
+            if (!CheckBackwardContext(span, siIdx)) { buf.Advance(siIdx + 2); continue; }
+
+            int afterSi = siIdx + 2;
+            if (afterSi >= span.Length)
             {
                 byte before = span[siIdx - 1];
-                int ltOffset = (before == (byte)':') ? FindLtOffset(span, siIdx) : siIdx - 1;
-                buf.Advance(ltOffset);
+                int ltOff = (before == (byte)':') ? FindLtOffset(span, siIdx) : siIdx - 1;
+                buf.Advance(ltOff);
                 buf.Refill();
                 continue;
             }
-            if (!IsTagNameBoundary(span[afterSiIdx]))
-            {
-                buf.Advance(siIdx + 2);
-                continue;
-            }
+
+            if (!IsTagNameBoundary(span[afterSi])) { buf.Advance(siIdx + 2); continue; }
+
             buf.Advance(siIdx + 2);
             return true;
         }
     }
 
-    // Returns true if the "si" at siIdx is preceded by '<' (direct) or '<prefix:' (namespaced).
-    // Requires siIdx >= 1.
     private static bool CheckBackwardContext(ReadOnlySpan<byte> span, int siIdx)
     {
         byte before = span[siIdx - 1];
-        if (before == (byte)'<')
-        {
-            return true;
-        }
+        if (before == (byte)'<') { return true; }
         if (before == (byte)':')
         {
             int k = siIdx - 2;
-            while (k >= 0 && IsValidPrefixChar(span[k]))
-            {
-                k--;
-            }
+            while (k >= 0 && IsValidPrefixChar(span[k])) { k--; }
             return k >= 0 && span[k] == (byte)'<';
         }
         return false;
     }
 
-    // Advances past the '>' (or '/>') that closes the current opening tag.
-    // Returns true when the element is empty (/>), false for a normal open tag (>).
+    // ── Phase 2: dispatch <si> element ───────────────────────────────────────
+
+    private static void DispatchSiElement(ScanBuffer buf, ParseState state)
+    {
+        state.StagingLen = 0;
+        bool isEmpty = SkipOpeningTagClose(buf);
+        if (!isEmpty)
+        {
+            ProcessSiContent(buf, state);
+        }
+        state.CommitEntry();
+    }
+
     private static bool SkipOpeningTagClose(ScanBuffer buf)
     {
         while (true)
         {
-            if (buf.IsExhausted)
-            {
-                return false;
-            }
+            if (buf.IsExhausted) { return false; }
             ReadOnlySpan<byte> span = buf.Span;
-            if (span.IsEmpty)
-            {
-                buf.Refill();
-                continue;
-            }
+            if (span.IsEmpty) { buf.Refill(); continue; }
+
             int idx = span.IndexOfAny((byte)'>', (byte)'/');
-            if (idx < 0)
-            {
-                buf.Advance(span.Length);
-                buf.Refill();
-                continue;
-            }
+            if (idx < 0) { buf.Advance(span.Length); buf.Refill(); continue; }
+
             if (span[idx] == (byte)'/')
             {
-                if (TryConsumeEmptyClose(buf, span, idx))
-                {
-                    return true;
-                }
+                if (TryConsumeEmptyClose(buf, span, idx)) { return true; }
                 continue;
             }
+
             buf.Advance(idx + 1);
             return false;
         }
     }
 
-    // Handles a '/' byte encountered while scanning an opening tag.
-    // Returns true if '/>' was consumed (empty element), false to keep scanning.
     private static bool TryConsumeEmptyClose(ScanBuffer buf, ReadOnlySpan<byte> span, int idx)
     {
-        int nextIdx = idx + 1;
-        if (nextIdx < span.Length)
+        int next = idx + 1;
+        if (next < span.Length)
         {
-            if (span[nextIdx] == (byte)'>')
-            {
-                buf.Advance(nextIdx + 1);
-                return true;
-            }
-            // '/' inside an attribute value (rare) — skip it and keep scanning.
-            buf.Advance(nextIdx);
+            if (span[next] == (byte)'>') { buf.Advance(next + 1); return true; }
+            buf.Advance(next);
             return false;
         }
-        // '/' is the last byte; peek into the next buffer chunk.
+
         buf.Advance(idx);
         buf.Refill();
         span = buf.Span;
         if (!span.IsEmpty && span[0] == (byte)'/')
         {
-            if (span.Length > 1 && span[1] == (byte)'>')
-            {
-                buf.Advance(2);
-                return true;
-            }
+            if (span.Length > 1 && span[1] == (byte)'>') { buf.Advance(2); return true; }
             buf.Advance(1);
         }
         return false;
     }
 
-    // Handles the confirmed <si…> open tag: records empty element or delegates to content scan.
-    private static void DispatchSiElement(
-        ScanBuffer buf,
-        ref byte[] arenaBuf,
-        ref int arenaOffset,
-        ref long[] infoBuf,
-        ref int infoCount)
-    {
-        bool isEmpty = SkipOpeningTagClose(buf);
-        EnsureInfoCapacity(ref infoBuf, infoCount);
-        if (isEmpty)
-        {
-            infoBuf[infoCount++] = (long)arenaOffset << 32;
-        }
-        else
-        {
-            ProcessSiContent(buf, ref arenaBuf, ref arenaOffset, ref infoBuf, ref infoCount);
-        }
-    }
+    // ── Phase 3: scan inside <si> for <t> content ────────────────────────────
 
-    // Phase 2: sequential scan inside a <si> block for <t> content.
-    private static void ProcessSiContent(
-        ScanBuffer buf,
-        ref byte[] arenaBuf,
-        ref int arenaOffset,
-        ref long[] infoBuf,
-        ref int infoCount)
+    private static void ProcessSiContent(ScanBuffer buf, ParseState state)
     {
-        int entryStart = arenaOffset;
         while (true)
         {
-            if (buf.IsExhausted)
-            {
-                break;
-            }
+            if (buf.IsExhausted) { break; }
+
             ReadOnlySpan<byte> span = buf.Span;
-            if (span.IsEmpty)
-            {
-                buf.Refill();
-                continue;
-            }
+            if (span.IsEmpty) { buf.Refill(); continue; }
+
             int ltIdx = span.IndexOf((byte)'<');
             if (ltIdx < 0)
             {
                 buf.Advance(span.Length);
-                if (buf.CanReadMore)
-                {
-                    buf.Refill();
-                }
+                if (buf.CanReadMore) { buf.Refill(); }
                 continue;
             }
-            if (ltIdx + 1 >= span.Length)
-            {
-                buf.Advance(ltIdx);
-                buf.Refill();
-                continue;
-            }
+
+            if (ltIdx + 1 >= span.Length) { buf.Advance(ltIdx); buf.Refill(); continue; }
+
             byte next = span[ltIdx + 1];
             if (next == (byte)'t')
             {
-                TryHandleTTag(buf, span, ltIdx, ref arenaBuf, ref arenaOffset);
+                TryHandleTTag(buf, span, ltIdx, state);
             }
             else if (next == (byte)'/')
             {
-                if (HandleClosingTag(buf, span, ltIdx))
-                {
-                    break;
-                }
+                if (HandleClosingTag(buf, span, ltIdx)) { break; }
             }
             else
             {
                 buf.Advance(ltIdx + 1);
             }
         }
-        int length = arenaOffset - entryStart;
-        EnsureInfoCapacity(ref infoBuf, infoCount);
-        infoBuf[infoCount++] = ((long)entryStart << 32) | (uint)length;
     }
 
-    // Handles a potential <t…> open tag at ltIdx. Advances the buffer and copies content
-    // when confirmed; otherwise advances past the non-<t> bytes and returns.
     private static void TryHandleTTag(
-        ScanBuffer buf,
-        ReadOnlySpan<byte> span,
-        int ltIdx,
-        ref byte[] arenaBuf,
-        ref int arenaOffset)
+        ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx, ParseState state)
     {
-        if (ltIdx + 2 >= span.Length)
-        {
-            buf.Advance(ltIdx);
-            buf.Refill();
-            return;
-        }
-        if (!IsTagNameBoundary(span[ltIdx + 2]))
-        {
-            buf.Advance(ltIdx + 2);
-            return;
-        }
-        // Confirmed <t…>: advance past '<t', skip to closing '>', copy content, skip '</t>'.
+        if (ltIdx + 2 >= span.Length) { buf.Advance(ltIdx); buf.Refill(); return; }
+        if (!IsTagNameBoundary(span[ltIdx + 2])) { buf.Advance(ltIdx + 2); return; }
+
         buf.Advance(ltIdx + 2);
         SkipToGt(buf);
-        CopyTextContent(buf, ref arenaBuf, ref arenaOffset);
+        CopyTextContent(buf, state);
         SkipToGt(buf);
     }
 
-    // Handles a potential close tag starting at span[ltIdx] (already known to be '</…>').
-    // Returns true when </si> is confirmed and the <si> block is complete.
     private static bool HandleClosingTag(ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx)
     {
-        // Need enough bytes to distinguish </si> from </r>, </rPr>, etc.
-        // Minimum for '</si>' is 5 bytes; refill when we have fewer.
         if (ltIdx + 4 >= span.Length && buf.CanReadMore)
         {
             buf.Advance(ltIdx);
             buf.Refill();
             return false;
         }
+
         if (IsCloseSiTag(span, ltIdx))
         {
             buf.Advance(ltIdx + 1);
             SkipToGt(buf);
             return true;
         }
+
         buf.Advance(ltIdx + 1);
         return false;
     }
 
-    // Checks whether span[ltIdx] starts '</si' (or '</prefix:si').
     private static bool IsCloseSiTag(ReadOnlySpan<byte> span, int ltIdx)
     {
         int pos = ltIdx + 2;
-        if (pos >= span.Length)
-        {
-            return false;
-        }
+        if (pos >= span.Length) { return false; }
+
         int nameStart = pos;
         for (int i = pos; i < Math.Min(pos + 12, span.Length); i++)
         {
-            if (span[i] == (byte)':')
-            {
-                nameStart = i + 1;
-                break;
-            }
-            if (!IsValidPrefixChar(span[i]))
-            {
-                break;
-            }
+            if (span[i] == (byte)':') { nameStart = i + 1; break; }
+            if (!IsValidPrefixChar(span[i])) { break; }
         }
-        if (nameStart + 1 >= span.Length)
-        {
-            return false;
-        }
-        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i')
-        {
-            return false;
-        }
+
+        if (nameStart + 1 >= span.Length) { return false; }
+        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i') { return false; }
+
         int boundaryPos = nameStart + 2;
-        if (boundaryPos >= span.Length)
-        {
-            return false;
-        }
+        if (boundaryPos >= span.Length) { return false; }
         return IsTagNameBoundary(span[boundaryPos]);
     }
 
-    // Copies text content into the arena until '<' is found, resolving XML entities inline.
-    // Leaves the buffer positioned AT the '<' (does not consume it).
-    private static void CopyTextContent(ScanBuffer buf, ref byte[] arenaBuf, ref int arenaOffset)
+    // ── Text content copy with inline entity resolution ───────────────────────
+
+    // Copies text bytes into the staging buffer until '<' is found.
+    // Leaves the buffer positioned AT the '<'.
+    private static void CopyTextContent(ScanBuffer buf, ParseState state)
     {
+        byte[] staging = state.StagingBuf;
+
         while (true)
         {
             ReadOnlySpan<byte> span = buf.Span;
@@ -381,9 +324,8 @@ internal static class SharedStringsByteParser
             int stopIdx = span.IndexOfAny((byte)'<', (byte)'&');
             if (stopIdx < 0)
             {
-                EnsureArenaCapacity(ref arenaBuf, arenaOffset, span.Length);
-                span.CopyTo(arenaBuf.AsSpan(arenaOffset));
-                arenaOffset += span.Length;
+                span.CopyTo(staging.AsSpan(state.StagingLen));
+                state.StagingLen += span.Length;
                 buf.Advance(span.Length);
                 if (buf.CanReadMore) { buf.Refill(); }
                 continue;
@@ -391,9 +333,8 @@ internal static class SharedStringsByteParser
 
             if (stopIdx > 0)
             {
-                EnsureArenaCapacity(ref arenaBuf, arenaOffset, stopIdx);
-                span.Slice(0, stopIdx).CopyTo(arenaBuf.AsSpan(arenaOffset));
-                arenaOffset += stopIdx;
+                span.Slice(0, stopIdx).CopyTo(staging.AsSpan(state.StagingLen));
+                state.StagingLen += stopIdx;
             }
 
             if (span[stopIdx] == (byte)'<')
@@ -402,32 +343,26 @@ internal static class SharedStringsByteParser
                 return;
             }
 
-            // '&' — resolve entity and write decoded UTF-8 into the arena.
+            // '&' — resolve entity and write decoded UTF-8 into staging.
             buf.Advance(stopIdx);
-            ResolveEntity(buf, ref arenaBuf, ref arenaOffset);
+            ResolveEntity(buf, state);
         }
     }
 
-    // Called with buf positioned AT '&'. Resolves the entity and writes clean UTF-8.
-    private static void ResolveEntity(ScanBuffer buf, ref byte[] arenaBuf, ref int arenaOffset)
+    // Called with buf positioned AT '&'. Resolves the entity and writes to staging.
+    private static void ResolveEntity(ScanBuffer buf, ParseState state)
     {
         buf.Advance(1); // skip '&'
 
-        // Entities are short (max ~12 bytes for &#x10FFFF;). Ensure we can see the ';'.
-        if (buf.Span.Length < 12 && buf.CanReadMore)
-        {
-            buf.Refill();
-        }
+        if (buf.Span.Length < 12 && buf.CanReadMore) { buf.Refill(); }
 
-        var span = buf.Span;
+        var span   = buf.Span;
         var window = span.Length > 16 ? span.Slice(0, 16) : span;
-        int semi = window.IndexOf((byte)';');
+        int semi   = window.IndexOf((byte)';');
 
         if (semi <= 0)
         {
-            // Malformed — emit '&' literally and let the caller continue.
-            EnsureArenaCapacity(ref arenaBuf, arenaOffset, 1);
-            arenaBuf[arenaOffset++] = (byte)'&';
+            state.StagingBuf[state.StagingLen++] = (byte)'&';
             return;
         }
 
@@ -435,24 +370,21 @@ internal static class SharedStringsByteParser
 
         if (body.Length > 0 && body[0] == (byte)'#')
         {
-            WriteNumericRef(body.Slice(1), ref arenaBuf, ref arenaOffset);
+            WriteNumericRef(body.Slice(1), state.StagingBuf, ref state.StagingLen);
         }
         else if (TryDecodeNamedEntity(body, out byte ch))
         {
-            EnsureArenaCapacity(ref arenaBuf, arenaOffset, 1);
-            arenaBuf[arenaOffset++] = ch;
+            state.StagingBuf[state.StagingLen++] = ch;
         }
         else
         {
-            // Unknown named entity — preserve literally (should not occur in valid XLSX).
-            EnsureArenaCapacity(ref arenaBuf, arenaOffset, semi + 2);
-            arenaBuf[arenaOffset++] = (byte)'&';
-            body.CopyTo(arenaBuf.AsSpan(arenaOffset));
-            arenaOffset += body.Length;
-            arenaBuf[arenaOffset++] = (byte)';';
+            state.StagingBuf[state.StagingLen++] = (byte)'&';
+            body.CopyTo(state.StagingBuf.AsSpan(state.StagingLen));
+            state.StagingLen += body.Length;
+            state.StagingBuf[state.StagingLen++] = (byte)';';
         }
 
-        buf.Advance(semi + 1); // past the ';'
+        buf.Advance(semi + 1);
     }
 
     private static bool TryDecodeNamedEntity(ReadOnlySpan<byte> name, out byte ch)
@@ -466,7 +398,7 @@ internal static class SharedStringsByteParser
         return false;
     }
 
-    private static void WriteNumericRef(ReadOnlySpan<byte> digits, ref byte[] arenaBuf, ref int arenaOffset)
+    private static void WriteNumericRef(ReadOnlySpan<byte> digits, byte[] buf, ref int offset)
     {
         bool hex = digits.Length > 0 && (digits[0] == (byte)'x' || digits[0] == (byte)'X');
         ReadOnlySpan<byte> numPart = hex ? digits.Slice(1) : digits;
@@ -484,69 +416,32 @@ internal static class SharedStringsByteParser
 
         Span<byte> utf8 = stackalloc byte[4];
         int written = rune.EncodeToUtf8(utf8);
-        EnsureArenaCapacity(ref arenaBuf, arenaOffset, written);
-        utf8.Slice(0, written).CopyTo(arenaBuf.AsSpan(arenaOffset));
-        arenaOffset += written;
+        utf8.Slice(0, written).CopyTo(buf.AsSpan(offset));
+        offset += written;
     }
 
-    // Advances the buffer past the next '>' character (end of any tag).
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
     private static void SkipToGt(ScanBuffer buf)
     {
         while (true)
         {
             ReadOnlySpan<byte> span = buf.Span;
             int gtIdx = span.IndexOf((byte)'>');
-            if (gtIdx >= 0)
-            {
-                buf.Advance(gtIdx + 1);
-                return;
-            }
-            if (buf.IsExhausted)
-            {
-                return;
-            }
+            if (gtIdx >= 0) { buf.Advance(gtIdx + 1); return; }
+            if (buf.IsExhausted) { return; }
             buf.Advance(span.Length);
             buf.Refill();
         }
     }
 
-    // Returns the span offset of the '<' that starts a namespace-prefixed tag ending at siIdx.
     private static int FindLtOffset(ReadOnlySpan<byte> span, int siIdx)
     {
         int k = siIdx - 2;
-        while (k >= 0 && IsValidPrefixChar(span[k]))
-        {
-            k--;
-        }
+        while (k >= 0 && IsValidPrefixChar(span[k])) { k--; }
         return k >= 0 ? k : 0;
     }
 
-    private static void EnsureArenaCapacity(ref byte[] arenaBuf, int used, int needed)
-    {
-        if (used + needed <= arenaBuf.Length)
-        {
-            return;
-        }
-        int newSize = Math.Max(arenaBuf.Length * 2, used + needed);
-        var bigger = ArrayPool<byte>.Shared.Rent(newSize);
-        arenaBuf.AsSpan(0, used).CopyTo(bigger);
-        ArrayPool<byte>.Shared.Return(arenaBuf, clearArray: false);
-        arenaBuf = bigger;
-    }
-
-    private static void EnsureInfoCapacity(ref long[] infoBuf, int used)
-    {
-        if (used < infoBuf.Length)
-        {
-            return;
-        }
-        var bigger = ArrayPool<long>.Shared.Rent(infoBuf.Length * 2);
-        infoBuf.AsSpan(0, used).CopyTo(bigger);
-        ArrayPool<long>.Shared.Return(infoBuf, clearArray: false);
-        infoBuf = bigger;
-    }
-
     private static bool IsTagNameBoundary(byte b) => XmlByteReader.IsTagNameBoundary(b);
-
-    private static bool IsValidPrefixChar(byte b) => XmlByteReader.IsValidPrefixChar(b);
+    private static bool IsValidPrefixChar(byte b)  => XmlByteReader.IsValidPrefixChar(b);
 }
