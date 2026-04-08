@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 
 namespace XLSight.Internal.Metadata;
@@ -36,20 +35,14 @@ internal sealed class SharedStringTable
 
         if (length == 0) { return _cache[index] = string.Empty; }
 
-        string value = Encoding.UTF8.GetString(_arena.AsSpan(start, length));
-        // Fast SIMD scan before paying the allocation cost of unescaping.
-        if (_arena.AsSpan(start, length).IndexOf((byte)'&') >= 0)
-        {
-            value = WebUtility.HtmlDecode(value);
-        }
-        return _cache[index] = value;
+        // Arena contains clean UTF-8 — entities were resolved during SST parsing.
+        return _cache[index] = Encoding.UTF8.GetString(_arena.AsSpan(start, length));
     }
 
     /// <summary>
     /// Returns the UTF-16 character count for a shared string entry without
-    /// materialising a <see cref="string"/>. Zero allocation for the common case.
-    /// Falls back to <see cref="GetString"/> when the arena bytes contain XML
-    /// entities (e.g. <c>&amp;amp;</c>) so the decoded length is exact.
+    /// materialising a <see cref="string"/>. Always zero-allocation because the
+    /// arena contains clean UTF-8 with entities already resolved at parse time.
     /// </summary>
     internal int GetCharCount(int index)
     {
@@ -61,14 +54,6 @@ internal sealed class SharedStringTable
 
         if (length == 0) { return 0; }
 
-        var span = _arena.AsSpan(start, length);
-
-        // Entity decoding changes character count — fall back to materialised string.
-        if (span.IndexOf((byte)'&') >= 0)
-        {
-            return GetString(index).Length;
-        }
-
-        return Encoding.UTF8.GetCharCount(span);
+        return Encoding.UTF8.GetCharCount(_arena.AsSpan(start, length));
     }
 }

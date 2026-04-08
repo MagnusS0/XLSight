@@ -1,12 +1,14 @@
 using System.Buffers;
+using System.Text;
 using XLSight.Internal.Readers.Xlsx;
 
 namespace XLSight.Internal.Metadata;
 
 /// <summary>
 /// Allocation-free SST parser that scans raw UTF-8 bytes instead of using XmlReader.
-/// Stores raw bytes (including XML entities like &amp;amp;) into an arena; entity
-/// decoding happens lazily in <see cref="SharedStringTable.GetString"/>.
+/// XML entities (<c>&amp;amp;</c>, <c>&amp;lt;</c>, numeric refs, etc.) are resolved
+/// during the parse so the arena always contains clean UTF-8. No entity work is
+/// needed at read time in <see cref="SharedStringTable"/>.
 /// </summary>
 internal static class SharedStringsByteParser
 {
@@ -363,7 +365,7 @@ internal static class SharedStringsByteParser
         return IsTagNameBoundary(span[boundaryPos]);
     }
 
-    // Copies raw bytes into the arena until '<' is found.
+    // Copies text content into the arena until '<' is found, resolving XML entities inline.
     // Leaves the buffer positioned AT the '<' (does not consume it).
     private static void CopyTextContent(ScanBuffer buf, ref byte[] arenaBuf, ref int arenaOffset)
     {
@@ -372,34 +374,119 @@ internal static class SharedStringsByteParser
             ReadOnlySpan<byte> span = buf.Span;
             if (span.IsEmpty)
             {
-                if (buf.CanReadMore)
-                {
-                    buf.Refill();
-                    continue;
-                }
+                if (buf.CanReadMore) { buf.Refill(); continue; }
                 return;
             }
-            int ltIdx = span.IndexOf((byte)'<');
-            if (ltIdx >= 0)
+
+            int stopIdx = span.IndexOfAny((byte)'<', (byte)'&');
+            if (stopIdx < 0)
             {
-                if (ltIdx > 0)
-                {
-                    EnsureArenaCapacity(ref arenaBuf, arenaOffset, ltIdx);
-                    span.Slice(0, ltIdx).CopyTo(arenaBuf.AsSpan(arenaOffset));
-                    arenaOffset += ltIdx;
-                }
-                buf.Advance(ltIdx);
+                EnsureArenaCapacity(ref arenaBuf, arenaOffset, span.Length);
+                span.CopyTo(arenaBuf.AsSpan(arenaOffset));
+                arenaOffset += span.Length;
+                buf.Advance(span.Length);
+                if (buf.CanReadMore) { buf.Refill(); }
+                continue;
+            }
+
+            if (stopIdx > 0)
+            {
+                EnsureArenaCapacity(ref arenaBuf, arenaOffset, stopIdx);
+                span.Slice(0, stopIdx).CopyTo(arenaBuf.AsSpan(arenaOffset));
+                arenaOffset += stopIdx;
+            }
+
+            if (span[stopIdx] == (byte)'<')
+            {
+                buf.Advance(stopIdx);
                 return;
             }
-            EnsureArenaCapacity(ref arenaBuf, arenaOffset, span.Length);
-            span.CopyTo(arenaBuf.AsSpan(arenaOffset));
-            arenaOffset += span.Length;
-            buf.Advance(span.Length);
-            if (buf.CanReadMore)
-            {
-                buf.Refill();
-            }
+
+            // '&' — resolve entity and write decoded UTF-8 into the arena.
+            buf.Advance(stopIdx);
+            ResolveEntity(buf, ref arenaBuf, ref arenaOffset);
         }
+    }
+
+    // Called with buf positioned AT '&'. Resolves the entity and writes clean UTF-8.
+    private static void ResolveEntity(ScanBuffer buf, ref byte[] arenaBuf, ref int arenaOffset)
+    {
+        buf.Advance(1); // skip '&'
+
+        // Entities are short (max ~12 bytes for &#x10FFFF;). Ensure we can see the ';'.
+        if (buf.Span.Length < 12 && buf.CanReadMore)
+        {
+            buf.Refill();
+        }
+
+        var span = buf.Span;
+        var window = span.Length > 16 ? span.Slice(0, 16) : span;
+        int semi = window.IndexOf((byte)';');
+
+        if (semi <= 0)
+        {
+            // Malformed — emit '&' literally and let the caller continue.
+            EnsureArenaCapacity(ref arenaBuf, arenaOffset, 1);
+            arenaBuf[arenaOffset++] = (byte)'&';
+            return;
+        }
+
+        var body = span.Slice(0, semi);
+
+        if (body.Length > 0 && body[0] == (byte)'#')
+        {
+            WriteNumericRef(body.Slice(1), ref arenaBuf, ref arenaOffset);
+        }
+        else if (TryDecodeNamedEntity(body, out byte ch))
+        {
+            EnsureArenaCapacity(ref arenaBuf, arenaOffset, 1);
+            arenaBuf[arenaOffset++] = ch;
+        }
+        else
+        {
+            // Unknown named entity — preserve literally (should not occur in valid XLSX).
+            EnsureArenaCapacity(ref arenaBuf, arenaOffset, semi + 2);
+            arenaBuf[arenaOffset++] = (byte)'&';
+            body.CopyTo(arenaBuf.AsSpan(arenaOffset));
+            arenaOffset += body.Length;
+            arenaBuf[arenaOffset++] = (byte)';';
+        }
+
+        buf.Advance(semi + 1); // past the ';'
+    }
+
+    private static bool TryDecodeNamedEntity(ReadOnlySpan<byte> name, out byte ch)
+    {
+        if (name.SequenceEqual("amp"u8))  { ch = (byte)'&';  return true; }
+        if (name.SequenceEqual("lt"u8))   { ch = (byte)'<';  return true; }
+        if (name.SequenceEqual("gt"u8))   { ch = (byte)'>';  return true; }
+        if (name.SequenceEqual("quot"u8)) { ch = (byte)'"';  return true; }
+        if (name.SequenceEqual("apos"u8)) { ch = (byte)'\''; return true; }
+        ch = 0;
+        return false;
+    }
+
+    private static void WriteNumericRef(ReadOnlySpan<byte> digits, ref byte[] arenaBuf, ref int arenaOffset)
+    {
+        bool hex = digits.Length > 0 && (digits[0] == (byte)'x' || digits[0] == (byte)'X');
+        ReadOnlySpan<byte> numPart = hex ? digits.Slice(1) : digits;
+
+        int codepoint = 0;
+        foreach (byte b in numPart)
+        {
+            if (b >= '0' && b <= '9') { codepoint = codepoint * (hex ? 16 : 10) + (b - '0'); }
+            else if (hex && b >= 'a' && b <= 'f') { codepoint = codepoint * 16 + (b - 'a' + 10); }
+            else if (hex && b >= 'A' && b <= 'F') { codepoint = codepoint * 16 + (b - 'A' + 10); }
+            else { break; }
+        }
+
+        if (!Rune.TryCreate(codepoint, out Rune rune)) { return; }
+
+        Span<byte> utf8 = stackalloc byte[4];
+        int written = rune.EncodeToUtf8(utf8);
+        EnsureArenaCapacity(ref arenaBuf, arenaOffset, written);
+        utf8.Slice(0, written).CopyTo(arenaBuf.AsSpan(arenaOffset));
+        arenaOffset += written;
     }
 
     // Advances the buffer past the next '>' character (end of any tag).
