@@ -3,36 +3,34 @@ using System.Text;
 namespace XLSight.Internal.Metadata;
 
 /// <summary>
-/// Lazy UTF-8 arena for shared strings. The arena is stored as 64 KB chunks (below the
-/// 85 KB LOH threshold) so every piece is eligible for Gen 0/1 GC and compaction.
-/// Entity decoding is done at parse time; the chunks hold clean UTF-8.
-/// Strings are materialised on demand via a fixed-size direct-mapped LRU cache.
+/// Lazy UTF-8 arena for shared strings. Stored as 64 KB chunks (below the 85 KB LOH
+/// threshold). Strings materialise on demand via a fixed-size direct-mapped LRU cache.
+/// Entities are pre-resolved at parse time so the chunks hold clean UTF-8.
 /// </summary>
 internal sealed class SharedStringTable
 {
-    // Arena chunks: each at most 64 KB → never reaches the LOH.
+    // 64 KB arena chunks — below the 85 KB LOH threshold.
     private const int ArenaChunkBits = 16;
     private const int ArenaChunkSize = 1 << ArenaChunkBits; // 65 536
-    private const int ArenaChunkMask = ArenaChunkSize - 1;  // 65 535
+    private const int ArenaChunkMask = ArenaChunkSize - 1;
 
-    // Info chunks: 8 192 longs × 8 bytes = 64 KB each.
+    // 8 192 longs × 8 bytes = 64 KB info chunks.
     private const int InfoChunkBits = 13;
     private const int InfoChunkSize = 1 << InfoChunkBits;   // 8 192
-    private const int InfoChunkMask = InfoChunkSize - 1;    // 8 191
+    private const int InfoChunkMask = InfoChunkSize - 1;
 
-    // Fixed-size direct-mapped LRU cache — 8 192 slots ≈ 196 KB total.
+    // 8 192 slots × ~24 bytes ≈ 196 KB — fits in L2 cache.
     private const int CacheSlots = 8192;
     private const int CacheMask  = CacheSlots - 1;
 
     internal static readonly SharedStringTable Empty = new([], [], 0);
 
     private readonly byte[][] _arena;
-    // Packed per entry: high 32 bits = globalOffset = (arenaChunkIdx << 16) | arenaChunkOffset,
-    //                   low  32 bits = byte length.
+    // high 32 bits: globalOffset = (arenaChunkIdx << ArenaChunkBits) | arenaChunkOffset
+    // low  32 bits: byte length
     private readonly long[][] _info;
     private readonly int      _count;
-    // Categorical strings (few unique values, many references) stay hot in their slot.
-    // Unique strings (addresses, descriptions) get evicted and collected by Gen 0 GC.
+    // Strings with few unique values stay hot; one-off strings are evicted and collected by Gen 0.
     private readonly (int Index, string Value)[] _cache;
 
     internal int Count => _count;
@@ -97,7 +95,6 @@ internal sealed class SharedStringTable
     private string DecodeFromArena(int index)
     {
         var span = GetUtf8Span(index);
-        // Arena contains clean UTF-8 — entities were resolved during SST parsing.
         return span.IsEmpty ? string.Empty : Encoding.UTF8.GetString(span);
     }
 }

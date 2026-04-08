@@ -15,7 +15,6 @@ internal static class SharedStringsByteParser
     // 256 KB covers Excel's maximum cell size (32 767 chars ≈ 131 KB UTF-8) with margin.
     private const int StagingCapacity = 256 * 1024;
 
-    // Bytes of context kept when scanning across buffer boundaries.
     private const int ContextKeep = 20;
 
     internal static SharedStringTable Parse(Stream stream)
