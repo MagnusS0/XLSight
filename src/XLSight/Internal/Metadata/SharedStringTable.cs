@@ -4,7 +4,8 @@ namespace XLSight.Internal.Metadata;
 
 /// <summary>
 /// Lazy UTF-8 arena for shared strings. Stored as 64 KB chunks (below the 85 KB LOH
-/// threshold). Strings materialise on demand via a fixed-size direct-mapped LRU cache.
+/// threshold). Strings materialise on demand via a capped index cache — low-index entries
+/// are exact-match cached; high-index entries bypass and are collected by Gen 0.
 /// Entities are pre-resolved at parse time so the chunks hold clean UTF-8.
 /// </summary>
 internal sealed class SharedStringTable
@@ -19,9 +20,8 @@ internal sealed class SharedStringTable
     private const int InfoChunkSize = 1 << InfoChunkBits;   // 8 192
     private const int InfoChunkMask = InfoChunkSize - 1;
 
-    // 8 192 slots × ~24 bytes ≈ 196 KB — fits in L2 cache.
-    private const int CacheSlots = 8192;
-    private const int CacheMask  = CacheSlots - 1;
+    // 131 072 entries × 8 bytes = 1 MB of references — covers low-index clustered strings.
+    private const int MaxCacheEntries = 131072;
 
     internal static readonly SharedStringTable Empty = new([], [], 0);
 
@@ -30,8 +30,8 @@ internal sealed class SharedStringTable
     // low  32 bits: byte length
     private readonly long[][] _info;
     private readonly int      _count;
-    // Strings with few unique values stay hot; one-off strings are evicted and collected by Gen 0.
-    private readonly (int Index, string Value)[] _cache;
+    // Low-index strings are clustered and highly repeated; high-index strings bypass and die in Gen 0.
+    private readonly string?[] _cache;
 
     internal int Count => _count;
 
@@ -40,21 +40,19 @@ internal sealed class SharedStringTable
         _arena = arena;
         _info  = info;
         _count = count;
-        _cache = new (int, string)[CacheSlots];
-        Array.Fill(_cache, (-1, string.Empty));
+        _cache = new string?[Math.Min(count, MaxCacheEntries)];
     }
 
     internal string GetString(int index)
     {
         if ((uint)index >= (uint)_count) { return string.Empty; }
 
-        int slot = index & CacheMask;
-        ref var entry = ref _cache[slot];
-        if (entry.Index == index) { return entry.Value; }
+        if (index < _cache.Length)
+        {
+            return _cache[index] ??= DecodeFromArena(index);
+        }
 
-        string value = DecodeFromArena(index);
-        entry = (index, value);
-        return value;
+        return DecodeFromArena(index);
     }
 
     /// <summary>
