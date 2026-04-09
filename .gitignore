@@ -500,3 +500,4 @@ bench/plots/
 bench/results.json
 tests/XLSight.Tests/TestData/*_samples.tsv
 tests/XLSight.Tests/TestData/.~lock.*
+viz/*
