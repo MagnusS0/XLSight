@@ -75,6 +75,7 @@ internal static class Program
                 SharedStrings,
                 StyleTable.Default,
                 isDate1904: false,
+                ReadMode.Values,
                 ExcelRange.Unbounded,
                 ref sink);
             return true;
@@ -109,10 +110,16 @@ internal static class Program
 
     private struct NoopSink : IByteSheetSink
     {
+        public bool NeedsDecodedValue => false;
+        public bool TracksFormulas => false;
         public void OnDimension(in ExcelRange dimension) { }
         public void OnRowStart(int rowIndex) { }
-        public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value) => true;
+        public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex) => true;
+        public void OnFormula(int column, bool isArray) { }
         public void OnMergeCell(in MergedRegion region) { }
+        public void OnConditionalFormatting() { }
+        public void OnDataValidation() { }
+        public void OnHyperlink() { }
         public void OnEnd() { }
     }
 }
