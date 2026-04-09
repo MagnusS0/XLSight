@@ -166,7 +166,7 @@ public sealed class ScanBufferTests
         Assert.False(before); // no buffered data → fails
 
         // RefillAsync loads the remaining 5 bytes.
-        await buf.RefillAsync();
+        await buf.RefillAsync(TestContext.Current.CancellationToken);
         Assert.Equal(5, buf.Span.Length);
 
         // Now TryWithoutIO succeeds from buffered data.
@@ -180,7 +180,7 @@ public sealed class ScanBufferTests
         using var stream = MakeStream("hello");
         using var buf = new ScanBuffer(stream);
         buf.Advance(2); // "he" consumed, "llo" remains
-        bool result = await buf.RefillAsync();
+        bool result = await buf.RefillAsync(TestContext.Current.CancellationToken);
         Assert.True(result);
         Assert.Equal((byte)'l', buf.Span[0]);
     }
@@ -191,7 +191,7 @@ public sealed class ScanBufferTests
         using var stream = MakeStream("hi");
         using var buf = new ScanBuffer(stream);
         buf.Advance(buf.Span.Length);
-        bool result = await buf.RefillAsync();
+        bool result = await buf.RefillAsync(TestContext.Current.CancellationToken);
         Assert.False(result);
     }
 
@@ -259,7 +259,7 @@ public sealed class ScanBufferTests
         Assert.Equal(chunkSize, buf.Span.Length);
         buf.Advance(buf.Span.Length);
 
-        bool hasMore = await buf.RefillAsync();
+        bool hasMore = await buf.RefillAsync(TestContext.Current.CancellationToken);
 
         Assert.True(hasMore);
         // RefillAsync fills the entire buffer, not just one chunk.

@@ -11,7 +11,7 @@ namespace XLSight.Tests.Readers.Xlsx;
 /// <summary>
 /// Correctness tests for <see cref="XlsxSheetScanner"/>.
 /// Unit tests use synthetic XML. Parity tests compare against
-/// <see cref="WorksheetScanner.ScanRows"/> on real fixture files.
+/// <c>WorksheetScanner.ScanRows</c> on real fixture files.
 /// </summary>
 public sealed class XlsxSheetScannerTests
 {

@@ -146,7 +146,7 @@ public sealed class SharedStringsByteParserTests
         sb.AppendLine("<sst>");
         for (int i = 0; i < count; i++)
         {
-            sb.AppendLine($"<si><t>Entry{i}</t></si>");
+            sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"<si><t>Entry{i}</t></si>");
         }
         sb.AppendLine("</sst>");
 

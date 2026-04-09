@@ -101,7 +101,7 @@ public sealed class WorkbookAsyncTests
     public async Task OpenAsync_FromStream_Succeeds()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, workbook.SheetNames.Count);
         Assert.Equal("Sheet1", workbook.SheetNames[0]);
@@ -116,7 +116,7 @@ public sealed class WorkbookAsyncTests
         {
             WriteWorkbookToFile(tempFile);
 
-            await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(tempFile);
+            await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(tempFile, TestContext.Current.CancellationToken);
 
             Assert.Equal(2, workbook.SheetNames.Count);
             Assert.Equal("Sheet1", workbook.SheetNames[0]);
@@ -137,8 +137,8 @@ public sealed class WorkbookAsyncTests
         {
             WriteWorkbookToFile(tempFile);
 
-            await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(tempFile);
-            var result = await workbook.ReadRangeAsync("Sheet1", "A1:B2");
+            await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(tempFile, TestContext.Current.CancellationToken);
+            var result = await workbook.ReadRangeAsync("Sheet1", "A1:B2", ct: TestContext.Current.CancellationToken);
 
             Assert.Equal(2, result.Width);
             Assert.Equal(2, result.Height);
@@ -154,9 +154,9 @@ public sealed class WorkbookAsyncTests
     public async Task ReadRangeAsync_KnownValues_DecodesCorrectly()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var result = await workbook.ReadRangeAsync("Sheet1", "A1:B2");
+        var result = await workbook.ReadRangeAsync("Sheet1", "A1:B2", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, result.Width);
         Assert.Equal(2, result.Height);
@@ -170,9 +170,9 @@ public sealed class WorkbookAsyncTests
     public async Task ReadCellAsync_KnownValue_DecodesCorrectly()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var result = await workbook.ReadCellAsync("Sheet1", "A1");
+        var result = await workbook.ReadCellAsync("Sheet1", "A1", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(ExcelCellValue.FromNumber(42), result.Value);
         Assert.Equal(1, result.Row);
@@ -183,9 +183,9 @@ public sealed class WorkbookAsyncTests
     public async Task AnalyzeSheetAsync_WithData_ReturnsCorrectSheetInfo()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var info = await workbook.AnalyzeSheetAsync("Sheet1");
+        var info = await workbook.AnalyzeSheetAsync("Sheet1", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal("Sheet1", info.SheetName);
         Assert.False(info.IsEmpty);
@@ -197,9 +197,9 @@ public sealed class WorkbookAsyncTests
     public async Task AnalyzeAsync_MultipleSheets_ReturnsAllSheets()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var info = await workbook.AnalyzeAsync();
+        var info = await workbook.AnalyzeAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, info.Sheets.Count);
         Assert.False(info.HasMacros);
@@ -210,9 +210,9 @@ public sealed class WorkbookAsyncTests
     public async Task AnalyzeSheetAsync_ExactLevel_ReturnsExactMetadataOnly()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var info = await workbook.AnalyzeSheetAsync("Sheet1", AnalysisLevel.Exact);
+        var info = await workbook.AnalyzeSheetAsync("Sheet1", AnalysisLevel.Exact, TestContext.Current.CancellationToken);
 
         Assert.Equal(AnalysisLevel.Exact, info.Level);
         Assert.False(info.HasObserved);
@@ -225,7 +225,7 @@ public sealed class WorkbookAsyncTests
     public async Task ReadRangeAsync_WithPreCancelledToken_ThrowsOperationCanceledException()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -237,7 +237,7 @@ public sealed class WorkbookAsyncTests
     public async Task AnalyzeSheetAsync_WithPreCancelledToken_ThrowsOperationCanceledException()
     {
         using var ms = CreateWorkbook();
-        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -249,10 +249,10 @@ public sealed class WorkbookAsyncTests
     public async Task ReadRangeAsync_AfterDispose_ThrowsObjectDisposedException()
     {
         using var ms = CreateWorkbook();
-        var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms);
+        var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
         await workbook.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => workbook.ReadRangeAsync("Sheet1", "A1:B2"));
+            () => workbook.ReadRangeAsync("Sheet1", "A1:B2", ct: TestContext.Current.CancellationToken));
     }
 }

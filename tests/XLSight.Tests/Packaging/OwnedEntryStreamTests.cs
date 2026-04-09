@@ -208,7 +208,7 @@ public sealed class OwnedEntryStreamTests : IDisposable
         await using (stream)
         {
             var buf = new byte[64];
-            int read = await stream!.ReadAsync(buf, 0, buf.Length, TestContext.Current.CancellationToken);
+            int read = await stream!.ReadAsync(buf.AsMemory(), TestContext.Current.CancellationToken);
             Assert.True(read > 0);
         }
     }
