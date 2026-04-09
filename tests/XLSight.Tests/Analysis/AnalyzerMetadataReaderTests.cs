@@ -2,7 +2,6 @@ using System.IO.Compression;
 using System.Text;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Packaging;
-using XLSight.Internal.Parsing;
 using Xunit;
 
 namespace XLSight.Tests.Analysis;

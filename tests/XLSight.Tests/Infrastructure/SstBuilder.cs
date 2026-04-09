@@ -11,11 +11,11 @@ internal static class SstBuilder
         if (strings.Length == 0) { return SharedStringTable.Empty; }
 
         var arena = new ArrayBufferWriter<byte>(strings.Length * 16);
-        var info  = new long[strings.Length];
+        var info = new long[strings.Length];
 
         for (int i = 0; i < strings.Length; i++)
         {
-            int start   = arena.WrittenCount;
+            int start = arena.WrittenCount;
             int written = Encoding.UTF8.GetBytes(
                 strings[i],
                 arena.GetSpan(Encoding.UTF8.GetMaxByteCount(strings[i].Length)));

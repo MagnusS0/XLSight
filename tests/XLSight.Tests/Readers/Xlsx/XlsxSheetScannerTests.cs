@@ -625,10 +625,10 @@ public sealed class XlsxSheetScannerTests
             """);
 
         Assert.Single(rows);
-        Assert.Equal(CellType.Text,   rows[0].GetCell(1).CellType);
-        Assert.Equal("v",             rows[0].GetCell(1).AsText());
+        Assert.Equal(CellType.Text, rows[0].GetCell(1).CellType);
+        Assert.Equal("v", rows[0].GetCell(1).AsText());
         Assert.Equal(CellType.Number, rows[0].GetCell(2).CellType);
-        Assert.Equal(99.0,            rows[0].GetCell(2).AsNumber());
+        Assert.Equal(99.0, rows[0].GetCell(2).AsNumber());
     }
 
     [Fact]
@@ -649,10 +649,10 @@ public sealed class XlsxSheetScannerTests
             """);
 
         Assert.Single(rows);
-        Assert.Equal(CellType.Text,   rows[0].GetCell(1).CellType);
-        Assert.Equal("f",             rows[0].GetCell(1).AsText());
+        Assert.Equal(CellType.Text, rows[0].GetCell(1).CellType);
+        Assert.Equal("f", rows[0].GetCell(1).AsText());
         Assert.Equal(CellType.Number, rows[0].GetCell(2).CellType);
-        Assert.Equal(55.0,            rows[0].GetCell(2).AsNumber());
+        Assert.Equal(55.0, rows[0].GetCell(2).AsNumber());
     }
 
     [Fact]
@@ -698,7 +698,7 @@ public sealed class XlsxSheetScannerTests
 
         Assert.Single(rows);
         Assert.Equal(CellType.Formula, rows[0].GetCell(1).CellType);
-        Assert.Equal("A1+B1",          rows[0].GetCell(1).AsFormula());
+        Assert.Equal("A1+B1", rows[0].GetCell(1).AsFormula());
     }
 
     [Fact]
@@ -716,7 +716,7 @@ public sealed class XlsxSheetScannerTests
 
         Assert.Single(rows);
         Assert.Equal(CellType.Formula, rows[0].GetCell(1).CellType);
-        Assert.Equal("SUM(A1:A10)",    rows[0].GetCell(1).AsFormula());
+        Assert.Equal("SUM(A1:A10)", rows[0].GetCell(1).AsFormula());
     }
 
     [Fact]
@@ -734,7 +734,7 @@ public sealed class XlsxSheetScannerTests
 
         Assert.Single(rows);
         Assert.Equal(CellType.Number, rows[0].GetCell(1).CellType);
-        Assert.Equal(3.0,             rows[0].GetCell(1).AsNumber());
+        Assert.Equal(3.0, rows[0].GetCell(1).AsNumber());
     }
 
     [Theory]
@@ -759,7 +759,7 @@ public sealed class XlsxSheetScannerTests
 
         Assert.Single(rows);
         Assert.Equal(CellType.Formula, rows[0].GetCell(1).CellType);
-        Assert.Equal("A1+B1",          rows[0].GetCell(1).AsFormula());
+        Assert.Equal("A1+B1", rows[0].GetCell(1).AsFormula());
     }
 
     // ── Performance optimisations — right-bound early exit ───────────────────

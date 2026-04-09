@@ -15,8 +15,8 @@ public sealed class ExceptionTests
         Assert.Equal(200_000_000L, ex.RequestedCells);
         Assert.Equal(100_000_000L, ex.MaxCells);
         Assert.NotNull(ex.Message);
-        Assert.Contains("200", ex.Message);
-        Assert.Contains("100", ex.Message);
+        Assert.Contains("200", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("100", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class ExceptionTests
         var ex = new InvalidAddressException("BAD_ADDR");
 
         Assert.Equal("BAD_ADDR", ex.Address);
-        Assert.Contains("BAD_ADDR", ex.Message);
+        Assert.Contains("BAD_ADDR", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class ExceptionTests
         var ex = new InvalidAddressException("BAD_ADDR", "column too large");
 
         Assert.Equal("BAD_ADDR", ex.Address);
-        Assert.Contains("column too large", ex.Message);
+        Assert.Contains("column too large", ex.Message, StringComparison.Ordinal);
     }
 
     // ── MalformedWorkbookException ────────────────────────────────────────────
@@ -78,6 +78,6 @@ public sealed class ExceptionTests
         var ex = new SheetNotFoundException("MySheet");
 
         Assert.Equal("MySheet", ex.SheetName);
-        Assert.Contains("MySheet", ex.Message);
+        Assert.Contains("MySheet", ex.Message, StringComparison.Ordinal);
     }
 }

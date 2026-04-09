@@ -1,7 +1,6 @@
-using XLSight.Tests.Infrastructure;
-using XLSight.Internal.Metadata;
 using XLSight.Internal.Sinks;
 using XLSight.Models;
+using XLSight.Tests.Infrastructure;
 using Xunit;
 
 namespace XLSight.Tests.Sinks;

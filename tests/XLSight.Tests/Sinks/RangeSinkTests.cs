@@ -1,4 +1,3 @@
-using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
