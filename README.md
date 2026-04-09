@@ -317,9 +317,9 @@ synthetic xlsx files with numeric and string columns. All libraries decode every
 
 | Library | 100 K rows | 1 M rows | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight** | **60 ms** | **1.41 s** | **343 KB** | **1.46 GB** |
-| ExcelDataReader | 265 ms · 4.4× | 5.19 s · 3.7× | 165 MB · 491× | 3.44 GB · 2.4× |
-| MiniExcel | 395 ms · 6.6× | 7.91 s · 5.6× | 877 MB · 2,615× | 10.56 GB · 7.2× |
+| **XLSight** | **60 ms** | **1.49 s** | **343 KB** | **1.46 GB** |
+| ExcelDataReader | 270 ms · 4.5× | 5.57 s · 3.7× | 165 MB · 491× | 3.44 GB · 2.3× |
+| MiniExcel | 391 ms · 6.6× | 8.36 s · 5.6× | 877 MB · 2,615× | 10.56 GB · 7.2× |
 
 > **Allocated** is total managed heap throughput (BenchmarkDotNet). XLSight's 1.46 GB for 1 M rows reflects
 > strings materialised from the shared-string table; peak live memory (RSS) stays at 169 MB because
@@ -330,12 +330,20 @@ synthetic xlsx files with numeric and string columns. All libraries decode every
 Agents and pipelines often need only a few rows to sample a file or confirm its schema.
 Because XLSight is a true streaming reader, it yields control immediately once the row limit is reached.
 
-| Library | First 10 of 100 K | First 10 of 1 M | Allocated (100 K) |
-|---|---:|---:|---:|
-| **XLSight** | **97 μs** | **461 ms** | **279 KB** |
-| ExcelDataReader | 98 ms · 1,010× | 2.56 s · 5.6× | 44.8 MB · 164× |
-| MiniExcel | 170 ms · 1,753× | 921 ms · 2.0× | 482 MB · 1,727× |
+| Library | First 10 of 100 K | First 10 of 1 M | Allocated (100 K) | Allocated (1 M) |
+|---|---:|---:|---:|---:|
+| **XLSight** | **97 μs** | **456 ms** | **279 KB** | **145 MB** |
+| ExcelDataReader | 98 ms · 1,012× | 2.67 s · 5.9× | 44.8 MB · 164× | 1.80 GB · 12.7× |
+| MiniExcel | 169 ms · 1,740× | 935 ms · 2.0× | 483 MB · 1,770× | 1.68 GB · 11.8× |
 
+> **Insight — numeric vs string-heavy files**: for numeric or mixed sheets, XLSight's early-exit
+> advantage is at its most extreme: the SST is tiny and sheet parsing stops immediately, so reading
+> 10 rows of a 100 K numeric file costs just 97 μs. For string-heavy files the SST must still be
+> fully parsed before any rows are scanned (XLSight defers this to the first read call, but then
+> loads the entire SST in one pass), so the SST becomes the floor. The 145 MB for 10 rows of the
+> 1 M string-heavy file reflects that SST cost — XLSight still stops sheet parsing after row 10,
+> but cannot avoid pre-loading the shared strings.
+>
 > **ExcelDataReader** processes a full SAX event stream under the hood; there is no mechanism to stop
 > mid-stream, so it reads the entire sheet even when only the first row is consumed.
 >
