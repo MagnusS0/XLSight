@@ -305,10 +305,10 @@ Wall time and peak RSS measured with psutil across 5 runs (2 warmup). MiniExcel 
 
 | Library | Mean time | Peak RSS |
 |---|---:|---:|
-| **XLSight (.NET 10)** | **4.59 s** | **169 MB** |
-| calamine (Rust) | 8.37 s · 1.8× | 160 MB |
-| ExcelDataReader | 18.71 s · 4.1× | 310 MB |
-| MiniExcel | 18.63 s · 4.1× | 395 MB |
+| **XLSight (.NET 10)** | **4.10 s** | **159 MB** |
+| calamine (Rust) | 8.65 s · 2.1× | 160 MB |
+| ExcelDataReader | 19.47 s · 4.7× | 309 MB |
+| MiniExcel | 19.14 s · 4.7× | 394 MB |
 
 ### BenchmarkDotNet — streaming throughput, all rows
 
@@ -322,7 +322,7 @@ synthetic xlsx files with numeric and string columns. All libraries decode every
 | MiniExcel | 391 ms · 6.6× | 8.36 s · 5.6× | 877 MB · 2,615× | 10.56 GB · 7.2× |
 
 > **Allocated** is total managed heap throughput (BenchmarkDotNet). XLSight's 1.46 GB for 1 M rows reflects
-> strings materialised from the shared-string table; peak live memory (RSS) stays at 169 MB because
+> strings materialised from the shared-string table; peak live memory (RSS) stays at 159 MB because
 > short-lived strings are collected in Gen 0/1 before the process can grow further.
 
 ### BenchmarkDotNet — early exit, first 10 rows
