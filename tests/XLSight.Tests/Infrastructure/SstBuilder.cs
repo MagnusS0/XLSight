@@ -1,4 +1,4 @@
-using System.Buffers;
+using System.Globalization;
 using System.Text;
 using XLSight.Internal.Metadata;
 
@@ -10,21 +10,15 @@ internal static class SstBuilder
     {
         if (strings.Length == 0) { return SharedStringTable.Empty; }
 
-        var arena = new ArrayBufferWriter<byte>(strings.Length * 16);
-        var info = new long[strings.Length];
-
-        for (int i = 0; i < strings.Length; i++)
+        var sb = new StringBuilder();
+        sb.Append(CultureInfo.InvariantCulture, $"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{strings.Length}\" uniqueCount=\"{strings.Length}\">");
+        foreach (var s in strings)
         {
-            int start = arena.WrittenCount;
-            int written = Encoding.UTF8.GetBytes(
-                strings[i],
-                arena.GetSpan(Encoding.UTF8.GetMaxByteCount(strings[i].Length)));
-            arena.Advance(written);
-            // Single-chunk layout: chunkIdx = 0, so globalOffset = (0 << 16) | start = start.
-            info[i] = ((long)start << 32) | (uint)written;
+            sb.Append(CultureInfo.InvariantCulture, $"<si><t>{System.Security.SecurityElement.Escape(s)}</t></si>");
         }
+        sb.Append("</sst>");
 
-        // Wrap in single-chunk arrays matching SharedStringTable's chunked constructor.
-        return new SharedStringTable([arena.WrittenSpan.ToArray()], [info], strings.Length);
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        return SharedStringsByteParser.Parse(stream);
     }
 }

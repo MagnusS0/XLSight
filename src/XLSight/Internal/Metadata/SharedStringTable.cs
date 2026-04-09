@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Text;
+using XLSight.Internal.Readers.Xlsx;
 
 namespace XLSight.Internal.Metadata;
 
@@ -7,8 +9,12 @@ namespace XLSight.Internal.Metadata;
 /// threshold). Strings materialise on demand via a capped index cache — low-index entries
 /// are exact-match cached; high-index entries bypass and are collected by Gen 0.
 /// Entities are pre-resolved at parse time so the chunks hold clean UTF-8.
+/// The SST is parsed incrementally: only enough <c>&lt;si&gt;</c> entries are decoded to
+/// satisfy each <see cref="GetString"/> call, so early-exit sheet scans avoid loading the
+/// full table. Once the stream is exhausted the lazy state is released and subsequent
+/// lookups hit the arena directly with no locking overhead.
 /// </summary>
-internal sealed class SharedStringTable
+internal sealed class SharedStringTable : IDisposable
 {
     // 64 KB arena chunks — below the 85 KB LOH threshold.
     private const int ArenaChunkBits = 16;
@@ -20,32 +26,73 @@ internal sealed class SharedStringTable
     private const int InfoChunkSize = 1 << InfoChunkBits;   // 8 192
     private const int InfoChunkMask = InfoChunkSize - 1;
 
-    // 131 072 entries × 8 bytes = 1 MB of references — covers low-index clustered strings.
+    // 131 072 entries × 8 bytes = 1 MB — covers low-index clustered strings.
     private const int MaxCacheEntries = 131072;
 
-    internal static readonly SharedStringTable Empty = new([], [], 0);
+    internal static readonly SharedStringTable Empty = new();
 
-    private readonly byte[][] _arena;
-    // high 32 bits: globalOffset = (arenaChunkIdx << ArenaChunkBits) | arenaChunkOffset
-    // low  32 bits: byte length
-    private readonly long[][] _info;
-    private readonly int      _count;
+    private readonly List<byte[]> _arena;
+    private readonly List<long[]> _info;
     // Low-index strings are clustered and highly repeated; high-index strings bypass and die in Gen 0.
     private readonly string?[] _cache;
 
-    internal int Count => _count;
+    // Lazy-parsing state — all null once _isComplete is true.
+    private SharedStringsByteParser.ParseState? _parseState;
+    private ScanBuffer? _sstBuffer;
+    private byte[]? _stagingBuf;
+    private readonly Lock _pumpLock = new();
 
-    internal SharedStringTable(byte[][] arena, long[][] info, int count)
+    private int  _parsedCount;
+    private bool _isComplete;
+
+    /// <summary>
+    /// Number of strings parsed so far. Accessing this property pumps the parser to
+    /// completion so the full count is returned — avoid in hot paths.
+    /// </summary>
+    internal int Count
     {
-        _arena = arena;
-        _info  = info;
-        _count = count;
-        _cache = new string?[Math.Min(count, MaxCacheEntries)];
+        get
+        {
+            EnsureParsed(int.MaxValue);
+            return _parsedCount;
+        }
+    }
+
+    /// <summary>Empty singleton — no <c>xl/sharedStrings.xml</c> entry in the workbook.</summary>
+    private SharedStringTable()
+    {
+        _arena      = [];
+        _info       = [];
+        _cache      = [];
+        _isComplete = true;
+    }
+
+    /// <summary>
+    /// Lazy SST — parsing is deferred to the first <see cref="GetString"/> call that
+    /// requests an index not yet in the arena.
+    /// </summary>
+    internal SharedStringTable(
+        ScanBuffer buffer,
+        SharedStringsByteParser.ParseState state,
+        byte[] stagingBuf)
+    {
+        _sstBuffer  = buffer;
+        _parseState = state;
+        _stagingBuf = stagingBuf;
+        _arena      = state.ArenaChunks;
+        _info       = state.InfoChunks;
+        _cache      = new string?[MaxCacheEntries];
+        _isComplete = false;
     }
 
     internal string GetString(int index)
     {
-        if ((uint)index >= (uint)_count) { return string.Empty; }
+        if (index >= _parsedCount && !_isComplete)
+        {
+            EnsureParsed(index);
+        }
+
+        if ((uint)index >= (uint)_parsedCount) { return string.Empty; }
 
         if (index < _cache.Length)
         {
@@ -61,7 +108,8 @@ internal sealed class SharedStringTable
     /// </summary>
     internal int GetCharCount(int index)
     {
-        if ((uint)index >= (uint)_count) { return 0; }
+        if (index >= _parsedCount && !_isComplete) { EnsureParsed(index); }
+        if ((uint)index >= (uint)_parsedCount) { return 0; }
         var span = GetUtf8Span(index);
         return span.IsEmpty ? 0 : Encoding.UTF8.GetCharCount(span);
     }
@@ -72,7 +120,8 @@ internal sealed class SharedStringTable
     /// </summary>
     internal ReadOnlySpan<byte> GetUtf8Bytes(int index)
     {
-        if ((uint)index >= (uint)_count) { return default; }
+        if (index >= _parsedCount && !_isComplete) { EnsureParsed(index); }
+        if ((uint)index >= (uint)_parsedCount) { return default; }
         return GetUtf8Span(index);
     }
 
@@ -94,5 +143,51 @@ internal sealed class SharedStringTable
     {
         var span = GetUtf8Span(index);
         return span.IsEmpty ? string.Empty : Encoding.UTF8.GetString(span);
+    }
+
+    /// <summary>
+    /// Pumps the SST stream until <paramref name="targetIndex"/> has been parsed or the
+    /// stream is exhausted. No-op once <see cref="_isComplete"/> is true.
+    /// </summary>
+    private void EnsureParsed(int targetIndex)
+    {
+        if (_isComplete) { return; }
+        lock (_pumpLock)
+        {
+            while (!_isComplete && _parsedCount <= targetIndex)
+            {
+                if (!SharedStringsByteParser.FindNextSiCandidate(_sstBuffer!))
+                {
+                    _isComplete = true;
+                    CleanupParserResources();
+                    break;
+                }
+                SharedStringsByteParser.DispatchSiElement(_sstBuffer!, _parseState!);
+                _parsedCount++;
+            }
+        }
+    }
+
+    private void CleanupParserResources()
+    {
+        _sstBuffer?.Dispose();
+        _sstBuffer = null;
+        if (_stagingBuf is not null)
+        {
+            ArrayPool<byte>.Shared.Return(_stagingBuf, clearArray: false);
+            _stagingBuf = null;
+        }
+        _parseState = null;
+    }
+
+    public void Dispose()
+    {
+        if (_isComplete) { return; }
+        lock (_pumpLock)
+        {
+            if (_isComplete) { return; }
+            _isComplete = true;
+            CleanupParserResources();
+        }
     }
 }

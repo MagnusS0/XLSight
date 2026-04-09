@@ -42,11 +42,6 @@ internal static class Utf8CellDecoder
                         return ExcelCellValue.Empty;
                     }
 
-                    if ((uint)idx >= (uint)sharedStrings.Count)
-                    {
-                        return ExcelCellValue.Empty;
-                    }
-
                     return ExcelCellValue.FromSharedString(sharedStrings.GetString(idx), idx);
                 }
 

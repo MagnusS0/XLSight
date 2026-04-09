@@ -40,7 +40,9 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             return SharedStringTable.Empty;
         }
 
-        using var stream = entry.OpenBuffered();
+        // Do NOT use 'using' — ownership is transferred to the lazy SharedStringTable,
+        // which holds the stream open for on-demand pumping and disposes it when done.
+        var stream = entry.OpenBuffered();
         return SharedStringsParser.Parse(stream);
     }
 
@@ -358,6 +360,8 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         }
 
         _disposed = true;
+        // Dispose SST before package — the SST stream was opened from the package.
+        if (_sharedStrings.IsValueCreated) { _sharedStrings.Value.Dispose(); }
         _package.Dispose();
     }
 
@@ -369,6 +373,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         }
 
         _disposed = true;
+        if (_sharedStrings.IsValueCreated) { _sharedStrings.Value.Dispose(); }
         await _package.DisposeAsync().ConfigureAwait(false);
     }
 

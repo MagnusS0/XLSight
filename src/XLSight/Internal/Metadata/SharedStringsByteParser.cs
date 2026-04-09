@@ -17,33 +17,22 @@ internal static class SharedStringsByteParser
 
     private const int ContextKeep = 20;
 
+    /// <summary>
+    /// Creates a lazy <see cref="SharedStringTable"/> that owns <paramref name="stream"/>
+    /// and pumps it on demand. The stream is closed once all entries are parsed or when
+    /// the table is disposed.
+    /// </summary>
     internal static SharedStringTable Parse(Stream stream)
     {
         byte[] stagingBuf = ArrayPool<byte>.Shared.Rent(StagingCapacity);
-        try
-        {
-            var state = new ParseState(stagingBuf);
-            using var buf = new ScanBuffer(stream);
-
-            while (FindNextSiCandidate(buf))
-            {
-                DispatchSiElement(buf, state);
-            }
-
-            return new SharedStringTable(
-                [.. state.ArenaChunks],
-                [.. state.InfoChunks],
-                state.TotalStrings);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(stagingBuf, clearArray: false);
-        }
+        var state = new ParseState(stagingBuf);
+        var buf   = new ScanBuffer(stream); // ownership transferred to SharedStringTable
+        return new SharedStringTable(buf, state, stagingBuf);
     }
 
     // ── Parse state ───────────────────────────────────────────────────────────
 
-    private sealed class ParseState
+    internal sealed class ParseState
     {
         public const int ArenaChunkSize = 65536; // 64 KB — below LOH threshold
         public const int InfoChunkSize  = 8192;  // 8 192 × 8 bytes = 64 KB
@@ -106,7 +95,7 @@ internal static class SharedStringsByteParser
 
     // ── Phase 1: locate <si> elements ────────────────────────────────────────
 
-    private static bool FindNextSiCandidate(ScanBuffer buf)
+    internal static bool FindNextSiCandidate(ScanBuffer buf)
     {
         while (true)
         {
@@ -160,7 +149,7 @@ internal static class SharedStringsByteParser
 
     // ── Phase 2: dispatch <si> element ───────────────────────────────────────
 
-    private static void DispatchSiElement(ScanBuffer buf, ParseState state)
+    internal static void DispatchSiElement(ScanBuffer buf, ParseState state)
     {
         state.StagingLen = 0;
         bool isEmpty = SkipOpeningTagClose(buf);
