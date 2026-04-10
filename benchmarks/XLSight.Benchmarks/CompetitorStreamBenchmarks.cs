@@ -11,7 +11,9 @@ using XLSight;
 //   ExcelDataReader: reader.Read() alone skips value decoding; GetValue(i) added
 //     for all columns so work is equivalent to XLSight.
 //   MiniExcel: useHeaderRow:false skips header detection; FillMergedCells:false
-//     is default but made explicit. Query() returns decoded IDictionary per row.
+//     is default but made explicit; EnableSharedStringCache:false forces the SST
+//     fully in-memory (same model as all other libraries) — the default true would
+//     disk-cache large SSTs and add per-lookup seek overhead.
 //
 // Sheet selection (xl_large.xlsx):
 //   xl_large.xlsx has 4 sheets. "Worksheet" is the 4th sheet (~985K rows).
@@ -27,7 +29,7 @@ public class CompetitorStreamBenchmarks
     private int _largeColumns;
     private int _xlLargeColumns;
 
-    private static readonly OpenXmlConfiguration s_cfg = new() { FillMergedCells = false };
+    private static readonly OpenXmlConfiguration s_cfg = new() { FillMergedCells = false, EnableSharedStringCache = false };
 
     [GlobalSetup]
     public void Setup()
