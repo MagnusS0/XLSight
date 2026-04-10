@@ -6,6 +6,12 @@
 
 XLSight is a high-performance, zero-dependency, streaming Excel (.xlsx) reader and analyzer for .NET 10.
 
+XLSight bypasses standard XML parsing entirely. Using `.indexOf` that compiles to SIMD instructions to scan raw UTF-8 byte streams and storing strings in a chunked, LOH-free arena, XLSight minimizes per-cell allocations and heap fragmentation.
+
+- Processes 1-million row files 2x faster than Rust's `calamine`, and ~5x faster than `ExcelDataReader` and `MiniExcel`.
+- Reads the first 10 rows of a 1M-row file in < 300 μs, allocating almost no heap memory (~9000x faster than `ExcelDataReader` and ~3000x faster than `MiniExcel` while allocating ~1000x less memory).
+
+
 ## Installation
 
 ```
@@ -235,54 +241,6 @@ WorkbookInfo info = await workbook.AnalyzeAsync(
     maxDegreeOfParallelism: 4);
 ```
 
-## Using XLSight with AI agents
-
-A common agent pattern: receive an uploaded file, understand its structure, then stream only
-the data that is relevant to the task — without loading the entire sheet into memory.
-
-```csharp
-// Each request creates its own ExcelWorkbook instance.
-// File-backed open means concurrent requests never block each other.
-app.MapPost("/analyze-sheet", async (IFormFile upload) =>
-{
-    string tmp = Path.GetTempFileName() + ".xlsx";
-    await using (var fs = File.Create(tmp))
-        await upload.CopyToAsync(fs);
-
-    await using var workbook = await ExcelWorkbook.OpenAsync(tmp);
-
-    // Step 1 — understand the file without reading all data
-    WorkbookInfo info = await workbook.AnalyzeAsync();
-    SheetInfo sheet   = info.Sheets[0];
-
-    // Step 2 — build a schema description for the LLM
-    var schema = sheet.Columns.Select(c => new
-    {
-        header   = c.InferredHeader ?? $"Col{c.ColumnIndex}",
-        type     = c.DominantType.ToString(),
-        nonEmpty = c.NonEmptyCount,
-        distinct = c.DistinctValueEstimate,
-    });
-
-    // Step 3 — stream only the rows the agent needs
-    await foreach (var row in workbook.StreamSheetAsync(sheet.SheetName))
-    {
-        // row is yielded one at a time; the sheet is never held in memory
-    }
-
-    return Results.Ok(schema);
-});
-```
-
-**Why this matters on a shared server:**
-
-- Each `ExcelWorkbook` instance is independent. Ten concurrent users each get their own instance;
-  file-backed workbooks open a separate `ZipArchive` per read so there is no coordination needed.
-- Streaming allocation is flat — a 100 K-row sheet allocates roughly 343 KB regardless of row count,
-  so ten concurrent reads cost ~3.4 MB, not 3.4 GB.
-- `Analyze()` returns a complete schema in a single pass. Give the result to your LLM as context;
-  only stream rows when the agent has decided what data it actually needs.
-
 ## Exceptions
 
 | Type | Thrown when |
@@ -300,15 +258,14 @@ All benchmarks run on Linux .NET 10.0, Intel Core i9-14900K. Every library reads
 
 ### Real-world benchmark — NYC 311 service requests, 1 M rows × 41 cols
 
-Wall time and peak RSS measured with psutil across 5 runs (2 warmup). MiniExcel measured with
-`EnableSharedStringCache = false` (fully in-memory SST — the same memory model as the other libraries).
+Wall time and peak RSS measured with psutil across 5 runs (2 warmup). XLSight processes the 1M row file 2x faster than Rust's `calamine` with the same RSS footprint.
 
 | Library | Mean time | Peak RSS |
 |---|---:|---:|
 | **XLSight (.NET 10)** | **4.10 s** | **159 MB** |
 | calamine (Rust) | 8.65 s · 2.1× | 160 MB |
 | ExcelDataReader | 19.47 s · 4.7× | 309 MB |
-| MiniExcel | 19.14 s · 4.7× | 394 MB |
+| MiniExcel[^1] | 19.14 s · 4.7× | 394 MB |
 
 ### BenchmarkDotNet — streaming throughput, all rows
 
@@ -319,11 +276,13 @@ synthetic xlsx files with numeric and string columns. All libraries decode every
 |---|---:|---:|---:|---:|
 | **XLSight** | **60 ms** | **1.49 s** | **343 KB** | **1.46 GB** |
 | ExcelDataReader | 270 ms · 4.5× | 5.57 s · 3.7× | 165 MB · 491× | 3.44 GB · 2.3× |
-| MiniExcel | 391 ms · 6.6× | 8.36 s · 5.6× | 877 MB · 2,615× | 10.56 GB · 7.2× |
+| MiniExcel[^1] | 376 ms · 6.3× | 4.75 s · 3.2× | 876 MB · 2,616× | 7.46 GB · 5.2× |
 
 > **Allocated** is total managed heap throughput (BenchmarkDotNet). XLSight's 1.46 GB for 1 M rows reflects
 > strings materialised from the shared-string table; peak live memory (RSS) stays at 159 MB because
 > short-lived strings are collected in Gen 0/1 before the process can grow further.
+
+[^1]: All MiniExcel benchmarks use `EnableSharedStringCache = false` (fully in-memory SST — the same memory model as every other library measured here).
 
 ### BenchmarkDotNet — early exit, first 10 rows
 
@@ -334,35 +293,61 @@ Because XLSight is a true streaming reader, it yields control immediately once t
 |---|---:|---:|---:|---:|
 | **XLSight** | **97 μs** | **294 μs** | **279 KB** | **1.5 MB** |
 | ExcelDataReader | 98 ms · 1,012× | 2.67 s · 9,082× | 44.8 MB · 164× | 1.80 GB · 1,254× |
-| MiniExcel | 169 ms · 1,740× | 935 ms · 3,180× | 483 MB · 1,770× | 1.68 GB · 1,173× |
+| MiniExcel[^1] | 158 ms · 1,629× | 1,098 ms · 3,736× | 483 MB · 1,771× | 1.51 GB · 1,032× |
 
 > **Numeric vs string-heavy files**: the SST is parsed lazily — only the entries referenced by the
 > rows actually consumed are decoded. For numeric sheets the SST is tiny and contributes nothing;
 > for string-heavy sheets only the handful of unique string indices in those 10 rows are resolved,
 > keeping both time and allocation near the numeric baseline regardless of total file size.
 >
-> **ExcelDataReader** processes a full SAX event stream under the hood; there is no mechanism to stop
-> mid-stream, so it reads the entire sheet even when only the first row is consumed.
+> **ExcelDataReader** implements `IDataReader`, whose contract requires `FieldCount` and `RowCount`
+> to be known before the first `Read()` call. To satisfy this, the worksheet constructor performs a
+> mandatory pre-scan that reads through the entire `<sheetData>` section. All shared strings and
+> styles are also loaded into memory at workbook-open time. There is no mechanism to exit earlier,
+> so the full sheet is always processed even when only the first row is consumed.
 >
-> **MiniExcel** is a streaming XML reader, but `Query()` materializes each row as an
-> `IDictionary<string, object>` and boxes every cell value. Per-cell allocation scales linearly
-> with the number of rows processed, which explains the large allocation figures.
+> **MiniExcel** is a streaming XML reader, but `Query()` materialises each row as an `ExpandoObject`
+> (`IDictionary<string, object>`). Every column slot — occupied or not — is pre-populated with a
+> null entry before any cell data is written, so per-row cost scales with the sheet's column width
+> rather than the number of non-empty cells. Every cell value is then boxed as `object?`.
 
-### How XLSight achieves flat allocation
+### How XLSight achieves high performance
 
-Most xlsx readers sit on top of an XML parser (`XmlReader` / SAX) that fires an event per element,
-allocating a string or object for every attribute value encountered.
-XLSight's inner loop works at the byte level: it uses `IndexOf` to locate `<row>` and `<c>` tag
-boundaries directly in the raw UTF-8 byte stream, then decodes cell attributes into pooled stack
-buffers — producing near-zero per-cell heap allocation regardless of sheet size.
+Most xlsx readers sit on top of `XmlReader` or a SAX event stream that fires a callback per XML
+element, allocating a string for every attribute value it encounters. XLSight's sheet scanner and
+shared-string parser bypass `XmlReader` entirely for the hot path. Instead,
+`ReadOnlySpan<byte>.IndexOf` and `SearchValues<byte>` — backed by SIMD intrinsics in the .NET
+runtime — locate `<row>`, `<c>`, `<v>`, `<f>`, and `<t>` tag boundaries directly in the
+decompressed UTF-8 byte stream. A single 64 KB `ArrayPool<byte>`-backed sliding window (`ScanBuffer`)
+is rented once per sheet open and reused for the full stream; no additional I/O buffers are allocated
+during parsing.
 
-The shared-string table is stored in a chunked UTF-8 arena (64 KB slabs, below the LOH threshold).
-Strings are decoded on demand via a 131 K-entry index cache: low-index SST entries (headers, categorical
-values) are cached with zero eviction; high-index entries bypass the cache and are collected by Gen 0.
+Cell attributes (`r=`, `t=`, `s=`) are extracted in-place from byte spans by `CellAttributeParser`,
+using `Utf8Parser.TryParse` to decode column references, integers, and floats without ever
+constructing a managed string. Numbers, booleans, and shared-string indices all take this
+zero-allocation path. Inline text and formula-result strings are the only cell types that produce a
+heap string during decoding.
+
+`ExcelCellValue` is a 24-byte `readonly struct` field-ordered to eliminate padding (8-byte `double`,
+8-byte `string` reference, 4-byte `CellType`, 4-byte `int`). One `ArrayPool<ExcelCellValue>` buffer
+is rented per sheet scan and reused across every row; each yielded `ExcelRow` carries only a single
+`ExcelCellValue[width]` allocation sized to the occupied columns, not the full sheet width. For
+analysis operations the scanner drives a push-based `struct` sink via a generic struct constraint —
+bypassing the row-yield path entirely and reducing per-row heap allocation to zero.
+
+The shared-string table is built as a lazy UTF-8 arena: 64 KB byte-array chunks (below the 85 KB
+LOH threshold) hold pre-decoded, entity-resolved UTF-8. A 256 KB `ArrayPool`-rented staging buffer
+assembles each `<si>` entry inline and commits it atomically to the arena — this parser is also
+byte-level, with no `XmlReader`. Entries are indexed via a packed `long[]` table (global offset +
+byte length, 8 bytes per entry). The SST is parsed incrementally and on demand: a consumer that reads
+only 10 rows causes only the handful of SST indices those rows reference to ever be decoded. A 131
+K-entry `string?[]` index cache retains low-index strings (repeated headers and categorical values)
+with zero eviction; high-index entries are materialised directly from the arena on lookup and
+collected by Gen 0.
 
 ## Key design points
 
-- **Zero dependencies** — only the .NET 10 BCL (ZipArchive + XmlReader).
+- **Zero dependencies** — only the .NET 10 BCL. `ZipArchive` handles the OOXML container; `XmlReader` parses one-time workbook metadata (styles, relationships); the sheet scanner and SST parser are custom byte-level engines that never invoke `XmlReader`.
 - **AOT-compatible** — annotated for Native AOT and trimming from day one.
 - **Streaming first** — rows are yielded as they are parsed; the full sheet is never held in memory.
 - **Read-only** — XLSight reads and analyzes .xlsx files; it does not write them.
