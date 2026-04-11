@@ -41,6 +41,7 @@ internal sealed class SharedStringTable : IDisposable
     private ScanBuffer? _sstBuffer;
     private byte[]? _stagingBuf;
     private readonly Lock _pumpLock = new();
+    private readonly int _cacheLength;
 
     private int  _parsedCount;
     private bool _isComplete;
@@ -64,6 +65,7 @@ internal sealed class SharedStringTable : IDisposable
         _arena      = [];
         _info       = [];
         _cache      = [];
+        _cacheLength = 0;
         _isComplete = true;
     }
 
@@ -74,16 +76,21 @@ internal sealed class SharedStringTable : IDisposable
     internal SharedStringTable(
         ScanBuffer buffer,
         SharedStringsByteParser.ParseState state,
-        byte[] stagingBuf)
+        byte[] stagingBuf,
+        int declaredUniqueCount)
     {
         _sstBuffer  = buffer;
         _parseState = state;
         _stagingBuf = stagingBuf;
         _arena      = state.ArenaChunks;
         _info       = state.InfoChunks;
-        _cache      = new string?[MaxCacheEntries];
+        _cacheLength = GetCacheLength(declaredUniqueCount);
+        _cache      = new string?[_cacheLength];
         _isComplete = false;
     }
+
+    internal int CacheLength => _cacheLength;
+    internal int FirstInfoChunkLength => _info.Count == 0 ? 0 : _info[0].Length;
 
     internal string GetString(int index)
     {
@@ -189,5 +196,15 @@ internal sealed class SharedStringTable : IDisposable
             _isComplete = true;
             CleanupParserResources();
         }
+    }
+
+    private static int GetCacheLength(int declaredUniqueCount)
+    {
+        if (declaredUniqueCount < 0)
+        {
+            return MaxCacheEntries;
+        }
+
+        return Math.Min(declaredUniqueCount, MaxCacheEntries);
     }
 }

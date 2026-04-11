@@ -21,6 +21,8 @@ public sealed class SharedStringsByteParserTests
         using var stream = Utf8("""<sst uniqueCount="0"></sst>""");
         SharedStringTable result = SharedStringsByteParser.Parse(stream);
         Assert.Equal(0, result.Count);
+        Assert.Equal(0, result.CacheLength);
+        Assert.Equal(0, result.FirstInfoChunkLength);
     }
 
     [Fact]
@@ -29,6 +31,26 @@ public sealed class SharedStringsByteParserTests
         using var stream = Utf8("""<sst/>""");
         SharedStringTable result = SharedStringsByteParser.Parse(stream);
         Assert.Equal(0, result.Count);
+        Assert.Equal(131072, result.CacheLength);
+    }
+
+    [Fact]
+    public void Parse_SstWithDeclaredUniqueCount_SizesCacheAndInfoChunkToWorkbook()
+    {
+        using var stream = Utf8("""
+            <sst uniqueCount="3">
+              <si><t>Alpha</t></si>
+              <si><t>Beta</t></si>
+              <si><t>Gamma</t></si>
+            </sst>
+            """);
+        SharedStringTable result = SharedStringsByteParser.Parse(stream);
+
+        Assert.Equal(3, result.CacheLength);
+        Assert.Equal(3, result.FirstInfoChunkLength);
+        Assert.Equal(3, result.Count);
+        Assert.Equal("Alpha", result.GetString(0));
+        Assert.Equal("Gamma", result.GetString(2));
     }
 
     // ── Namespace-prefixed si element ────────────────────────────────────────

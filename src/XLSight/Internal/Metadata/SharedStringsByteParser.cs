@@ -25,9 +25,10 @@ internal static class SharedStringsByteParser
     internal static SharedStringTable Parse(Stream stream)
     {
         byte[] stagingBuf = ArrayPool<byte>.Shared.Rent(StagingCapacity);
-        var state = new ParseState(stagingBuf);
-        var buf   = new ScanBuffer(stream); // ownership transferred to SharedStringTable
-        return new SharedStringTable(buf, state, stagingBuf);
+        var buf = new ScanBuffer(stream); // ownership transferred to SharedStringTable
+        int declaredUniqueCount = ReadDeclaredUniqueCount(buf.Span);
+        var state = new ParseState(stagingBuf, declaredUniqueCount);
+        return new SharedStringTable(buf, state, stagingBuf, declaredUniqueCount);
     }
 
     // ── Parse state ───────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ internal static class SharedStringsByteParser
         public const int InfoChunkSize  = 8192;  // 8 192 × 8 bytes = 64 KB
 
         public readonly List<byte[]> ArenaChunks = [new byte[ArenaChunkSize]];
-        public readonly List<long[]> InfoChunks  = [new long[InfoChunkSize]];
+        public readonly List<long[]> InfoChunks;
         public int ArenaChunkIdx;
         public int ArenaChunkOffset;
         public int InfoChunkIdx;
@@ -48,7 +49,11 @@ internal static class SharedStringsByteParser
         public readonly byte[] StagingBuf;
         public int StagingLen;
 
-        public ParseState(byte[] stagingBuf) => StagingBuf = stagingBuf;
+        public ParseState(byte[] stagingBuf, int declaredUniqueCount)
+        {
+            StagingBuf = stagingBuf;
+            InfoChunks = [new long[GetInitialInfoChunkLength(declaredUniqueCount)]];
+        }
 
         /// <summary>
         /// Atomically places the staging content into the arena and records the info entry.
@@ -91,6 +96,58 @@ internal static class SharedStringsByteParser
             ArenaChunkOffset += length;
             TotalStrings++;
         }
+    }
+
+    private static int GetInitialInfoChunkLength(int declaredUniqueCount)
+    {
+        if (declaredUniqueCount < 0)
+        {
+            return ParseState.InfoChunkSize;
+        }
+
+        return Math.Min(declaredUniqueCount, ParseState.InfoChunkSize);
+    }
+
+    private static int ReadDeclaredUniqueCount(ReadOnlySpan<byte> span)
+    {
+        int tagStart = span.IndexOf("<sst"u8);
+        if (tagStart < 0)
+        {
+            tagStart = span.IndexOf(":sst"u8);
+        }
+
+        if (tagStart < 0)
+        {
+            return -1;
+        }
+
+        int tagEnd = span[tagStart..].IndexOf((byte)'>');
+        if (tagEnd < 0)
+        {
+            return -1;
+        }
+
+        ReadOnlySpan<byte> openingTag = span.Slice(tagStart, tagEnd + 1);
+        int uniqueCountIndex = openingTag.IndexOf("uniqueCount=\""u8);
+        if (uniqueCountIndex < 0)
+        {
+            return -1;
+        }
+
+        ReadOnlySpan<byte> valueBytes = openingTag[(uniqueCountIndex + "uniqueCount=\"".Length)..];
+        int closingQuoteIndex = valueBytes.IndexOf((byte)'"');
+        if (closingQuoteIndex < 0)
+        {
+            return -1;
+        }
+
+        valueBytes = valueBytes[..closingQuoteIndex];
+        if (valueBytes.IsEmpty || !System.Buffers.Text.Utf8Parser.TryParse(valueBytes, out int uniqueCount, out int consumed) || consumed != valueBytes.Length)
+        {
+            return -1;
+        }
+
+        return uniqueCount;
     }
 
     // ── Phase 1: locate <si> elements ────────────────────────────────────────
