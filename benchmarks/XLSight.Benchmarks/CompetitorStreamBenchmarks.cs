@@ -1,4 +1,5 @@
 using System.Text;
+using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using ExcelDataReader;
@@ -7,13 +8,26 @@ using MiniExcelLibs.OpenXml;
 using XLSight;
 
 // Fairness notes:
-//   XLSight StreamSheet decodes all cell values per row (default behaviour).
+//   XLSight GetSheetReader is the fastest supported public forward-only API and
+//     still decodes all cell values per row before exposing Current.
+//   XLSight StreamSheet is also benchmarked separately to show the cost of the
+//     safe snapshotting enumerable contract.
 //   ExcelDataReader: reader.Read() alone skips value decoding; GetValue(i) added
-//     for all columns so work is equivalent to XLSight.
+//     for all columns so work is equivalent to XLSight row decoding.
 //   MiniExcel: useHeaderRow:false skips header detection; FillMergedCells:false
 //     is default but made explicit; EnableSharedStringCache:false forces the SST
 //     fully in-memory (same model as all other libraries) — the default true would
 //     disk-cache large SSTs and add per-lookup seek overhead.
+//
+// Sink contract:
+//   All benchmarks consume both row count and cell count.
+//   The returned int is a deterministic token derived from both so all libraries
+//   are forced through equivalent row/cell workloads.
+//
+// Bounded range selection (complex_workbook.xlsx):
+//   Scenarios!B10:N20 is a centered 11x13 slice from the scenario table.
+//   XLSight uses ReadRange for the bounded rectangular read, while competitors
+//   consume the same effective rows/cells from that rectangle.
 //
 // Sheet selection (xl_large.xlsx):
 //   xl_large.xlsx has 4 sheets. "Worksheet" is the 4th sheet (~985K rows).
@@ -24,17 +38,25 @@ using XLSight;
 [ShortRunJob]
 public class CompetitorStreamBenchmarks
 {
+    private const string ComplexSheet = "Scenarios";
+    private const string MidRangeAddress = "B10:N20";
+
+    private string _complexPath   = null!;
     private string _largePath    = null!;
     private string? _xlLargePath;
     private int _largeColumns;
     private int _xlLargeColumns;
 
+    private static readonly ExcelRange s_midRange = ExcelRange.Parse(MidRangeAddress);
+    private static readonly string[] s_midRangeColumns =
+        CreateColumnKeys(s_midRange.TopLeft.Column, s_midRange.BottomRight.Column);
     private static readonly OpenXmlConfiguration s_cfg = new() { FillMergedCells = false, EnableSharedStringCache = false };
 
     [GlobalSetup]
     public void Setup()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        _complexPath = Path.Combine(AppContext.BaseDirectory, "TestData", "complex_workbook.xlsx");
         _largePath   = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
         var xlLarge  = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
         _xlLargePath = File.Exists(xlLarge) ? xlLarge : null;
@@ -54,52 +76,62 @@ public class CompetitorStreamBenchmarks
         }
     }
 
-    // ── 100K-row file ────────────────────────────────────────────────────────
+    // ── Mid-sheet rectangular range (complex workbook) ───────────────────────
 
-    [Benchmark(Baseline = true, Description = "XLSight AllRows (100K)")]
-    public int XLSight_Large_AllRows()
+    [Benchmark(Description = "XLSight ReadRange MidRange (complex)")]
+    public int XLSight_Complex_MidRange()
     {
-        using var wb = ExcelWorkbook.Open(_largePath);
-        int n = 0;
-        foreach (var _ in wb.StreamSheet("Numbers"))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeXlsightRange(_complexPath, ComplexSheet, s_midRange);
     }
 
-    [Benchmark(Description = "XLSight First10 (100K)")]
-    public int XLSight_Large_First10()
+    [Benchmark(Description = "MiniExcel MidRange (complex)")]
+    public int MiniExcel_Complex_MidRange()
     {
-        using var wb = ExcelWorkbook.Open(_largePath);
-        int n = 0;
-        foreach (var _ in wb.StreamSheet("Numbers").Take(10))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeMiniExcelRange(_complexPath, ComplexSheet, s_midRange, s_midRangeColumns);
+    }
+
+    [Benchmark(Description = "ExcelDataReader MidRange (complex)")]
+    public int ExcelDataReader_Complex_MidRange()
+    {
+        return ConsumeExcelDataReaderRange(_complexPath, ComplexSheet, s_midRange);
+    }
+
+    // ── 100K-row file ────────────────────────────────────────────────────────
+
+    [Benchmark(Baseline = true, Description = "XLSight reader AllRows (100K)")]
+    public int XLSightReader_Large_AllRows()
+    {
+        return ConsumeXlsightReader(_largePath, "Numbers");
+    }
+
+    [Benchmark(Description = "XLSight reader First10 (100K)")]
+    public int XLSightReader_Large_First10()
+    {
+        return ConsumeXlsightReader(_largePath, "Numbers", 10);
+    }
+
+    [Benchmark(Description = "XLSight safe AllRows (100K)")]
+    public int XLSightSafe_Large_AllRows()
+    {
+        return ConsumeXlsightSafe(_largePath, "Numbers");
+    }
+
+    [Benchmark(Description = "XLSight safe First10 (100K)")]
+    public int XLSightSafe_Large_First10()
+    {
+        return ConsumeXlsightSafe(_largePath, "Numbers", 10);
     }
 
     [Benchmark(Description = "MiniExcel AllRows (100K)")]
     public int MiniExcel_Large_AllRows()
     {
-        int n = 0;
-        foreach (var _ in MiniExcel.Query(_largePath, useHeaderRow: false, configuration: s_cfg))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeMiniExcel(_largePath);
     }
 
     [Benchmark(Description = "MiniExcel First10 (100K)")]
     public int MiniExcel_Large_First10()
     {
-        int n = 0;
-        foreach (var _ in MiniExcel.Query(_largePath, useHeaderRow: false, configuration: s_cfg).Take(10))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeMiniExcel(_largePath, maxRows: 10);
     }
 
     [Benchmark(Description = "ExcelDataReader AllRows (100K)")]
@@ -107,13 +139,20 @@ public class CompetitorStreamBenchmarks
     {
         using var stream = File.Open(_largePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
-        int n = 0;
+        int rows = 0;
+        int cells = 0;
         while (reader.Read())
         {
-            for (int i = 0; i < _largeColumns; i++) _ = reader.GetValue(i);
-            n++;
+            for (int i = 0; i < _largeColumns; i++)
+            {
+                _ = reader.GetValue(i);
+                cells++;
+            }
+
+            rows++;
         }
-        return n;
+
+        return CombineCounts(rows, cells);
     }
 
     [Benchmark(Description = "ExcelDataReader First10 (100K)")]
@@ -121,65 +160,64 @@ public class CompetitorStreamBenchmarks
     {
         using var stream = File.Open(_largePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
-        int n = 0;
-        while (reader.Read() && n < 10)
+        int rows = 0;
+        int cells = 0;
+        while (reader.Read() && rows < 10)
         {
-            for (int i = 0; i < _largeColumns; i++) _ = reader.GetValue(i);
-            n++;
+            for (int i = 0; i < _largeColumns; i++)
+            {
+                _ = reader.GetValue(i);
+                cells++;
+            }
+
+            rows++;
         }
-        return n;
+
+        return CombineCounts(rows, cells);
     }
 
     // ── ~1M-row file (skipped if xl_large.xlsx not present) ─────────────────
 
-    [Benchmark(Description = "XLSight AllRows (1M)")]
-    public int XLSight_XlLarge_AllRows()
+    [Benchmark(Description = "XLSight reader AllRows (1M)")]
+    public int XLSightReader_XlLarge_AllRows()
     {
         if (_xlLargePath is null) return -1;
-        using var wb = ExcelWorkbook.Open(_xlLargePath);
-        int n = 0;
-        foreach (var _ in wb.StreamSheet("Worksheet"))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeXlsightReader(_xlLargePath, "Worksheet");
     }
 
-    [Benchmark(Description = "XLSight First10 (1M)")]
-    public int XLSight_XlLarge_First10()
+    [Benchmark(Description = "XLSight reader First10 (1M)")]
+    public int XLSightReader_XlLarge_First10()
     {
         if (_xlLargePath is null) return -1;
-        using var wb = ExcelWorkbook.Open(_xlLargePath);
-        int n = 0;
-        foreach (var _ in wb.StreamSheet("Worksheet").Take(10))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeXlsightReader(_xlLargePath, "Worksheet", 10);
+    }
+
+    [Benchmark(Description = "XLSight safe AllRows (1M)")]
+    public int XLSightSafe_XlLarge_AllRows()
+    {
+        if (_xlLargePath is null) return -1;
+        return ConsumeXlsightSafe(_xlLargePath, "Worksheet");
+    }
+
+    [Benchmark(Description = "XLSight safe First10 (1M)")]
+    public int XLSightSafe_XlLarge_First10()
+    {
+        if (_xlLargePath is null) return -1;
+        return ConsumeXlsightSafe(_xlLargePath, "Worksheet", 10);
     }
 
     [Benchmark(Description = "MiniExcel AllRows (1M)")]
     public int MiniExcel_XlLarge_AllRows()
     {
         if (_xlLargePath is null) { return -1; }
-        int n = 0;
-        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, sheetName: "Worksheet", configuration: s_cfg))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeMiniExcel(_xlLargePath, "Worksheet");
     }
 
     [Benchmark(Description = "MiniExcel First10 (1M)")]
     public int MiniExcel_XlLarge_First10()
     {
         if (_xlLargePath is null) { return -1; }
-        int n = 0;
-        foreach (var _ in MiniExcel.Query(_xlLargePath, useHeaderRow: false, sheetName: "Worksheet", configuration: s_cfg).Take(10))
-        {
-            n++;
-        }
-        return n;
+        return ConsumeMiniExcel(_xlLargePath, "Worksheet", 10);
     }
 
     [Benchmark(Description = "ExcelDataReader AllRows (1M)")]
@@ -189,13 +227,20 @@ public class CompetitorStreamBenchmarks
         using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
         NavigateToSheet(reader, "Worksheet");
-        int n = 0;
+        int rows = 0;
+        int cells = 0;
         while (reader.Read())
         {
-            for (int i = 0; i < _xlLargeColumns; i++) { _ = reader.GetValue(i); }
-            n++;
+            for (int i = 0; i < _xlLargeColumns; i++)
+            {
+                _ = reader.GetValue(i);
+                cells++;
+            }
+
+            rows++;
         }
-        return n;
+
+        return CombineCounts(rows, cells);
     }
 
     [Benchmark(Description = "ExcelDataReader First10 (1M)")]
@@ -205,13 +250,20 @@ public class CompetitorStreamBenchmarks
         using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
         NavigateToSheet(reader, "Worksheet");
-        int n = 0;
-        while (reader.Read() && n < 10)
+        int rows = 0;
+        int cells = 0;
+        while (reader.Read() && rows < 10)
         {
-            for (int i = 0; i < _xlLargeColumns; i++) { _ = reader.GetValue(i); }
-            n++;
+            for (int i = 0; i < _xlLargeColumns; i++)
+            {
+                _ = reader.GetValue(i);
+                cells++;
+            }
+
+            rows++;
         }
-        return n;
+
+        return CombineCounts(rows, cells);
     }
 
     private static void NavigateToSheet(IExcelDataReader reader, string sheetName)
@@ -221,5 +273,166 @@ public class CompetitorStreamBenchmarks
             if (string.Equals(reader.Name, sheetName, StringComparison.OrdinalIgnoreCase)) { return; }
         }
         while (reader.NextResult());
+    }
+
+    private static int ConsumeXlsightSafe(string path, string sheet, int maxRows = int.MaxValue)
+    {
+        using var workbook = ExcelWorkbook.Open(path);
+        int rows = 0;
+        int cells = 0;
+        foreach (var row in workbook.StreamSheet(sheet))
+        {
+            rows++;
+            cells += row.Cells.Length;
+            if (rows == maxRows)
+            {
+                break;
+            }
+        }
+
+        return CombineCounts(rows, cells);
+    }
+
+    private static int ConsumeXlsightReader(string path, string sheet, int maxRows = int.MaxValue)
+    {
+        using var workbook = ExcelWorkbook.Open(path);
+        using var reader = workbook.GetSheetReader(sheet);
+        int rows = 0;
+        int cells = 0;
+        while (rows < maxRows && reader.Read())
+        {
+            rows++;
+            cells += reader.Current.Cells.Length;
+        }
+
+        return CombineCounts(rows, cells);
+    }
+
+    private static int ConsumeXlsightRange(string path, string sheet, ExcelRange range)
+    {
+        using var workbook = ExcelWorkbook.Open(path);
+        RangeResult result = workbook.ReadRange(sheet, range);
+        int cells = 0;
+        foreach (var value in result.Cells.Span)
+        {
+            _ = value;
+            cells++;
+        }
+
+        return CombineCounts(result.Height, cells);
+    }
+
+    private static int ConsumeMiniExcel(string path, string? sheetName = null, int maxRows = int.MaxValue)
+    {
+        int rows = 0;
+        int cells = 0;
+        foreach (IDictionary<string, object?> row in MiniExcel.Query(
+                     path,
+                     useHeaderRow: false,
+                     sheetName: sheetName,
+                     configuration: s_cfg).Cast<IDictionary<string, object?>>())
+        {
+            rows++;
+            foreach (var value in row.Values)
+            {
+                _ = value;
+                cells++;
+            }
+
+            if (rows == maxRows)
+            {
+                break;
+            }
+        }
+
+        return CombineCounts(rows, cells);
+    }
+
+    private static int ConsumeMiniExcelRange(
+        string path,
+        string sheetName,
+        ExcelRange range,
+        IReadOnlyList<string> columns)
+    {
+        int rows = 0;
+        int cells = 0;
+        int rowIndex = 0;
+
+        foreach (IDictionary<string, object?> row in MiniExcel.Query(
+                     path,
+                     useHeaderRow: false,
+                     sheetName: sheetName,
+                     configuration: s_cfg).Cast<IDictionary<string, object?>>())
+        {
+            rowIndex++;
+            if (rowIndex < range.TopLeft.Row)
+            {
+                continue;
+            }
+
+            if (rowIndex > range.BottomRight.Row)
+            {
+                break;
+            }
+
+            rows++;
+            foreach (string column in columns)
+            {
+                row.TryGetValue(column, out object? value);
+                _ = value;
+                cells++;
+            }
+        }
+
+        return CombineCounts(rows, cells);
+    }
+
+    private static int ConsumeExcelDataReaderRange(string path, string sheetName, ExcelRange range)
+    {
+        using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var reader = ExcelReaderFactory.CreateReader(stream);
+        NavigateToSheet(reader, sheetName);
+        int rows = 0;
+        int cells = 0;
+        int rowIndex = 0;
+
+        while (reader.Read())
+        {
+            rowIndex++;
+            if (rowIndex < range.TopLeft.Row)
+            {
+                continue;
+            }
+
+            if (rowIndex > range.BottomRight.Row)
+            {
+                break;
+            }
+
+            rows++;
+            for (int columnIndex = range.TopLeft.Column - 1; columnIndex < range.BottomRight.Column; columnIndex++)
+            {
+                _ = columnIndex < reader.FieldCount ? reader.GetValue(columnIndex) : null;
+                cells++;
+            }
+        }
+
+        return CombineCounts(rows, cells);
+    }
+
+    private static string[] CreateColumnKeys(int startColumn, int endColumn)
+    {
+        var columns = new string[endColumn - startColumn + 1];
+        for (int columnIndex = startColumn; columnIndex <= endColumn; columnIndex++)
+        {
+            columns[columnIndex - startColumn] = new ExcelAddress(columnIndex, 1).ToString()[..^1];
+        }
+
+        return columns;
+    }
+
+    private static int CombineCounts(int rows, int cells)
+    {
+        return unchecked((rows * 397) ^ cells);
     }
 }

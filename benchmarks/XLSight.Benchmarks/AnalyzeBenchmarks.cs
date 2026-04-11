@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using XLSight;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 [MemoryDiagnoser]
 [SimpleJob]

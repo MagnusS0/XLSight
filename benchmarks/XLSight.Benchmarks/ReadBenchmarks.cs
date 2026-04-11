@@ -1,6 +1,5 @@
 using BenchmarkDotNet.Attributes;
 using XLSight;
-using XLSight.Models;
 
 [MemoryDiagnoser]
 [SimpleJob]
@@ -17,7 +16,7 @@ public class ReadBenchmarks
     }
 
     [Benchmark]
-    public CellResult ReadCell_Small()
+    public ExcelCellValue ReadCell_Small()
     {
         using var wb = ExcelWorkbook.Open(_smallPath);
         return wb.ReadCell("Sheet1", "C5");
