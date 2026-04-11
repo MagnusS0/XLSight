@@ -53,6 +53,24 @@ public sealed class SharedStringsByteParserTests
         Assert.Equal("Gamma", result.GetString(2));
     }
 
+    [Fact]
+    public void Parse_MismatchedUniqueCount_GrowsFirstInfoChunkAndParsesAllEntries()
+    {
+        using var stream = Utf8("""
+            <sst uniqueCount="1">
+              <si><t>One</t></si>
+              <si><t>Two</t></si>
+              <si><t>Three</t></si>
+            </sst>
+            """);
+        SharedStringTable result = SharedStringsByteParser.Parse(stream);
+
+        Assert.Equal(3, result.Count);
+        Assert.Equal(SharedStringsByteParser.ParseState.InfoChunkSize, result.FirstInfoChunkLength);
+        Assert.Equal("One", result.GetString(0));
+        Assert.Equal("Three", result.GetString(2));
+    }
+
     // ── Namespace-prefixed si element ────────────────────────────────────────
 
     [Fact]

@@ -85,16 +85,32 @@ internal static class SharedStringsByteParser
             int globalOffset = (ArenaChunkIdx << 16) | ArenaChunkOffset;
             long packed      = ((long)globalOffset << 32) | (uint)length;
 
-            if (InfoChunkOffset >= InfoChunkSize)
-            {
-                InfoChunkIdx++;
-                InfoChunks.Add(new long[InfoChunkSize]);
-                InfoChunkOffset = 0;
-            }
+            EnsureInfoCapacity();
 
             InfoChunks[InfoChunkIdx][InfoChunkOffset++] = packed;
             ArenaChunkOffset += length;
             TotalStrings++;
+        }
+
+        private void EnsureInfoCapacity()
+        {
+            long[] currentChunk = InfoChunks[InfoChunkIdx];
+            if (InfoChunkOffset < currentChunk.Length)
+            {
+                return;
+            }
+
+            if (currentChunk.Length < InfoChunkSize)
+            {
+                var grownChunk = new long[InfoChunkSize];
+                currentChunk.AsSpan().CopyTo(grownChunk);
+                InfoChunks[InfoChunkIdx] = grownChunk;
+                return;
+            }
+
+            InfoChunkIdx++;
+            InfoChunks.Add(new long[InfoChunkSize]);
+            InfoChunkOffset = 0;
         }
     }
 
