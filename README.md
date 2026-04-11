@@ -1,15 +1,20 @@
 # XLSight
 
-[![NuGet](https://img.shields.io/badge/nuget-v0.1.0-blue)](https://www.nuget.org/packages/XLSight/)
+[![NuGet](https://img.shields.io/badge/nuget-v0.2.0-blue)](https://www.nuget.org/packages/XLSight/)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-XLSight is a high-performance, zero-dependency, streaming Excel (.xlsx) reader and analyzer for .NET 10.
+XLSight is a high-performance, zero-dependency Excel (.xlsx) reader and analyzer for .NET 10.
 
-XLSight bypasses standard XML parsing entirely. Using `.indexOf` that compiles to SIMD instructions to scan raw UTF-8 byte streams and storing strings in a chunked, LOH-free arena, XLSight minimizes per-cell allocations and heap fragmentation.
+XLSight bypasses `XmlReader` on the hot path. It scans raw UTF-8 byte streams with SIMD-accelerated `IndexOf`/`SearchValues<byte>` operations and stores shared strings in a chunked, LOH-free arena to minimize per-cell allocations and heap fragmentation.
 
-- Processes 1-million row files 2x faster than Rust's `calamine`, and ~5x faster than `ExcelDataReader` and `MiniExcel`.
-- Reads the first 10 rows of a 1M-row file in < 300 μs, allocating almost no heap memory (~9000x faster than `ExcelDataReader` and ~3000x faster than `MiniExcel` while allocating ~1000x less memory).
+- Processes the NYC 311 1M-row workbook in **4.10 s** with **157 MB** peak RSS using the public reader API, about **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
+- Reads the first 10 rows of a 1M-row sheet in about **300 μs** on both public streaming APIs. Use the borrowed reader for the lowest allocations, or the safe stream when you want independent row snapshots.
+
+> **Scope note:** XLSight currently focuses on `.xlsx` reads. Some comparison libraries also cover
+> formats such as `.xls`, `.csv`, `.xlsm`, or VBA content,
+> so their overall use-case surface is broader. The benchmarks here compare equivalent
+> `.xlsx` reads. Support for more formats may be added in the future.
 
 
 ## Installation
@@ -26,19 +31,19 @@ dotnet add package XLSight
 using XLSight;
 
 // Open from file path
-using var workbook = ExcelWorkbook.Open("report.xlsx");
+using var workbookFromFile = ExcelWorkbook.Open("report.xlsx");
 
 // Open from a stream
-using var workbook = ExcelWorkbook.Open(stream);
+using var workbookFromStream = ExcelWorkbook.Open(stream);
 
 // Async variants
-await using var workbook = await ExcelWorkbook.OpenAsync("report.xlsx");
-await using var workbook = await ExcelWorkbook.OpenAsync(stream);
+await using var workbookFromFileAsync = await ExcelWorkbook.OpenAsync("report.xlsx");
+await using var workbookFromStreamAsync = await ExcelWorkbook.OpenAsync(stream);
 
 // Workbook-level metadata
-Console.WriteLine(string.Join(", ", workbook.SheetNames)); // ["Sheet1", "Sheet2"]
-Console.WriteLine(workbook.IsDate1904);
-Console.WriteLine(workbook.HasMacros);
+Console.WriteLine(string.Join(", ", workbookFromFile.SheetNames)); // "Sheet1, Sheet2"
+Console.WriteLine(workbookFromFile.IsDate1904);
+Console.WriteLine(workbookFromFile.HasMacros);
 ```
 
 ### Read a cell or range
@@ -48,27 +53,39 @@ using XLSight;
 
 using var workbook = ExcelWorkbook.Open("report.xlsx");
 
-// Single cell
-var cell = workbook.ReadCell("Sheet1", "B2");
-Console.WriteLine(cell.Value);
+// Single cell — returns ExcelCellValue directly
+ExcelCellValue cell = workbook.ReadCell("Sheet1", "B2");
+Console.WriteLine(cell);
 
-// Range
-var result = workbook.ReadRange("Sheet1", "A1:D10");
+// Typed address overload — no string parsing at call site
+ExcelCellValue cell2 = workbook.ReadCell("Sheet1", new ExcelAddress(2, 2));
+
+// Addresses are case-insensitive
+ExcelCellValue cell3 = workbook.ReadCell("Sheet1", "b2");
+
+// Range — result.Rows gives one ExcelRow per row, consistent with streaming
+RangeResult result = workbook.ReadRange("Sheet1", "A1:D10");
 foreach (var row in result.Rows)
 {
-    foreach (var cell in row.Cells)
-        Console.Write($"{cell}\t");
+    foreach (var c in row.Cells)
+        Console.Write($"{c}\t");
     Console.WriteLine();
 }
 
+// Typed range overload
+var range = ExcelRange.Parse("A1:D10");
+RangeResult result2 = workbook.ReadRange("Sheet1", range);
+
 // Async equivalents
-var cell  = await workbook.ReadCellAsync("Sheet1", "B2");
-var range = await workbook.ReadRangeAsync("Sheet1", "A1:D10");
+ExcelCellValue cellAsync   = await workbook.ReadCellAsync("Sheet1", "B2");
+RangeResult    rangeAsync  = await workbook.ReadRangeAsync("Sheet1", "A1:D10");
 ```
 
-### Stream large sheets
+### Stream large sheets safely
 
-Stream rows one at a time without loading the entire sheet into memory:
+Stream rows one at a time without loading the entire sheet into memory.
+The `StreamSheet*` / `StreamRange*` APIs yield **independent row snapshots**, so they are safe
+to buffer, materialize, and use with LINQ. This is the best default for most consumers:
 
 ```csharp
 using XLSight;
@@ -83,18 +100,59 @@ await foreach (var row in workbook.StreamSheetAsync("Sheet1"))
     Console.WriteLine();
 }
 
-// Stream a specific range
-await foreach (var row in workbook.StreamRangeAsync("Sheet1", "A1:C1000"))
+// Stream a typed range — no string parsing
+var range = ExcelRange.Parse("A1:C1000");
+await foreach (var row in workbook.StreamRangeAsync("Sheet1", range))
 {
-    var name  = row.GetCell(1);   // column 1 by 1-based index
+    var name  = row.GetCell(1);   // 1-based column index
     var value = row.GetCell(3);
 }
 
-// Synchronous streaming is also available
+// Synchronous streaming — rows are independent; safe to buffer or pass to LINQ
 foreach (var row in workbook.StreamSheet("Sheet1"))
 {
     ReadOnlySpan<ExcelCellValue> cells = row.Cells;   // zero-copy span access
 }
+```
+
+### Borrowed high-performance reader
+
+If you want the absolute lowest-allocation path, use `GetSheetReader*` / `GetRangeReader*`.
+`ExcelSheetReader.Current` is a **borrowed** row view over a reused internal buffer, so the
+current row is only valid until the next successful call to `Read()` or `ReadAsync()`.
+Use this when you process each row immediately in a hot loop; if you need to retain rows,
+prefer `StreamSheet*` / `StreamRange*`:
+
+```csharp
+await using var reader = await workbook.GetSheetReaderAsync("Sheet1");
+
+while (await reader.ReadAsync())
+{
+    ExcelRow current = reader.Current;
+    ReadOnlySpan<ExcelCellValue> cells = current.Cells;
+    runningTotal += Sum(cells);   // process the row before the next ReadAsync()
+}
+```
+
+If you ever need to keep a borrowed row past the next read, call `current.ToSnapshot()`.
+In most application code, using `StreamSheet*` is simpler.
+
+### Address and range types
+
+`ExcelAddress` and `ExcelRange` are value types you can construct once and reuse across calls:
+
+```csharp
+// Parse from string (case-insensitive)
+ExcelAddress addr = ExcelAddress.Parse("B2");
+ExcelRange   rng  = ExcelRange.Parse("A1:D10");
+
+// Try-pattern — returns false on invalid input, never throws
+bool okAddress = ExcelAddress.TryParse("b2", out ExcelAddress addr2);
+bool okRange   = ExcelRange.TryParse("A1:D10", out ExcelRange rng2);
+
+// Construct directly
+var addr3 = new ExcelAddress(column: 2, row: 2);   // B2
+var rng3  = new ExcelRange(new ExcelAddress(1, 1), new ExcelAddress(4, 10));  // A1:D10
 ```
 
 ### Read modes
@@ -103,10 +161,10 @@ Pass `ReadMode` to control what data is returned:
 
 ```csharp
 // Values (default) — decoded cached values: dates, numbers, text, booleans, errors
-var range = workbook.ReadRange("Sheet1", "A1:D10", ReadMode.Values);
+RangeResult valuesRange = workbook.ReadRange("Sheet1", "A1:D10", ReadMode.Values);
 
 // Formulas — return formula text for formula cells; fall back to decoded value otherwise
-var range = workbook.ReadRange("Sheet1", "A1:D10", ReadMode.Formulas);
+RangeResult formulasRange = workbook.ReadRange("Sheet1", "A1:D10", ReadMode.Formulas);
 ```
 
 `ReadMode` applies to `ReadCell`, `ReadRange`, `StreamSheet`, and `StreamRange`.
@@ -124,7 +182,7 @@ Use `AnalysisLevel` to control how much work is performed:
 
 ```csharp
 using XLSight;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 using var workbook = ExcelWorkbook.Open("report.xlsx");
 
@@ -135,9 +193,13 @@ Console.WriteLine($"Has macros: {info.HasMacros}");
 
 foreach (SheetInfo sheet in info.Sheets)
 {
-    Console.WriteLine($"{sheet.SheetName}: {sheet.UsedRange}, {sheet.RowCount} rows");
-    Console.WriteLine($"  Inferred header row: {sheet.InferredHeaderRowIndex}");
-    Console.WriteLine($"  Merged regions: {sheet.MergedRegions.Count}");
+    Console.WriteLine($"{sheet.SheetName}: {sheet.Tables.Count} tables, {sheet.MergedRegions.Count} merged regions");
+
+    if (sheet.RowCount is { } rowCount)
+        Console.WriteLine($"  Used range: {sheet.UsedRange}, {rowCount} rows");
+
+    if (sheet.InferredHeaderRowIndex is { } headerRow)
+        Console.WriteLine($"  Inferred header row: {headerRow}");
 }
 
 // Analyze a single sheet — with explicit level
@@ -146,9 +208,14 @@ Console.WriteLine($"Used range: {s.UsedRange}");
 Console.WriteLine($"Columns with formulas: {string.Join(", ", s.FormulaColumns)}");
 
 // Async variants
-WorkbookInfo info  = await workbook.AnalyzeAsync();
-SheetInfo    sheet = await workbook.AnalyzeSheetAsync("Sheet1");
+WorkbookInfo infoAsync  = await workbook.AnalyzeAsync();
+SheetInfo    sheetAsync = await workbook.AnalyzeSheetAsync("Sheet1");
 ```
+
+`Exact` is always populated. `Observed` and `Inferred` are `null` when that analysis work was
+not requested, and the convenience properties (`RowCount`, `Columns`, `UsedRange`,
+`FormulaColumns`, `InferredHeaderRowIndex`, and so on) return `null` instead of throwing.
+Use `TryGetObserved` / `TryGetInferred` when you want the full sub-objects explicitly.
 
 ### Column profiles
 
@@ -160,13 +227,16 @@ needs to understand a sheet's schema without reading the data itself.
 ```csharp
 SheetInfo sheet = workbook.AnalyzeSheet("Data");
 
-foreach (ColumnProfile col in sheet.Columns)
+if (sheet.Columns is { } columns)
 {
-    string header = col.InferredHeader ?? $"Col {col.ColumnIndex}";
-    Console.WriteLine($"{header}: {col.DominantType}, {col.NonEmptyCount} rows, ~{col.DistinctValueEstimate} distinct");
+    foreach (ColumnProfile col in columns)
+    {
+        string header = col.InferredHeader ?? $"Col {col.ColumnIndex}";
+        Console.WriteLine($"{header}: {col.DominantType}, {col.NonEmptyCount} rows, ~{col.DistinctValueEstimate} distinct");
 
-    if (col.MinNumericValue.HasValue)
-        Console.WriteLine($"  range [{col.MinNumericValue} – {col.MaxNumericValue}]");
+        if (col.MinNumericValue.HasValue)
+            Console.WriteLine($"  range [{col.MinNumericValue} – {col.MaxNumericValue}]");
+    }
 }
 ```
 
@@ -247,53 +317,82 @@ WorkbookInfo info = await workbook.AnalyzeAsync(
 |---|---|
 | `SheetNotFoundException` | Named sheet does not exist in the workbook |
 | `InvalidAddressException` | Cell address or range string cannot be parsed |
-| `RangeTooLargeException` | Requested range exceeds `ExcelLimits` |
+| `RangeTooLargeException` | Requested range exceeds `ExcelLimits.MaxCells` |
 | `MalformedWorkbookException` | ZIP package or XML structure is corrupt |
 
-All exception types inherit from `ExcelException`.
+## Limits
+
+`ExcelLimits` exposes the bounds XLSight enforces:
+
+```csharp
+Console.WriteLine(ExcelLimits.MaxRows);    // 1,048,576
+Console.WriteLine(ExcelLimits.MaxColumns); // 16,384
+Console.WriteLine(ExcelLimits.MaxCells);   // 100,000,000
+```
 
 ## Performance
 
-All benchmarks run on Linux .NET 10.0, Intel Core i9-14900K. Every library reads the same sheet and decodes all cell values.
+All benchmarks were run on Linux, .NET 10.0, Intel Core i9-14900K. Every library reads the same
+sheet and touches the same rows and cells. XLSight benchmarks use the relevant
+public API for each scenario: `GetSheetReader` for forward-only streaming and `ReadRange` for
+bounded rectangular reads.
 
 ### Real-world benchmark — NYC 311 service requests, 1 M rows × 41 cols
 
-Wall time and peak RSS measured with psutil across 5 runs (2 warmup). XLSight processes the 1M row file 2x faster than Rust's `calamine` with the same RSS footprint.
+Wall time and peak RSS were measured with a small Python script using `psutil` across 5 runs
+(2 warmup).
 
-| Library | Mean time | Peak RSS |
-|---|---:|---:|
-| **XLSight (.NET 10)** | **4.10 s** | **159 MB** |
-| calamine (Rust) | 8.65 s · 2.1× | 160 MB |
-| ExcelDataReader | 19.47 s · 4.7× | 309 MB |
-| MiniExcel[^1] | 19.14 s · 4.7× | 394 MB |
+All four harnesses processed the same workload: **41,000,041 cells**.
 
-### BenchmarkDotNet — streaming throughput, all rows
+| Library | Mean time | Stddev | Peak RSS |
+|---|---:|---:|---:|
+| **XLSight reader (.NET 10)** | **4.10 s** | **0.004 s** | **157 MB** |
+| calamine (Rust) | 8.69 s · 2.1× | 0.109 s | 160 MB |
+| ExcelDataReader | 19.27 s · 4.7× | 0.140 s | 310 MB |
+| MiniExcel[^1] | 19.11 s · 4.7× | 0.178 s | 395 MB |
+
+### BenchmarkDotNet — public streaming throughput, all rows
 
 Measured with [BenchmarkDotNet](https://benchmarkdotnet.org). The 100 K and 1 M datasets are
-synthetic xlsx files with numeric and string columns. All libraries decode every cell value.
+synthetic xlsx files with numeric and string columns.
 
 | Library | 100 K rows | 1 M rows | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight** | **60 ms** | **1.49 s** | **343 KB** | **1.46 GB** |
-| ExcelDataReader | 270 ms · 4.5× | 5.57 s · 3.7× | 165 MB · 491× | 3.44 GB · 2.3× |
-| MiniExcel[^1] | 376 ms · 6.3× | 4.75 s · 3.2× | 876 MB · 2,616× | 7.46 GB · 5.2× |
+| **XLSight reader** | **59.3 ms** | **1.51 s** | **343 KB** | **1.46 GB** |
+| **XLSight safe stream** | **62.0 ms** | **1.56 s** | **14.1 MB** | **1.66 GB** |
+| ExcelDataReader | 268.9 ms · 4.5× | 5.44 s · 3.6× | 165 MB · 492.6× | 3.43 GB · 2.3× |
+| MiniExcel[^1] | 387.1 ms · 6.5× | 4.85 s · 3.2× | 885 MB · 2,642.1× | 7.54 GB · 5.2× |
 
-> **Allocated** is total managed heap throughput (BenchmarkDotNet). XLSight's 1.46 GB for 1 M rows reflects
-> strings materialised from the shared-string table; peak live memory (RSS) stays at 159 MB because
-> short-lived strings are collected in Gen 0/1 before the process can grow further.
+> **Allocated** is total managed heap throughput (BenchmarkDotNet), not peak live RSS.
 
 [^1]: All MiniExcel benchmarks use `EnableSharedStringCache = false` (fully in-memory SST — the same memory model as every other library measured here).
 
+### BenchmarkDotNet — bounded mid-sheet range
+
+This scenario reads `Scenarios!B10:N20` (**11 rows × 13 columns**) from the middle of
+`complex_workbook.xlsx`. It models the case where the caller wants one table-like region,
+not the whole sheet.
+
+| Library | Time | Allocated |
+|---|---:|---:|
+| **XLSight `ReadRange`** | **127.0 μs** | **425 KB** |
+| MiniExcel[^1] | 596.6 μs · 4.7× | 839 KB · 2.0× |
+| ExcelDataReader | 735.5 μs · 5.8× | 614 KB · 1.4× |
+
+> XLSight can use a true bounded range API here; MiniExcel and ExcelDataReader still iterate sheet
+> rows and then consume just the requested rectangle.
+
 ### BenchmarkDotNet — early exit, first 10 rows
 
-Agents and pipelines often need only a few rows to sample a file or confirm its schema.
-Because XLSight is a true streaming reader, it yields control immediately once the row limit is reached.
+Agents and pipelines often need only a few rows to sample a file or confirm its schema. XLSight
+yields control immediately once the row limit is reached.
 
 | Library | First 10 of 100 K | First 10 of 1 M | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight** | **97 μs** | **294 μs** | **279 KB** | **1.5 MB** |
-| ExcelDataReader | 98 ms · 1,012× | 2.67 s · 9,082× | 44.8 MB · 164× | 1.80 GB · 1,254× |
-| MiniExcel[^1] | 158 ms · 1,629× | 1,098 ms · 3,736× | 483 MB · 1,771× | 1.51 GB · 1,032× |
+| **XLSight reader** | **97.1 μs** | **301.8 μs** | **279 KB** | **1.48 MB** |
+| **XLSight safe stream** | **96.4 μs** | **297.6 μs** | **281 KB** | **1.48 MB** |
+| ExcelDataReader | 96.7 ms · 995.9× | 2.68 s · 8,880.1× | 44.8 MB · 164.4× | 1.80 GB · 1,245.4× |
+| MiniExcel[^1] | 170.2 ms · 1,752.8× | 1.13 s · 3,744.2× | 483 MB · 1,772.7× | 1.51 GB · 1,044.8× |
 
 > **Numeric vs string-heavy files**: the SST is parsed lazily — only the entries referenced by the
 > rows actually consumed are decoded. For numeric sheets the SST is tiny and contributes nothing;
@@ -329,27 +428,30 @@ zero-allocation path. Inline text and formula-result strings are the only cell t
 heap string during decoding.
 
 `ExcelCellValue` is a 24-byte `readonly struct` field-ordered to eliminate padding (8-byte `double`,
-8-byte `string` reference, 4-byte `CellType`, 4-byte `int`). One `ArrayPool<ExcelCellValue>` buffer
-is rented per sheet scan and reused across every row; each yielded `ExcelRow` carries only a single
-`ExcelCellValue[width]` allocation sized to the occupied columns, not the full sheet width. For
-analysis operations the scanner drives a push-based `struct` sink via a generic struct constraint —
-bypassing the row-yield path entirely and reducing per-row heap allocation to zero.
+8-byte `string` reference, 4-byte `CellType`, 4-byte `int`). The borrowed `ExcelSheetReader`
+reuses one `ExcelCellValue[]` row buffer for the full scan, keeping the hot path allocation-free
+aside from decoded strings. `StreamSheet*` / `StreamRange*` build on top of that reader and
+snapshot rows only when you choose the safe enumerable surface. `RangeResult` stores one flat
+read-only cell buffer and projects cached `ExcelRow` views over slices of that memory instead of
+copying per row. For analysis operations the scanner drives a push-based `struct` sink via a
+generic struct constraint, bypassing the row-yield path entirely and reducing per-row heap
+allocation to zero.
 
 The shared-string table is built as a lazy UTF-8 arena: 64 KB byte-array chunks (below the 85 KB
 LOH threshold) hold pre-decoded, entity-resolved UTF-8. A 256 KB `ArrayPool`-rented staging buffer
 assembles each `<si>` entry inline and commits it atomically to the arena — this parser is also
 byte-level, with no `XmlReader`. Entries are indexed via a packed `long[]` table (global offset +
 byte length, 8 bytes per entry). The SST is parsed incrementally and on demand: a consumer that reads
-only 10 rows causes only the handful of SST indices those rows reference to ever be decoded. A 131
-K-entry `string?[]` index cache retains low-index strings (repeated headers and categorical values)
-with zero eviction; high-index entries are materialised directly from the arena on lookup and
-collected by Gen 0.
+only 10 rows causes only the handful of SST indices those rows reference to ever be decoded. A
+low-index `string?[]` cache sized to `min(uniqueCount, 131,072)` retains repeated headers and
+categorical values without over-allocating on small workbooks; high-index entries are materialised
+directly from the arena on lookup and collected by Gen 0.
 
 ## Key design points
 
 - **Zero dependencies** — only the .NET 10 BCL. `ZipArchive` handles the OOXML container; `XmlReader` parses one-time workbook metadata (styles, relationships); the sheet scanner and SST parser are custom byte-level engines that never invoke `XmlReader`.
 - **AOT-compatible** — annotated for Native AOT and trimming from day one.
-- **Streaming first** — rows are yielded as they are parsed; the full sheet is never held in memory.
+- **Dual streaming API** — `GetSheetReader*` exposes the lowest-allocation borrowed reader; `StreamSheet*` / `StreamRange*` snapshot rows automatically for safe enumeration and LINQ usage.
 - **Read-only** — XLSight reads and analyzes .xlsx files; it does not write them.
 - **Target framework** — .NET 10 (`net10.0`).
 
