@@ -188,6 +188,7 @@ public sealed class WorkbookAsyncTests
         Assert.False(info.IsEmpty);
         Assert.Equal(2, info.RowCount);
         Assert.Equal(2, info.ColumnCount);
+        Assert.NotNull(info.Observed);
     }
 
     [Fact]
@@ -215,7 +216,8 @@ public sealed class WorkbookAsyncTests
         Assert.False(info.HasObserved);
         Assert.False(info.HasInferred);
         Assert.NotNull(info.Exact.DeclaredDimension);
-        Assert.Throws<InvalidOperationException>(() => _ = info.RowCount);
+        Assert.Null(info.Observed);
+        Assert.Null(info.RowCount);
     }
 
     [Fact]
@@ -228,6 +230,16 @@ public sealed class WorkbookAsyncTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => workbook.ReadRangeAsync("Sheet1", "A1:B2", ct: cts.Token));
+    }
+
+    [Fact]
+    public async Task ReadCellAsync_RangeAddress_ThrowsInvalidAddressException()
+    {
+        using var ms = CreateWorkbook();
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<InvalidAddressException>(
+            () => workbook.ReadCellAsync("Sheet1", "A1:B2", ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]

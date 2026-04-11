@@ -139,10 +139,6 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(cellAddress);
-        if (cellAddress.Contains(':'))
-        {
-            throw new InvalidAddressException(cellAddress, "ReadCell requires a single cell address, not a range");
-        }
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("ReadCell");
@@ -150,8 +146,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("cell", cellAddress);
         try
         {
-            var range = AddressParser.Parse(cellAddress.ToUpperInvariant().AsSpan());
-            return _engine.ReadCell(sheet, range.TopLeft, mode);
+            return _engine.ReadCell(sheet, ExcelAddress.Parse(cellAddress), mode);
         }
         finally
         {
@@ -267,10 +262,6 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(cellAddress);
-        if (cellAddress.Contains(':'))
-        {
-            throw new InvalidAddressException(cellAddress, "ReadCell requires a single cell address, not a range");
-        }
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("ReadCell");
@@ -278,8 +269,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("cell", cellAddress);
         try
         {
-            var range = AddressParser.Parse(cellAddress.ToUpperInvariant().AsSpan());
-            return await _engine.ReadCellAsync(sheet, range.TopLeft, mode, ct).ConfigureAwait(false);
+            return await _engine.ReadCellAsync(sheet, ExcelAddress.Parse(cellAddress), mode, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -341,6 +331,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(rangeAddress);
         ThrowIfDisposed();
         EnterOperation();
+        XLSightEventSource.Log.ReadRangeStart(sheet, rangeAddress);
         using var activity = ActivitySource.StartActivity("ReadRange");
         activity?.SetTag("sheet", sheet);
         activity?.SetTag("range", rangeAddress);
@@ -351,6 +342,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
         finally
         {
+            XLSightEventSource.Log.ReadRangeStop();
             ExitOperation();
         }
     }
@@ -374,6 +366,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
         EnterOperation();
+        XLSightEventSource.Log.ReadRangeStart(sheet, range.ToString());
         using var activity = ActivitySource.StartActivity("ReadRange");
         activity?.SetTag("sheet", sheet);
         try
@@ -382,6 +375,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
         finally
         {
+            XLSightEventSource.Log.ReadRangeStop();
             ExitOperation();
         }
     }
@@ -508,6 +502,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
         EnterOperation();
+        XLSightEventSource.Log.AnalyzeSheetStart(sheet);
         using var activity = ActivitySource.StartActivity("AnalyzeSheet");
         activity?.SetTag("sheet", sheet);
         activity?.SetTag("level", level.ToString());
@@ -517,6 +512,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
         finally
         {
+            XLSightEventSource.Log.AnalyzeSheetStop();
             ExitOperation();
         }
     }

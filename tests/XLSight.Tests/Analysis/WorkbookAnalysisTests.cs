@@ -218,6 +218,7 @@ public sealed class WorkbookAnalysisTests
         Assert.Equal(2, info.ColumnCount);
         Assert.Equal(4, info.CellCount);
         Assert.NotNull(info.UsedRange);
+        Assert.NotNull(info.Observed);
     }
 
     [Fact]
@@ -231,6 +232,7 @@ public sealed class WorkbookAnalysisTests
         Assert.True(info.IsEmpty);
         Assert.Equal(0, info.CellCount);
         Assert.Null(info.UsedRange);
+        Assert.NotNull(info.Observed);
     }
 
     [Fact]
@@ -241,9 +243,10 @@ public sealed class WorkbookAnalysisTests
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
-        Assert.Single(info.Columns);
-        Assert.Equal(CellType.Number, info.Columns[0].DominantType);
-        Assert.Equal(3, info.Columns[0].NonEmptyCount);
+        var columns = Assert.IsAssignableFrom<IReadOnlyList<ColumnProfile>>(info.Columns);
+        Assert.Single(columns);
+        Assert.Equal(CellType.Number, columns[0].DominantType);
+        Assert.Equal(3, columns[0].NonEmptyCount);
     }
 
     [Fact]
@@ -257,7 +260,8 @@ public sealed class WorkbookAnalysisTests
 
         Assert.Equal(1, info.InferredHeaderRowIndex);
 
-        var colA = info.Columns.FirstOrDefault(c => c.ColumnIndex == 1);
+        var columns = Assert.IsAssignableFrom<IReadOnlyList<ColumnProfile>>(info.Columns);
+        var colA = columns.FirstOrDefault(c => c.ColumnIndex == 1);
         Assert.NotNull(colA);
         Assert.Equal("Name", colA.InferredHeader);
     }
@@ -290,8 +294,10 @@ public sealed class WorkbookAnalysisTests
         Assert.False(info.HasObserved);
         Assert.False(info.HasInferred);
         Assert.Single(info.MergedRegions);
-        Assert.Throws<InvalidOperationException>(() => _ = info.RowCount);
-        Assert.Throws<InvalidOperationException>(() => _ = info.InferredHeaderRowIndex);
+        Assert.Null(info.Observed);
+        Assert.Null(info.Inferred);
+        Assert.Null(info.RowCount);
+        Assert.Null(info.InferredHeaderRowIndex);
     }
 
     [Fact]
@@ -306,10 +312,13 @@ public sealed class WorkbookAnalysisTests
         Assert.Equal(AnalysisLevel.Observed, info.Level);
         Assert.True(info.HasObserved);
         Assert.False(info.HasInferred);
+        Assert.NotNull(info.Observed);
+        Assert.Null(info.Inferred);
         Assert.Equal(2, info.RowCount);
-        Assert.Equal(2, info.Columns.Count);
-        Assert.All(info.Columns, column => Assert.Null(column.InferredHeader));
-        Assert.Throws<InvalidOperationException>(() => _ = info.InferredHeaderRowIndex);
+        var columns = Assert.IsAssignableFrom<IReadOnlyList<ColumnProfile>>(info.Columns);
+        Assert.Equal(2, columns.Count);
+        Assert.All(columns, column => Assert.Null(column.InferredHeader));
+        Assert.Null(info.InferredHeaderRowIndex);
     }
 
     [Fact]
@@ -337,10 +346,12 @@ public sealed class WorkbookAnalysisTests
             info.Sheets,
             s => string.Equals(s.SheetName, "Calculator", StringComparison.Ordinal));
         Assert.Equal(2, calculator.Exact.ConditionalFormattingCount);
+        var calculatorObserved = Assert.IsType<SheetAnalysisObserved>(calculator.Observed);
         Assert.Contains(
-            calculator.Observed.FormulaColumns,
+            calculatorObserved.FormulaColumns,
             c => string.Equals(c.ColumnLabel, "J", StringComparison.Ordinal) && c.FormulaCount == 42);
-        Assert.NotEmpty(calculator.Inferred.Regions);
+        var calculatorInferred = Assert.IsType<SheetAnalysisInferred>(calculator.Inferred);
+        Assert.NotEmpty(calculatorInferred.Regions);
 
         SheetInfo charts = Assert.Single(
             info.Sheets,
@@ -348,7 +359,8 @@ public sealed class WorkbookAnalysisTests
         Assert.Equal(1, charts.Exact.DrawingCount);
         Assert.Equal(3, charts.Exact.Charts.Count);
         Assert.Contains(charts.Exact.Charts, c => c.PartPath.EndsWith("chart1.xml", StringComparison.Ordinal));
-        Assert.Contains(charts.Inferred.Regions, region => region.ColumnCount >= 3);
+        var chartsInferred = Assert.IsType<SheetAnalysisInferred>(charts.Inferred);
+        Assert.Contains(chartsInferred.Regions, region => region.ColumnCount >= 3);
 
         SheetInfo pivotSheet = Assert.Single(
             info.Sheets,
@@ -365,10 +377,12 @@ public sealed class WorkbookAnalysisTests
         SheetInfo info = workbook.AnalyzeSheet("Calculator");
 
         Assert.NotNull(info.Exact.DeclaredDimension);
-        Assert.NotNull(info.Observed.ValueUsedRange);
-        Assert.NotEqual(info.Exact.DeclaredDimension, info.Observed.ValueUsedRange);
+        var observed = Assert.IsType<SheetAnalysisObserved>(info.Observed);
+        Assert.NotNull(observed.ValueUsedRange);
+        Assert.NotEqual(info.Exact.DeclaredDimension, observed.ValueUsedRange);
+        var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
         Assert.Contains(
-            info.Inferred.Warnings,
+            inferred.Warnings,
             warning => string.Equals(warning.Code, "declared-dimension-mismatch", StringComparison.Ordinal));
     }
 
@@ -390,12 +404,46 @@ public sealed class WorkbookAnalysisTests
             s => string.Equals(s.SheetName, "Charts", StringComparison.Ordinal));
         Assert.Equal(1, charts.Exact.DrawingCount);
         Assert.Equal(3, charts.Exact.Charts.Count);
-        Assert.Throws<InvalidOperationException>(() => _ = charts.UsedRange);
+        Assert.Null(charts.Observed);
+        Assert.Null(charts.UsedRange);
 
         SheetInfo pivotSheet = Assert.Single(
             info.Sheets,
             s => string.Equals(s.SheetName, "Pivot-Analysis", StringComparison.Ordinal));
         Assert.Single(pivotSheet.Exact.PivotTables);
-        Assert.Throws<InvalidOperationException>(() => _ = pivotSheet.RowCount);
+        Assert.Null(pivotSheet.RowCount);
+    }
+
+    [Fact]
+    public void SheetInfo_CanBeConstructedSafelyWithoutHiddenInternalState()
+    {
+        var info = new SheetInfo
+        {
+            Level = AnalysisLevel.Exact,
+            SheetName = "Sheet1",
+            SheetIndex = 0,
+            Exact = new SheetAnalysisExact
+            {
+                DeclaredDimension = null,
+                MergedRegions = [],
+                Tables = [],
+                PivotTables = [],
+                Charts = [],
+                ConditionalFormattingCount = 0,
+                DataValidationCount = 0,
+                HyperlinkCount = 0,
+                CommentCount = 0,
+                DrawingCount = 0,
+            },
+            Observed = null,
+            Inferred = null,
+        };
+
+        Assert.False(info.HasObserved);
+        Assert.False(info.HasInferred);
+        Assert.Null(info.UsedRange);
+        Assert.Null(info.RowCount);
+        Assert.False(info.TryGetObserved(out _));
+        Assert.False(info.TryGetInferred(out _));
     }
 }

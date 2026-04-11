@@ -97,7 +97,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
 
         var range = new ExcelRange(address, address);
         var result = ReadRange(sheetName, range, mode);
-        return result.Cells[0];
+        return result.Cells.Span[0];
     }
 
     public async Task<ExcelCellValue> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct)
@@ -105,7 +105,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         ct.ThrowIfCancellationRequested();
         var range = new ExcelRange(address, address);
         var result = await ReadRangeAsync(sheetName, range, mode, ct).ConfigureAwait(false);
-        return result.Cells[0];
+        return result.Cells.Span[0];
     }
 
     public async Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct)

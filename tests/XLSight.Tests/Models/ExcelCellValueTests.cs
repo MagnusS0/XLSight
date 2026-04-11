@@ -162,6 +162,20 @@ public sealed class ExcelCellValueTests
         Assert.False(v);
     }
 
+    [Fact]
+    public void TryGetSharedStringId_OnDefaultValue_ReturnsFalseAndMinusOne()
+    {
+        Assert.False(default(ExcelCellValue).TryGetSharedStringId(out int id));
+        Assert.Equal(-1, id);
+    }
+
+    [Fact]
+    public void TryGetSharedStringId_OnEmptyValue_ReturnsFalseAndMinusOne()
+    {
+        Assert.False(ExcelCellValue.Empty.TryGetSharedStringId(out int id));
+        Assert.Equal(-1, id);
+    }
+
     // ── Equality ──────────────────────────────────────────────────────────────
 
     [Fact]

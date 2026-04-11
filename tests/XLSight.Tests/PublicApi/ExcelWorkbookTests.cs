@@ -251,6 +251,15 @@ public sealed class ExcelWorkbookTests
     }
 
     [Fact]
+    public void ReadCell_RangeAddress_ThrowsInvalidAddressException()
+    {
+        using var ms = CreateWorkbook();
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+
+        Assert.Throws<InvalidAddressException>(() => workbook.ReadCell("Sheet1", "A1:B2"));
+    }
+
+    [Fact]
     public void ReadRange_AfterDispose_ThrowsObjectDisposedException()
     {
         using var ms = CreateWorkbook();

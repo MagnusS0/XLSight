@@ -105,8 +105,14 @@ public readonly struct ExcelCellValue : IEquatable<ExcelCellValue>
     /// </returns>
     public bool TryGetSharedStringId(out int id)
     {
-        id = _sstId;
-        return _sstId >= 0;
+        if (_type == CellType.Text && _sstId >= 0)
+        {
+            id = _sstId;
+            return true;
+        }
+
+        id = -1;
+        return false;
     }
 
     // ── Typed accessors — throw InvalidOperationException on wrong type ────────

@@ -52,6 +52,22 @@ public sealed class ExcelRangeTests
         Assert.NotEqual(a, b);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(16385)]
+    public void Address_InvalidColumn_ThrowsArgumentOutOfRangeException(int column)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExcelAddress(column, 1));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1048577)]
+    public void Address_InvalidRow_ThrowsArgumentOutOfRangeException(int row)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExcelAddress(1, row));
+    }
+
     // ── ExcelRange bounded Width and Height ──────────────────────────────────
 
     [Fact]

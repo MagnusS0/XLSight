@@ -186,7 +186,7 @@ internal partial struct AnalysisSink : IByteSheetSink
             return new SheetInfo
             {
                 Level = level, SheetName = sheetName, SheetIndex = sheetIndex,
-                Exact = exact, Observed = SheetAnalysisObserved.Empty, Inferred = SheetAnalysisInferred.Empty,
+                Exact = exact, Observed = null, Inferred = null,
             };
         }
 
@@ -200,7 +200,9 @@ internal partial struct AnalysisSink : IByteSheetSink
         return new SheetInfo
         {
             Level = level, SheetName = sheetName, SheetIndex = sheetIndex,
-            Exact = exact, Observed = observed, Inferred = inferred,
+            Exact = exact,
+            Observed = observed,
+            Inferred = level >= AnalysisLevel.Full ? inferred : null,
         };
     }
 

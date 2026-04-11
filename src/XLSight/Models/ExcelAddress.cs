@@ -7,11 +7,37 @@ namespace XLSight;
 /// Represents a single Excel cell address as a 1-based (column, row) pair.
 /// Column 1 = A, Column 26 = Z, Column 27 = AA, Column 16384 = XFD.
 /// </summary>
-/// <param name="Column">The 1-based column index (1 = A, 16384 = XFD).</param>
-/// <param name="Row">The 1-based row index (1 to 1048576).</param>
 [StructLayout(LayoutKind.Auto)]
-public readonly record struct ExcelAddress(int Column, int Row)
+public readonly record struct ExcelAddress
 {
+    /// <summary>The 1-based column index (1 = A, 16384 = XFD).</summary>
+    public int Column { get; }
+
+    /// <summary>The 1-based row index (1 to 1048576).</summary>
+    public int Row { get; }
+
+    /// <summary>Creates a validated Excel cell address.</summary>
+    /// <param name="column">The 1-based column index.</param>
+    /// <param name="row">The 1-based row index.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="column"/> or <paramref name="row"/> falls outside Excel limits.
+    /// </exception>
+    public ExcelAddress(int column, int row)
+    {
+        if (column is < 1 or > ExcelLimits.MaxColumns)
+        {
+            throw new ArgumentOutOfRangeException(nameof(column), column, $"Column must be between 1 and {ExcelLimits.MaxColumns}.");
+        }
+
+        if (row is < 1 or > ExcelLimits.MaxRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(row), row, $"Row must be between 1 and {ExcelLimits.MaxRows}.");
+        }
+
+        Column = column;
+        Row = row;
+    }
+
     /// <summary>
     /// Parses an Excel cell address string (e.g. "A1") into an <see cref="ExcelAddress"/>.
     /// The input is normalized to uppercase before parsing.
@@ -43,6 +69,7 @@ public readonly record struct ExcelAddress(int Column, int Row)
         var span = address.ToUpperInvariant().AsSpan();
         return AddressParser.TryParseCell(span, out result);
     }
+
     /// <summary>
     /// Returns the Excel-style address string, e.g. "A1", "BC42", "XFD1048576".
     /// </summary>

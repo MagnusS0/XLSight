@@ -15,37 +15,48 @@ public sealed class SheetInfo
     public required int SheetIndex { get; init; }
 
     /// <summary>Gets exact worksheet facts parsed from the package.</summary>
-    internal SheetAnalysisExact Exact { get; init; } = null!;
+    public required SheetAnalysisExact Exact { get; init; }
 
-    /// <summary>Gets worksheet facts observed during the streaming value scan.</summary>
-    internal SheetAnalysisObserved Observed { get; init; } = null!;
+    /// <summary>Gets worksheet facts observed during the streaming value scan, when available.</summary>
+    public SheetAnalysisObserved? Observed { get; init; }
 
-    /// <summary>Gets inferred worksheet structure derived from exact and observed facts.</summary>
-    internal SheetAnalysisInferred Inferred { get; init; } = null!;
+    /// <summary>Gets inferred worksheet structure derived from exact and observed facts, when available.</summary>
+    public SheetAnalysisInferred? Inferred { get; init; }
 
     /// <summary>Gets a value indicating whether observed scan data is available for this sheet.</summary>
-    public bool HasObserved => Level >= AnalysisLevel.Observed;
+    public bool HasObserved => Observed is not null;
 
     /// <summary>Gets a value indicating whether inferred structure is available for this sheet.</summary>
-    public bool HasInferred => Level >= AnalysisLevel.Full;
+    public bool HasInferred => Inferred is not null;
 
-    /// <summary>Gets the bounding range of all non-empty cells, or null if the sheet is empty.</summary>
-    public ExcelRange? UsedRange => RequireObserved().ValueUsedRange;
+    /// <summary>Gets the bounding range of all non-empty cells, or <see langword="null"/> when observed data is unavailable or the sheet is empty.</summary>
+    public ExcelRange? UsedRange => Observed?.ValueUsedRange;
 
-    /// <summary>Gets the number of non-empty rows in the used range.</summary>
-    public int RowCount => RequireObserved().RowCount;
+    /// <summary>Gets the number of non-empty rows in the used range, or <see langword="null"/> when observed data is unavailable.</summary>
+    public int? RowCount => Observed?.RowCount;
 
-    /// <summary>Gets the number of non-empty columns in the used range.</summary>
-    public int ColumnCount => RequireObserved().ColumnCount;
+    /// <summary>Gets the number of non-empty columns in the used range, or <see langword="null"/> when observed data is unavailable.</summary>
+    public int? ColumnCount => Observed?.ColumnCount;
 
-    /// <summary>Gets the total number of non-empty cells in the sheet.</summary>
-    public int CellCount => RequireObserved().CellCount;
+    /// <summary>Gets the total number of non-empty cells in the sheet, or <see langword="null"/> when observed data is unavailable.</summary>
+    public int? CellCount => Observed?.CellCount;
 
-    /// <summary>Gets the column-level profiles for each column that contains data.</summary>
-    public IReadOnlyList<ColumnProfile> Columns => RequireObserved().Columns;
+    /// <summary>Gets the column-level profiles for each column that contains data, or <see langword="null"/> when observed data is unavailable.</summary>
+    public IReadOnlyList<ColumnProfile>? Columns => Observed?.Columns;
 
-    /// <summary>Gets the Excel-style column letters (e.g. "A", "BC") of columns that contain formulas.</summary>
-    public IReadOnlyList<string> FormulaColumns => _formulaColumns ??= [.. RequireObserved().FormulaColumns.Select(c => c.ColumnLabel)];
+    /// <summary>Gets the Excel-style column letters (e.g. "A", "BC") of columns that contain formulas, or <see langword="null"/> when observed data is unavailable.</summary>
+    public IReadOnlyList<string>? FormulaColumns
+    {
+        get
+        {
+            if (Observed is null)
+            {
+                return null;
+            }
+
+            return _formulaColumns ??= [.. Observed.FormulaColumns.Select(c => c.ColumnLabel)];
+        }
+    }
 
     /// <summary>Gets all merged cell regions in this sheet.</summary>
     public IReadOnlyList<MergedRegion> MergedRegions => Exact.MergedRegions;
@@ -53,29 +64,23 @@ public sealed class SheetInfo
     /// <summary>Gets the structured tables defined in this sheet.</summary>
     public IReadOnlyList<TableInfo> Tables => Exact.Tables;
 
-    /// <summary>Gets the 1-based row index inferred as the header row, or 0 if none could be inferred.</summary>
-    public int InferredHeaderRowIndex => RequireInferred().HeaderRowIndex;
+    /// <summary>Gets the 1-based row index inferred as the header row, or <see langword="null"/> when inferred data is unavailable.</summary>
+    public int? InferredHeaderRowIndex => Inferred?.HeaderRowIndex;
 
-    /// <summary>Gets a value indicating whether the sheet contains no data cells.</summary>
-    public bool IsEmpty => RequireObserved().ValueUsedRange is null;
+    /// <summary>Gets a value indicating whether the sheet contains no data cells, or <see langword="null"/> when observed data is unavailable.</summary>
+    public bool? IsEmpty => Observed is null ? null : Observed.ValueUsedRange is null;
 
-    private SheetAnalysisObserved RequireObserved()
+    /// <summary>Gets the observed analysis data when available.</summary>
+    public bool TryGetObserved([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SheetAnalysisObserved? observed)
     {
-        if (!HasObserved)
-        {
-            throw new InvalidOperationException("Observed analysis data is not available for this result. Analyze with AnalysisLevel.Observed or AnalysisLevel.Full.");
-        }
-
-        return Observed;
+        observed = Observed;
+        return observed is not null;
     }
 
-    private SheetAnalysisInferred RequireInferred()
+    /// <summary>Gets the inferred analysis data when available.</summary>
+    public bool TryGetInferred([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SheetAnalysisInferred? inferred)
     {
-        if (!HasInferred)
-        {
-            throw new InvalidOperationException("Inferred analysis data is not available for this result. Analyze with AnalysisLevel.Full.");
-        }
-
-        return Inferred;
+        inferred = Inferred;
+        return inferred is not null;
     }
 }
