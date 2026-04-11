@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes a named range or named formula defined in an Excel workbook.</summary>
 public sealed class NamedRange

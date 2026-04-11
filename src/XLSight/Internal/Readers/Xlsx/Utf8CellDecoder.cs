@@ -3,7 +3,6 @@ using System.Net;
 using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Sinks;
-using XLSight.Models;
 
 namespace XLSight.Internal.Readers.Xlsx;
 

@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
-using XLSight.Models;
 using Xunit;
 
 namespace XLSight.Tests.PublicApi;
@@ -132,7 +131,7 @@ public sealed class WorksheetStreamingTests
         using var ms = CreateWorkbook();
         using var workbook = XLSight.ExcelWorkbook.Open(ms);
 
-        var rows = workbook.StreamRange("Sheet1", "A1:B2").Select(r => r.CloneRow()).ToList();
+        var rows = workbook.StreamRange("Sheet1", "A1:B2").ToList();
 
         Assert.Equal(2, rows.Count);
 
@@ -192,6 +191,79 @@ public sealed class WorksheetStreamingTests
         }
 
         Assert.Equal(2, rows.Count);
+    }
+
+    [Fact]
+    public async Task StreamRangeAsync_BufferedRows_AreIndependentSnapshots()
+    {
+        using var ms = CreateWorkbook();
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+
+        var rows = new List<ExcelRow>();
+        await foreach (var row in workbook.StreamRangeAsync("Sheet1", "A1:B2", ct: TestContext.Current.CancellationToken))
+        {
+            rows.Add(row);
+        }
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(ExcelCellValue.FromNumber(42), rows[0].GetCell(1));
+        Assert.Equal(ExcelCellValue.FromText("Hello"), rows[0].GetCell(2));
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), rows[1].GetCell(1));
+        Assert.Equal(ExcelCellValue.FromBoolean(true), rows[1].GetCell(2));
+    }
+
+    [Fact]
+    public void GetSheetReader_Current_IsBorrowedUntilNextRead()
+    {
+        using var ms = CreateWorkbook();
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var reader = workbook.GetSheetReader("Sheet1");
+
+        Assert.True(reader.Read());
+        ExcelRow first = reader.Current;
+        ExcelRow snapshot = first.ToSnapshot();
+
+        Assert.True(reader.Read());
+        ExcelRow second = reader.Current;
+
+        Assert.Equal(1, first.RowIndex);
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), first.GetCell(1));
+        Assert.Equal(ExcelCellValue.FromBoolean(true), first.GetCell(2));
+        Assert.Equal(ExcelCellValue.FromNumber(42), snapshot.GetCell(1));
+        Assert.Equal(ExcelCellValue.FromText("Hello"), snapshot.GetCell(2));
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), second.GetCell(1));
+    }
+
+    [Fact]
+    public async Task GetSheetReaderAsync_Current_IsBorrowedUntilNextReadAsync()
+    {
+        using var ms = CreateWorkbook();
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        await using var reader = await workbook.GetSheetReaderAsync("Sheet1", ct: TestContext.Current.CancellationToken);
+
+        Assert.True(await reader.ReadAsync(TestContext.Current.CancellationToken));
+        ExcelRow first = reader.Current;
+        ExcelRow snapshot = first.ToSnapshot();
+
+        Assert.True(await reader.ReadAsync(TestContext.Current.CancellationToken));
+        ExcelRow second = reader.Current;
+
+        Assert.Equal(1, first.RowIndex);
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), first.GetCell(1));
+        Assert.Equal(ExcelCellValue.FromBoolean(true), first.GetCell(2));
+        Assert.Equal(ExcelCellValue.FromNumber(42), snapshot.GetCell(1));
+        Assert.Equal(ExcelCellValue.FromText("Hello"), snapshot.GetCell(2));
+        Assert.Equal(ExcelCellValue.FromNumber(3.14), second.GetCell(1));
+    }
+
+    [Fact]
+    public void GetSheetReader_OnStreamBackedWorkbook_BlocksConcurrentOperationUntilDisposed()
+    {
+        using var ms = CreateWorkbook();
+        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var reader = workbook.GetSheetReader("Sheet1");
+
+        Assert.Throws<InvalidOperationException>(() => workbook.ReadRange("Sheet1", "A1:B2"));
     }
 
     [Fact]

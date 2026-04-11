@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Exact workbook facts parsed from package parts and workbook metadata.</summary>
 public sealed class WorkbookAnalysisExact

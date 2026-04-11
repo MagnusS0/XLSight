@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Represents a non-fatal issue or caveat surfaced by workbook analysis.</summary>
 public sealed class AnalysisWarning

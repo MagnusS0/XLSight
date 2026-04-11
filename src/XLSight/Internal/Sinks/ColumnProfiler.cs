@@ -1,6 +1,5 @@
 using System.Buffers;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Sinks;
 

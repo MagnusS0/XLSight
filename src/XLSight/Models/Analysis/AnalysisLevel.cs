@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Controls how much work XLSight performs when analyzing a workbook or sheet.</summary>
 public enum AnalysisLevel : byte

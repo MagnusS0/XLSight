@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Inferred worksheet structure derived from exact metadata and observed scan facts.</summary>
 public sealed class SheetAnalysisInferred

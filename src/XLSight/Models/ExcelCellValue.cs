@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
 
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>
 /// Represents the decoded value of a single Excel cell.

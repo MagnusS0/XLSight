@@ -1,5 +1,4 @@
 using System.Text;
-using XLSight.Exceptions;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Readers.Xlsx;
 

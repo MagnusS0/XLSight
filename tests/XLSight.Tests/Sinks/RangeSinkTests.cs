@@ -1,8 +1,7 @@
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 using XLSight.Tests.Infrastructure;
 using Xunit;
 

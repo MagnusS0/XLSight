@@ -1,9 +1,10 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using XLSight.Analysis;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
 
 namespace XLSight;
 
@@ -123,19 +124,25 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         return new ExcelWorkbook(engine);
     }
 
+    // ── ReadCell (string overloads) ──────────────────────────────────────────
+
     /// <summary>Reads a single cell value synchronously.</summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="cellAddress">The cell address, e.g. "A1".</param>
+    /// <param name="cellAddress">The cell address, e.g. "A1". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
-    /// <returns>The cell result containing its value and location.</returns>
+    /// <returns>The decoded cell value.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="cellAddress"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    public CellResult ReadCell(string sheet, string cellAddress, ReadMode mode = ReadMode.Values)
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed or is a range.</exception>
+    public ExcelCellValue ReadCell(string sheet, string cellAddress, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(cellAddress);
+        if (cellAddress.Contains(':'))
+        {
+            throw new InvalidAddressException(cellAddress, "ReadCell requires a single cell address, not a range");
+        }
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("ReadCell");
@@ -143,7 +150,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("cell", cellAddress);
         try
         {
-            var range = AddressParser.Parse(cellAddress.AsSpan());
+            var range = AddressParser.Parse(cellAddress.ToUpperInvariant().AsSpan());
             return _engine.ReadCell(sheet, range.TopLeft, mode);
         }
         finally
@@ -152,16 +159,44 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>Reads a single cell value synchronously using a typed address.</summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="address">The cell address.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>The decoded cell value.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public ExcelCellValue ReadCell(string sheet, ExcelAddress address, ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ThrowIfDisposed();
+        EnterOperation();
+        using var activity = ActivitySource.StartActivity("ReadCell");
+        activity?.SetTag("sheet", sheet);
+        activity?.SetTag("cell", address.ToString());
+        try
+        {
+            return _engine.ReadCell(sheet, address, mode);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    // ── ReadRange (string overloads) ─────────────────────────────────────────
+
     /// <summary>Reads a rectangular range of cells synchronously.</summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="rangeAddress">The range address, e.g. "A1:D10".</param>
+    /// <param name="rangeAddress">The range address, e.g. "A1:D10". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <returns>The range result containing all cell values.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="rangeAddress"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    /// <exception cref="Exceptions.RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    /// <exception cref="RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
     public RangeResult ReadRange(string sheet, string rangeAddress, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -174,7 +209,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("range", rangeAddress);
         try
         {
-            var range = AddressParser.Parse(rangeAddress.AsSpan());
+            var range = AddressParser.Parse(rangeAddress.ToUpperInvariant().AsSpan());
             return _engine.ReadRange(sheet, range, mode);
         }
         finally
@@ -184,17 +219,47 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>Reads a rectangular range of cells synchronously using a typed range.</summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range to read.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>The range result containing all cell values.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="RangeTooLargeException">Thrown when the range is unbounded or exceeds the cell limit.</exception>
+    public RangeResult ReadRange(string sheet, ExcelRange range, ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ThrowIfDisposed();
+        EnterOperation();
+        XLSightEventSource.Log.ReadRangeStart(sheet, range.ToString());
+        using var activity = ActivitySource.StartActivity("ReadRange");
+        activity?.SetTag("sheet", sheet);
+        try
+        {
+            return _engine.ReadRange(sheet, range, mode);
+        }
+        finally
+        {
+            XLSightEventSource.Log.ReadRangeStop();
+            ExitOperation();
+        }
+    }
+
+    // ── ReadCellAsync ────────────────────────────────────────────────────────
+
     /// <summary>Reads a single cell value asynchronously.</summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="cellAddress">The cell address, e.g. "A1".</param>
+    /// <param name="cellAddress">The cell address, e.g. "A1". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>A task that returns the cell result.</returns>
+    /// <returns>A task that returns the decoded cell value.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="cellAddress"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    public async Task<CellResult> ReadCellAsync(
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed or is a range.</exception>
+    public async Task<ExcelCellValue> ReadCellAsync(
         string sheet,
         string cellAddress,
         ReadMode mode = ReadMode.Values,
@@ -202,6 +267,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(cellAddress);
+        if (cellAddress.Contains(':'))
+        {
+            throw new InvalidAddressException(cellAddress, "ReadCell requires a single cell address, not a range");
+        }
         ThrowIfDisposed();
         EnterOperation();
         using var activity = ActivitySource.StartActivity("ReadCell");
@@ -209,7 +278,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("cell", cellAddress);
         try
         {
-            var range = AddressParser.Parse(cellAddress.AsSpan());
+            var range = AddressParser.Parse(cellAddress.ToUpperInvariant().AsSpan());
             return await _engine.ReadCellAsync(sheet, range.TopLeft, mode, ct).ConfigureAwait(false);
         }
         finally
@@ -218,17 +287,50 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>Reads a single cell value asynchronously using a typed address.</summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="address">The cell address.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns the decoded cell value.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public async Task<ExcelCellValue> ReadCellAsync(
+        string sheet,
+        ExcelAddress address,
+        ReadMode mode = ReadMode.Values,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ThrowIfDisposed();
+        EnterOperation();
+        using var activity = ActivitySource.StartActivity("ReadCell");
+        activity?.SetTag("sheet", sheet);
+        activity?.SetTag("cell", address.ToString());
+        try
+        {
+            return await _engine.ReadCellAsync(sheet, address, mode, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    // ── ReadRangeAsync ───────────────────────────────────────────────────────
+
     /// <summary>Reads a rectangular range of cells asynchronously.</summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="rangeAddress">The range address, e.g. "A1:D10".</param>
+    /// <param name="rangeAddress">The range address, e.g. "A1:D10". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns the range result.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="rangeAddress"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
-    /// <exception cref="Exceptions.RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    /// <exception cref="RangeTooLargeException">Thrown when the range exceeds the cell limit.</exception>
     public async Task<RangeResult> ReadRangeAsync(
         string sheet,
         string rangeAddress,
@@ -244,7 +346,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("range", rangeAddress);
         try
         {
-            var range = AddressParser.Parse(rangeAddress.AsSpan());
+            var range = AddressParser.Parse(rangeAddress.ToUpperInvariant().AsSpan());
             return await _engine.ReadRangeAsync(sheet, range, mode, ct).ConfigureAwait(false);
         }
         finally
@@ -252,6 +354,39 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
             ExitOperation();
         }
     }
+
+    /// <summary>Reads a rectangular range of cells asynchronously using a typed range.</summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range to read.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns the range result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="RangeTooLargeException">Thrown when the range is unbounded or exceeds the cell limit.</exception>
+    public async Task<RangeResult> ReadRangeAsync(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode = ReadMode.Values,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ThrowIfDisposed();
+        EnterOperation();
+        using var activity = ActivitySource.StartActivity("ReadRange");
+        activity?.SetTag("sheet", sheet);
+        try
+        {
+            return await _engine.ReadRangeAsync(sheet, range, mode, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    // ── Analyze ──────────────────────────────────────────────────────────────
 
     /// <summary>Analyzes all sheets in the workbook and returns structural information.</summary>
     /// <param name="level">The analysis depth to execute.</param>
@@ -263,8 +398,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// </param>
     /// <returns>A workbook info object describing all sheets, named ranges, and workbook properties.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public Models.Analysis.WorkbookInfo Analyze(
-        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+    public WorkbookInfo Analyze(
+        AnalysisLevel level = AnalysisLevel.Full,
         int maxDegreeOfParallelism = -1)
     {
         ThrowIfDisposed();
@@ -285,8 +420,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a workbook info object.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(CancellationToken ct)
-        => AnalyzeAsync(Models.Analysis.AnalysisLevel.Full, ct: ct);
+    public Task<WorkbookInfo> AnalyzeAsync(CancellationToken ct)
+        => AnalyzeAsync(AnalysisLevel.Full, ct: ct);
 
     /// <summary>Analyzes all sheets in the workbook asynchronously and returns structural information.</summary>
     /// <param name="level">The analysis depth to execute.</param>
@@ -299,8 +434,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a workbook info object.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    public async Task<Models.Analysis.WorkbookInfo> AnalyzeAsync(
-        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+    public async Task<WorkbookInfo> AnalyzeAsync(
+        AnalysisLevel level = AnalysisLevel.Full,
         int maxDegreeOfParallelism = -1,
         CancellationToken ct = default)
     {
@@ -324,10 +459,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <returns>A sheet info object describing columns, merged regions, tables, and inferred headers.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public Models.Analysis.SheetInfo AnalyzeSheet(
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public SheetInfo AnalyzeSheet(
         string sheet,
-        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full)
+        AnalysisLevel level = AnalysisLevel.Full)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -353,9 +488,9 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <returns>A task that returns a sheet info object.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct)
-        => AnalyzeSheetAsync(sheet, Models.Analysis.AnalysisLevel.Full, ct);
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public Task<SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct)
+        => AnalyzeSheetAsync(sheet, AnalysisLevel.Full, ct);
 
     /// <summary>Analyzes a single sheet asynchronously and returns its structural information.</summary>
     /// <param name="sheet">The sheet name.</param>
@@ -364,10 +499,10 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <returns>A task that returns a sheet info object.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    public async Task<Models.Analysis.SheetInfo> AnalyzeSheetAsync(
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public async Task<SheetInfo> AnalyzeSheetAsync(
         string sheet,
-        Models.Analysis.AnalysisLevel level = Models.Analysis.AnalysisLevel.Full,
+        AnalysisLevel level = AnalysisLevel.Full,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -386,35 +521,133 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <summary>Streams all rows of a sheet asynchronously without buffering the entire sheet.</summary>
+    // ── Borrowed row readers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens a forward-only borrowed row reader for the specified sheet.
+    /// The row returned by <see cref="ExcelSheetReader.Current"/> is only valid until the
+    /// next successful call to <see cref="ExcelSheetReader.Read"/> or
+    /// <see cref="ExcelSheetReader.ReadAsync"/>.
+    /// </summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>A borrowed row reader for the sheet.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public ExcelSheetReader GetSheetReader(string sheet, ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        return GetRangeReaderCore(sheet, ExcelRange.Unbounded, mode);
+    }
+
+    /// <summary>
+    /// Opens a forward-only borrowed row reader for the specified range.
+    /// The row returned by <see cref="ExcelSheetReader.Current"/> is only valid until the
+    /// next successful call to <see cref="ExcelSheetReader.Read"/> or
+    /// <see cref="ExcelSheetReader.ReadAsync"/>.
+    /// </summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range address, e.g. "A1:D10". Case-insensitive.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>A borrowed row reader for the range.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="range"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    public ExcelSheetReader GetRangeReader(string sheet, string range, ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(range);
+        return GetRangeReaderCore(sheet, ExcelRange.Parse(range), mode);
+    }
+
+    /// <summary>
+    /// Opens a forward-only borrowed row reader for the specified typed range.
+    /// The row returned by <see cref="ExcelSheetReader.Current"/> is only valid until the
+    /// next successful call to <see cref="ExcelSheetReader.Read"/> or
+    /// <see cref="ExcelSheetReader.ReadAsync"/>.
+    /// </summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range to read.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>A borrowed row reader for the range.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public ExcelSheetReader GetRangeReader(string sheet, ExcelRange range, ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        return GetRangeReaderCore(sheet, range, mode);
+    }
+
+    /// <summary>Opens a borrowed row reader for the specified sheet.</summary>
+    public ValueTask<ExcelSheetReader> GetSheetReaderAsync(
+        string sheet,
+        ReadMode mode = ReadMode.Values,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(GetSheetReader(sheet, mode));
+    }
+
+    /// <summary>Opens a borrowed row reader for the specified range.</summary>
+    public ValueTask<ExcelSheetReader> GetRangeReaderAsync(
+        string sheet,
+        string range,
+        ReadMode mode = ReadMode.Values,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(GetRangeReader(sheet, range, mode));
+    }
+
+    /// <summary>Opens a borrowed row reader for the specified typed range.</summary>
+    public ValueTask<ExcelSheetReader> GetRangeReaderAsync(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode = ReadMode.Values,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(GetRangeReader(sheet, range, mode));
+    }
+
+    // ── StreamSheetAsync / StreamRangeAsync ──────────────────────────────────
+
+    /// <summary>
+    /// Streams all rows of a sheet asynchronously.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
     /// <param name="sheet">The sheet name.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>An async sequence of <see cref="ExcelRow"/> objects.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     public IAsyncEnumerable<ExcelRow> StreamSheetAsync(
         string sheet,
         ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
-        ThrowIfDisposed();
-        // Each enumeration opens its own stream — concurrent iterations are safe.
-        return _engine.StreamRangeAsync(sheet, ExcelRange.Unbounded, mode, ct);
+        return StreamRangeAsync(sheet, ExcelRange.Unbounded, mode, ct);
     }
 
-    /// <summary>Streams a range of rows asynchronously without buffering.</summary>
+    /// <summary>
+    /// Streams a range of rows asynchronously.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="range">The range address, e.g. "A1:D10".</param>
+    /// <param name="range">The range address, e.g. "A1:D10". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>An async sequence of <see cref="ExcelRow"/> objects within the range.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="range"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
     public IAsyncEnumerable<ExcelRow> StreamRangeAsync(
         string sheet,
         string range,
@@ -423,37 +656,68 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(range);
-        ThrowIfDisposed();
-        // Each enumeration opens its own stream — concurrent iterations are safe.
-        var parsedRange = AddressParser.Parse(range.AsSpan());
-        return _engine.StreamRangeAsync(sheet, parsedRange, mode, ct);
+        return StreamRangeAsync(sheet, ExcelRange.Parse(range), mode, ct);
     }
 
-    /// <summary>Streams all rows of a sheet synchronously without buffering the entire sheet.</summary>
+    /// <summary>
+    /// Streams a range of rows asynchronously using a typed range.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range to stream.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>An async sequence of <see cref="ExcelRow"/> objects within the range.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public async IAsyncEnumerable<ExcelRow> StreamRangeAsync(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode = ReadMode.Values,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        var reader = await GetRangeReaderAsync(sheet, range, mode, ct).ConfigureAwait(false);
+        await using (reader.ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                yield return reader.Current.ToSnapshot();
+            }
+        }
+    }
+
+    // ── StreamSheet / StreamRange ────────────────────────────────────────────
+
+    /// <summary>
+    /// Streams all rows of a sheet synchronously.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
     /// <param name="sheet">The sheet name.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <returns>A sequence of <see cref="ExcelRow"/> objects.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     public IEnumerable<ExcelRow> StreamSheet(string sheet, ReadMode mode = ReadMode.Values)
     {
         ArgumentNullException.ThrowIfNull(sheet);
-        ThrowIfDisposed();
-        // Each enumeration opens its own stream — concurrent iterations are safe.
-        // The busy guard is intentionally omitted: it would release before iteration begins anyway.
-        return _engine.StreamRange(sheet, ExcelRange.Unbounded, mode);
+        return StreamRange(sheet, ExcelRange.Unbounded, mode);
     }
 
-    /// <summary>Streams a range of rows synchronously without buffering.</summary>
+    /// <summary>
+    /// Streams a range of rows synchronously.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
     /// <param name="sheet">The sheet name.</param>
-    /// <param name="range">The range address, e.g. "A1:D10".</param>
+    /// <param name="range">The range address, e.g. "A1:D10". Case-insensitive.</param>
     /// <param name="mode">Whether to return cached values or formula text.</param>
     /// <returns>A sequence of <see cref="ExcelRow"/> objects within the range.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> or <paramref name="range"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
-    /// <exception cref="Exceptions.SheetNotFoundException">Thrown when the sheet does not exist.</exception>
-    /// <exception cref="Exceptions.InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
     public IEnumerable<ExcelRow> StreamRange(
         string sheet,
         string range,
@@ -461,11 +725,27 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(range);
-        ThrowIfDisposed();
-        // Each enumeration opens its own stream — concurrent iterations are safe.
-        // The busy guard is intentionally omitted: it would release before iteration begins anyway.
-        var parsedRange = AddressParser.Parse(range.AsSpan());
-        return _engine.StreamRange(sheet, parsedRange, mode);
+        return StreamRange(sheet, ExcelRange.Parse(range), mode);
+    }
+
+    /// <summary>
+    /// Streams a range of rows synchronously using a typed range.
+    /// Each yielded row is an independent snapshot safe to buffer, materialize, or pass to LINQ.
+    /// </summary>
+    /// <param name="sheet">The sheet name.</param>
+    /// <param name="range">The range to stream.</param>
+    /// <param name="mode">Whether to return cached values or formula text.</param>
+    /// <returns>A sequence of <see cref="ExcelRow"/> objects within the range.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
+    public IEnumerable<ExcelRow> StreamRange(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode = ReadMode.Values)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        return StreamRangeCore(sheet, range, mode);
     }
 
     /// <summary>Releases all resources used by this workbook.</summary>
@@ -516,6 +796,30 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         if (!_engine.IsFileBacked)
         {
             Volatile.Write(ref _busy, 0);
+        }
+    }
+
+    private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode)
+    {
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            return new ExcelSheetReader(_engine.OpenCursor(sheet, range, mode), ExitOperation);
+        }
+        catch
+        {
+            ExitOperation();
+            throw;
+        }
+    }
+
+    private IEnumerable<ExcelRow> StreamRangeCore(string sheet, ExcelRange range, ReadMode mode)
+    {
+        using var reader = GetRangeReader(sheet, range, mode);
+        while (reader.Read())
+        {
+            yield return reader.Current.ToSnapshot();
         }
     }
 

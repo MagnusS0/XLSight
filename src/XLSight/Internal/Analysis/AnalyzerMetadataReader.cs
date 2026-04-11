@@ -3,8 +3,7 @@ using System.Text;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Analysis;
 

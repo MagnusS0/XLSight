@@ -1,4 +1,4 @@
-namespace XLSight.Exceptions;
+namespace XLSight;
 
 /// <summary>Thrown when a requested sheet name does not exist in the workbook.</summary>
 public sealed class SheetNotFoundException : ExcelException

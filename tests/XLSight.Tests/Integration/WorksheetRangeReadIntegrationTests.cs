@@ -4,7 +4,6 @@ using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
-using XLSight.Models;
 using Xunit;
 
 namespace XLSight.Tests.Integration;

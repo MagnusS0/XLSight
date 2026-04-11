@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes the statistical profile of a single column within an analyzed worksheet.</summary>
 public sealed class ColumnProfile

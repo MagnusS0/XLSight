@@ -78,7 +78,7 @@ internal sealed class ColumnState
     /// <summary>
     /// General path for non-shared-string cells (numbers, dates, booleans, inline strings, errors).
     /// </summary>
-    internal void RecordValue(Models.ExcelCellValue value)
+    internal void RecordValue(ExcelCellValue value)
     {
         if (value.IsEmpty)
         {
@@ -89,7 +89,7 @@ internal sealed class ColumnState
 
         switch (value.CellType)
         {
-            case Models.CellType.Number:
+            case CellType.Number:
                 NumberCount++;
                 double num = value.AsNumber();
                 if (!HasNumeric)
@@ -107,12 +107,12 @@ internal sealed class ColumnState
                 TrackDistinctLong(ref DistinctNumbers, System.Runtime.CompilerServices.Unsafe.BitCast<double, long>(num));
                 break;
 
-            case Models.CellType.Date:
+            case CellType.Date:
                 DateCount++;
                 TrackDistinctLong(ref DistinctDates, value.AsDate().Ticks);
                 break;
 
-            case Models.CellType.Text:
+            case CellType.Text:
                 TextCount++;
                 string text = value.AsText();
                 int len = text.Length;
@@ -120,12 +120,12 @@ internal sealed class ColumnState
                 TrackDistinctString(text);
                 break;
 
-            case Models.CellType.Boolean:
+            case CellType.Boolean:
                 BooleanCount++;
                 BooleanSeen |= value.AsBoolean() ? (byte)2 : (byte)1;
                 break;
 
-            case Models.CellType.Error:
+            case CellType.Error:
                 ErrorCount++;
                 break;
         }

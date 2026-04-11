@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
+using XLSight.Internal.Parsing;
 
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>
 /// Represents a rectangular Excel range. Use <see cref="Unbounded"/> as a sentinel
@@ -47,8 +48,44 @@ public readonly record struct ExcelRange
         BottomRight = default;
     }
 
+    /// <summary>
+    /// Parses an Excel range address string (e.g. "A1:D10") into an <see cref="ExcelRange"/>.
+    /// The input is normalized to uppercase before parsing.
+    /// </summary>
+    /// <param name="range">The range address string to parse.</param>
+    /// <returns>The parsed <see cref="ExcelRange"/>.</returns>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    public static ExcelRange Parse(string range)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        return AddressParser.Parse(range.ToUpperInvariant().AsSpan());
+    }
+
+    /// <summary>
+    /// Tries to parse an Excel range address string (e.g. "A1:D10") into an <see cref="ExcelRange"/>.
+    /// The input is normalized to uppercase before parsing.
+    /// </summary>
+    /// <param name="range">The range address string to parse.</param>
+    /// <param name="result">When successful, the parsed <see cref="ExcelRange"/>.</param>
+    /// <returns>True if parsing succeeded; otherwise false.</returns>
+    public static bool TryParse(string range, out ExcelRange result)
+    {
+        if (range is null) { result = default; return false; }
+        return AddressParser.TryParse(range.ToUpperInvariant().AsSpan(), out result);
+    }
+
     /// <summary>Number of columns in this range.</summary>
-    public int Width => BottomRight.Column - TopLeft.Column + 1;
+    public int Width
+    {
+        get
+        {
+            if (_isUnbounded)
+            {
+                throw new InvalidOperationException("Range is unbounded — Width is not defined.");
+            }
+            return BottomRight.Column - TopLeft.Column + 1;
+        }
+    }
 
     /// <summary>
     /// Number of rows in this range.

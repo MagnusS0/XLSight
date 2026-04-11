@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Observed worksheet facts collected by scanning the sheet contents.</summary>
 public sealed class SheetAnalysisObserved

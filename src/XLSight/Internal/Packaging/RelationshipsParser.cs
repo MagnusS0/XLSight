@@ -1,5 +1,4 @@
 using System.Xml;
-using XLSight.Exceptions;
 
 namespace XLSight.Internal.Packaging;
 

@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Runtime.InteropServices;
 
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>Represents a single row of cell values returned by a streaming read operation.</summary>
 [StructLayout(LayoutKind.Auto)]
@@ -98,10 +98,10 @@ public readonly struct ExcelRow : IEnumerable<ExcelCellValue>
 
     /// <summary>
     /// Returns a new <see cref="ExcelRow"/> whose cells are copied into an independent array.
-    /// Used internally when adapting a zero-alloc cursor (shared buffer) to an
-    /// <see cref="IEnumerable{ExcelRow}"/> that callers may materialise with .ToList().
+    /// Use this when storing rows beyond the current iteration — the streaming cursor reuses
+    /// a single pooled buffer, so calling <c>ToSnapshot()</c> produces a stable, independent copy.
     /// </summary>
-    internal ExcelRow CloneRow()
+    public ExcelRow ToSnapshot()
     {
         var copy = new ExcelCellValue[_cells.Length];
         _cells.Span.CopyTo(copy);

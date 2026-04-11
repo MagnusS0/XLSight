@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
+using XLSight.Internal.Parsing;
 
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>
 /// Represents a single Excel cell address as a 1-based (column, row) pair.
@@ -11,6 +12,37 @@ namespace XLSight.Models;
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct ExcelAddress(int Column, int Row)
 {
+    /// <summary>
+    /// Parses an Excel cell address string (e.g. "A1") into an <see cref="ExcelAddress"/>.
+    /// The input is normalized to uppercase before parsing.
+    /// </summary>
+    /// <param name="address">The cell address string to parse.</param>
+    /// <returns>The parsed <see cref="ExcelAddress"/>.</returns>
+    /// <exception cref="InvalidAddressException">Thrown when the address cannot be parsed.</exception>
+    public static ExcelAddress Parse(string address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        var span = address.ToUpperInvariant().AsSpan();
+        if (!AddressParser.TryParseCell(span, out var result))
+        {
+            throw new InvalidAddressException(address);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Tries to parse an Excel cell address string (e.g. "A1") into an <see cref="ExcelAddress"/>.
+    /// The input is normalized to uppercase before parsing.
+    /// </summary>
+    /// <param name="address">The cell address string to parse.</param>
+    /// <param name="result">When successful, the parsed <see cref="ExcelAddress"/>.</param>
+    /// <returns>True if parsing succeeded; otherwise false.</returns>
+    public static bool TryParse(string address, out ExcelAddress result)
+    {
+        if (address is null) { result = default; return false; }
+        var span = address.ToUpperInvariant().AsSpan();
+        return AddressParser.TryParseCell(span, out result);
+    }
     /// <summary>
     /// Returns the Excel-style address string, e.g. "A1", "BC42", "XFD1048576".
     /// </summary>

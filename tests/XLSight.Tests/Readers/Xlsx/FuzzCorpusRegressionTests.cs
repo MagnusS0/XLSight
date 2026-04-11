@@ -1,6 +1,5 @@
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
 using Xunit;
 
 namespace XLSight.Tests.Readers.Xlsx;

@@ -1,4 +1,4 @@
-namespace XLSight.Exceptions;
+namespace XLSight;
 
 /// <summary>Thrown when an address or range string cannot be parsed or exceeds Excel limits.</summary>
 public sealed class InvalidAddressException : ExcelException

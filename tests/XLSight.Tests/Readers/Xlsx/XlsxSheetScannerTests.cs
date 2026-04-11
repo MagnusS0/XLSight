@@ -2,7 +2,6 @@ using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
 using XLSight.Tests.Infrastructure;
 using Xunit;
 
@@ -912,7 +911,7 @@ public sealed class XlsxSheetScannerTests
     private static List<ExcelRow> StreamWithXmlEngine(string path)
     {
         using var wb = global::XLSight.ExcelWorkbook.Open(path);
-        return wb.StreamSheet(wb.SheetNames[0]).Select(r => r.CloneRow()).ToList();
+        return wb.StreamSheet(wb.SheetNames[0]).ToList();
     }
 
     private static List<ExcelRow> StreamWithByteEngine(string path)

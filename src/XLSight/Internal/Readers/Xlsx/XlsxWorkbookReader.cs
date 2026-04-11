@@ -1,10 +1,8 @@
-using XLSight.Exceptions;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Sinks;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -93,34 +91,21 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         return ReadRangeCore(sheetName, range, mode);
     }
 
-    public CellResult ReadCell(string sheetName, ExcelAddress address, ReadMode mode)
+    public ExcelCellValue ReadCell(string sheetName, ExcelAddress address, ReadMode mode)
     {
         ThrowIfDisposed();
 
         var range = new ExcelRange(address, address);
         var result = ReadRange(sheetName, range, mode);
-
-        return new CellResult
-        {
-            Sheet = sheetName,
-            Row = address.Row,
-            Column = address.Column,
-            Value = result.Cells[0],
-        };
+        return result.Cells[0];
     }
 
-    public async Task<CellResult> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct)
+    public async Task<ExcelCellValue> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var range = new ExcelRange(address, address);
         var result = await ReadRangeAsync(sheetName, range, mode, ct).ConfigureAwait(false);
-        return new CellResult
-        {
-            Sheet = sheetName,
-            Row = address.Row,
-            Column = address.Column,
-            Value = result.Cells[0],
-        };
+        return result.Cells[0];
     }
 
     public async Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct)
@@ -145,14 +130,27 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         int width = range.Width;
         var buffer = new ExcelCellValue[cellCount];
 
-        await foreach (var row in StreamRangeAsync(sheetName, range, mode, ct).ConfigureAwait(false))
+        using var cursor = OpenCursor(sheetName, range, mode);
+        while (!ct.IsCancellationRequested)
         {
-            int rowOffset = (row.RowIndex - startRow) * width;
-            for (int c = startCol; c <= endCol; c++)
+            if (cursor.TryParseNext(out var row))
             {
-                buffer[rowOffset + (c - startCol)] = row.GetCell(c);
+                int rowOffset = (row.RowIndex - startRow) * width;
+                for (int c = startCol; c <= endCol; c++)
+                {
+                    buffer[rowOffset + (c - startCol)] = row.GetCell(c);
+                }
+
+                continue;
             }
+
+            if (cursor.IsSheetDone) { break; }
+
+            bool hasMore = await cursor.RefillAsync(ct).ConfigureAwait(false);
+            if (!hasMore) { break; }
         }
+
+        ct.ThrowIfCancellationRequested();
 
         return new RangeResult
         {
@@ -163,6 +161,22 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             Height = range.Height,
             Cells = buffer,
         };
+    }
+
+    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode)
+    {
+        ThrowIfDisposed();
+
+        var (sheet, _) = FindSheetWithIndex(sheetName);
+        var sheetStream = OpenSheetStream(sheet.Path);
+        var cursor = XlsxSheetScanner.OpenCursor(
+            sheetStream,
+            _sharedStrings.Value,
+            _styles.Value,
+            _metadata.UsesDate1904,
+            mode,
+            range);
+        return new OwnedRowCursor(sheetStream, cursor);
     }
 
     public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1)
@@ -278,78 +292,6 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         var sink = new AnalysisSink(_sharedStrings.Value, level);
         XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
-    }
-
-    public IEnumerable<ExcelRow> StreamRange(string sheetName, ExcelRange range, ReadMode mode)
-    {
-        ThrowIfDisposed();
-
-        var (sheet, _) = FindSheetWithIndex(sheetName);
-
-        // Validation runs eagerly here; iteration is deferred to the private iterator below,
-        // which owns the stream lifetime via 'using' inside the iterator body.
-        return StreamRangeCore(OpenSheetStream(sheet.Path), range, mode);
-    }
-
-    // Private iterator — stream lifetime is tied to the iterator's lifetime.
-    // The 'using' inside a yield iterator's body runs on disposal of the enumerator,
-    // so early break (Take(N)) correctly disposes the stream and cursor.
-    //
-    // CONTRACT: each yielded ExcelRow is valid only until the next MoveNext() call.
-    // The cursor reuses a single pooled buffer — do not store a row or its Cells span
-    // across loop iterations. Use .Select(r => r.CloneRow()).ToList() if independent
-    // copies are needed.
-    private IEnumerable<ExcelRow> StreamRangeCore(Stream sheetStream, ExcelRange range, ReadMode mode)
-    {
-        using var s = sheetStream;
-        using var cursor = XlsxSheetScanner.OpenCursor(
-            s, _sharedStrings.Value, _styles.Value,
-            _metadata.UsesDate1904, mode, range);
-
-        while (cursor.MoveNext())
-        {
-            yield return cursor.Current;
-        }
-    }
-
-    public async IAsyncEnumerable<ExcelRow> StreamRangeAsync(
-        string sheetName,
-        ExcelRange range,
-        ReadMode mode,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        ThrowIfDisposed();
-        ct.ThrowIfCancellationRequested();
-
-        var (sheet, _) = FindSheetWithIndex(sheetName);
-
-        // The 'using' inside an async iterator method is safe — the stream stays alive
-        // until the async enumerator is disposed (end of 'await foreach' or cancellation).
-        using var sheetStream = OpenSheetStream(sheet.Path);
-        using var cursor = XlsxSheetScanner.OpenCursor(
-            sheetStream, _sharedStrings.Value, _styles.Value,
-            _metadata.UsesDate1904, mode, range);
-
-        // Outer-async / inner-sync loop: parse from the already-loaded buffer without
-        // blocking, and only await I/O at buffer boundaries.
-        while (!ct.IsCancellationRequested)
-        {
-            // Inner-sync: parse as many rows as the buffer holds (no I/O, no await).
-            if (cursor.TryParseNext(out var row))
-            {
-                yield return row;
-                continue;
-            }
-
-            // Sheet data fully consumed (</sheetData> found) — stop immediately.
-            if (cursor.IsSheetDone) { break; }
-
-            // Buffer exhausted — await a true async refill here (the only await point).
-            bool hasMore = await cursor.RefillAsync(ct).ConfigureAwait(false);
-            if (!hasMore) { break; }
-        }
-
-        ct.ThrowIfCancellationRequested();
     }
 
     public void Dispose()

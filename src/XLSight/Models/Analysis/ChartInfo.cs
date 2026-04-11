@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes a chart defined in the workbook.</summary>
 public sealed class ChartInfo

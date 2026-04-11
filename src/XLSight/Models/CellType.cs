@@ -1,4 +1,4 @@
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>Identifies the data type of an Excel cell value.</summary>
 public enum CellType : byte

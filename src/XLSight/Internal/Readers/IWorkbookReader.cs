@@ -1,5 +1,4 @@
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Readers;
 
@@ -10,10 +9,10 @@ internal interface IWorkbookReader : IDisposable, IAsyncDisposable
     public bool IsDate1904 { get; }
     public bool HasMacros { get; }
 
-    public CellResult ReadCell(string sheetName, ExcelAddress address, ReadMode mode);
+    public ExcelCellValue ReadCell(string sheetName, ExcelAddress address, ReadMode mode);
     public RangeResult ReadRange(string sheetName, ExcelRange range, ReadMode mode);
 
-    public Task<CellResult> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct);
+    public Task<ExcelCellValue> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct);
     public Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct);
 
     public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1);
@@ -21,6 +20,5 @@ internal interface IWorkbookReader : IDisposable, IAsyncDisposable
     public Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, CancellationToken ct = default);
     public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, CancellationToken ct);
 
-    public IEnumerable<ExcelRow> StreamRange(string sheetName, ExcelRange range, ReadMode mode);
-    public IAsyncEnumerable<ExcelRow> StreamRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct);
+    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode);
 }

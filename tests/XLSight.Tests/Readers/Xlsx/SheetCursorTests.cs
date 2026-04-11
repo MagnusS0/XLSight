@@ -1,7 +1,6 @@
 using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsx;
-using XLSight.Models;
 using XLSight.Tests.Infrastructure;
 using Xunit;
 
@@ -207,7 +206,7 @@ public sealed class SheetCursorTests
         foreach (var row in cursor)
         {
             // Clone to retain value after next MoveNext (for Assert below).
-            cursorRows.Add(row.CloneRow());
+            cursorRows.Add(row.ToSnapshot());
         }
 
         Assert.Equal(scanRows.Count, cursorRows.Count);
@@ -251,7 +250,7 @@ public sealed class SheetCursorTests
         var cursorRows = new List<ExcelRow>();
         foreach (var row in cursor)
         {
-            cursorRows.Add(row.CloneRow());
+            cursorRows.Add(row.ToSnapshot());
         }
 
         Assert.Equal(scanRows.Count, cursorRows.Count);

@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes a structured table defined within an Excel worksheet.</summary>
 public sealed class TableInfo

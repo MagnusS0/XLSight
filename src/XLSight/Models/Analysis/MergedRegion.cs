@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Represents a merged cell region in an Excel worksheet.</summary>
 /// <param name="StartRow">The 1-based row index of the top edge of the merged region.</param>

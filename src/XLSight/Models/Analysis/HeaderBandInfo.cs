@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Represents an inferred header band in a worksheet.</summary>
 public sealed class HeaderBandInfo

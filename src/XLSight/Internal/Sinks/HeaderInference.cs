@@ -1,4 +1,3 @@
-using XLSight.Models;
 
 namespace XLSight.Internal.Sinks;
 

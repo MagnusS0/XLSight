@@ -1,7 +1,6 @@
 using System.IO.Compression;
 using System.Text;
-using XLSight.Models;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 using Xunit;
 
 namespace XLSight.Tests.PublicApi;
@@ -174,9 +173,7 @@ public sealed class WorkbookAsyncTests
 
         var result = await workbook.ReadCellAsync("Sheet1", "A1", ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(ExcelCellValue.FromNumber(42), result.Value);
-        Assert.Equal(1, result.Row);
-        Assert.Equal(1, result.Column);
+        Assert.Equal(ExcelCellValue.FromNumber(42), result);
     }
 
     [Fact]

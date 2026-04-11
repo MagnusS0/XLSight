@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Coarse structural categories inferred for worksheet regions.</summary>
 public enum RegionKind : byte

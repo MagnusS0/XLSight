@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes formula density for a single worksheet column.</summary>
 public sealed class FormulaColumnProfile

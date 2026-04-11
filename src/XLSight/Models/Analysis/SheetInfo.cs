@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes the structural properties of a single Excel worksheet after analysis.</summary>
 public sealed class SheetInfo
@@ -15,13 +15,13 @@ public sealed class SheetInfo
     public required int SheetIndex { get; init; }
 
     /// <summary>Gets exact worksheet facts parsed from the package.</summary>
-    public required SheetAnalysisExact Exact { get; init; }
+    internal SheetAnalysisExact Exact { get; init; } = null!;
 
     /// <summary>Gets worksheet facts observed during the streaming value scan.</summary>
-    public required SheetAnalysisObserved Observed { get; init; }
+    internal SheetAnalysisObserved Observed { get; init; } = null!;
 
     /// <summary>Gets inferred worksheet structure derived from exact and observed facts.</summary>
-    public required SheetAnalysisInferred Inferred { get; init; }
+    internal SheetAnalysisInferred Inferred { get; init; } = null!;
 
     /// <summary>Gets a value indicating whether observed scan data is available for this sheet.</summary>
     public bool HasObserved => Level >= AnalysisLevel.Observed;

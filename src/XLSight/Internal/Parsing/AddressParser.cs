@@ -1,5 +1,3 @@
-using XLSight.Exceptions;
-using XLSight.Models;
 
 namespace XLSight.Internal.Parsing;
 
@@ -137,6 +135,13 @@ internal static class AddressParser
         range = new ExcelRange(topLeft, bottomRight);
         return true;
     }
+
+    /// <summary>
+    /// Tries to parse a single cell reference string into an <see cref="ExcelAddress"/>.
+    /// Returns false without throwing on invalid input.
+    /// </summary>
+    internal static bool TryParseCell(ReadOnlySpan<char> input, out ExcelAddress address)
+        => CellReferenceParser.TryParse(input, out address);
 
     /// <summary>
     /// Converts column letters (e.g. "XFD") to a 1-based column index using bijective base-26.

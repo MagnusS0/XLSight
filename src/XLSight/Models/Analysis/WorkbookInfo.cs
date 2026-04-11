@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes the structural properties of an entire Excel workbook after analysis.</summary>
 public sealed class WorkbookInfo

@@ -1,6 +1,5 @@
 using System.Buffers;
 using XLSight.Internal.Metadata;
-using XLSight.Models;
 using static XLSight.Internal.Readers.Xlsx.XmlByteReader;
 
 namespace XLSight.Internal.Readers.Xlsx;
@@ -21,7 +20,7 @@ namespace XLSight.Internal.Readers.Xlsx;
 /// as long as the loop body does not store the row reference beyond the loop body.
 /// </para>
 /// </remarks>
-internal sealed class SheetCursor : IDisposable
+internal sealed class SheetCursor : IRowCursor
 {
     private readonly ScanBuffer _buf;
     private readonly SharedStringTable _sharedStrings;
@@ -69,7 +68,7 @@ internal sealed class SheetCursor : IDisposable
     /// <c>&lt;/sheetData&gt;</c> end-tag was found or the stream was exhausted).
     /// Used by the async streaming loop to break early without extra I/O.
     /// </summary>
-    internal bool IsSheetDone => _done;
+    public bool IsSheetDone => _done;
 
     /// <summary>
     /// Advances to the next row. Returns <see langword="false"/> when the sheet is exhausted.
@@ -132,7 +131,7 @@ internal sealed class SheetCursor : IDisposable
     /// trigger a roll-back and retry after the next async refill — they are never skipped
     /// or partially yielded.
     /// </remarks>
-    internal bool TryParseNext(out ExcelRow row)
+    public bool TryParseNext(out ExcelRow row)
     {
         row = default;
         if (_done) { return false; }
@@ -159,7 +158,7 @@ internal sealed class SheetCursor : IDisposable
     }
 
     /// <summary>Asynchronously refills the underlying <see cref="ScanBuffer"/>.</summary>
-    internal ValueTask<bool> RefillAsync(CancellationToken ct = default) =>
+    public ValueTask<bool> RefillAsync(CancellationToken ct = default) =>
         _buf.RefillAsync(ct);
 
     /// <summary>Enables duck-typed <c>foreach</c> over the cursor.</summary>

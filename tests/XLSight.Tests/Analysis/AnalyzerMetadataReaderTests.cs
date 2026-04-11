@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using XLSight.Analysis;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Packaging;
 using Xunit;
@@ -192,7 +193,7 @@ public sealed class AnalyzerMetadataReaderTests : IDisposable
         }
 
         using var workbook = XLSight.ExcelWorkbook.Open(_tempFile);
-        XLSight.Models.Analysis.WorkbookInfo info = workbook.Analyze();
+        WorkbookInfo info = workbook.Analyze();
 
         Assert.Equal(2, info.Sheets.Count);
         Assert.Equal("Sheet1", info.Sheets[0].SheetName);
@@ -259,7 +260,7 @@ public sealed class AnalyzerMetadataReaderTests : IDisposable
         AnalyzerMetadata result = AnalyzerMetadataReader.Read(package, metadata);
 
         Assert.Single(result.WorkbookExact.Tables);
-        XLSight.Models.Analysis.TableInfo table = result.WorkbookExact.Tables[0];
+        TableInfo table = result.WorkbookExact.Tables[0];
         Assert.Equal("SalesTable", table.Name);
         Assert.Equal("Data", table.Sheet);
         Assert.Equal(3, table.ColumnNames.Count);

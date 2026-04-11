@@ -1,4 +1,3 @@
-using XLSight.Exceptions;
 using Xunit;
 
 namespace XLSight.Tests.Exceptions;

@@ -1,5 +1,4 @@
 using XLSight.Internal.Sinks;
-using XLSight.Models;
 using XLSight.Tests.Infrastructure;
 using Xunit;
 

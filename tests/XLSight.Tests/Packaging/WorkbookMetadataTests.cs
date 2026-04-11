@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using System.Text;
-using XLSight.Exceptions;
 using XLSight.Internal.Packaging;
 using Xunit;
 

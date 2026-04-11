@@ -1,4 +1,4 @@
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>Holds the result of reading a rectangular range of cells from an Excel worksheet.</summary>
 public sealed class RangeResult
@@ -30,4 +30,23 @@ public sealed class RangeResult
 
     /// <summary>Gets the total number of cells in this range.</summary>
     public int CellCount => Width * Height;
+
+    /// <summary>
+    /// Returns the cells in this range as a list of <see cref="ExcelRow"/> values,
+    /// one per row in the range.
+    /// </summary>
+    public IReadOnlyList<ExcelRow> Rows
+    {
+        get
+        {
+            var rows = new ExcelRow[Height];
+            for (int r = 0; r < Height; r++)
+            {
+                var slice = new ExcelCellValue[Width];
+                Array.Copy(Cells, r * Width, slice, 0, Width);
+                rows[r] = new ExcelRow(StartRow + r, slice, StartColumn);
+            }
+            return rows;
+        }
+    }
 }

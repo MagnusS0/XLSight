@@ -1,4 +1,4 @@
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Analysis;
 

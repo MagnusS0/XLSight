@@ -1,4 +1,4 @@
-namespace XLSight.Models;
+namespace XLSight;
 
 /// <summary>Controls whether cell values or formula strings are returned by the reader.</summary>
 public enum ReadMode : byte

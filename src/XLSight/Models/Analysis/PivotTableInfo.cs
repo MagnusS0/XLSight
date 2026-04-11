@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Describes a pivot table defined within a workbook.</summary>
 public sealed class PivotTableInfo

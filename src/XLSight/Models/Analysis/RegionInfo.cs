@@ -1,4 +1,4 @@
-namespace XLSight.Models.Analysis;
+namespace XLSight.Analysis;
 
 /// <summary>Represents an inferred coherent region within a worksheet.</summary>
 public sealed class RegionInfo

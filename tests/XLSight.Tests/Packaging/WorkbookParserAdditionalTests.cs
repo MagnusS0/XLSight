@@ -235,6 +235,6 @@ public sealed class WorkbookParserAdditionalTests
     public void Parse_MalformedXml_ThrowsMalformedWorkbookException()
     {
         using var stream = Utf8("""<workbook><sheets><sheet name="x" r:id="rId1" <<BROKEN""");
-        Assert.Throws<XLSight.Exceptions.MalformedWorkbookException>(() => WorkbookParser.Parse(stream));
+        Assert.Throws<MalformedWorkbookException>(() => WorkbookParser.Parse(stream));
     }
 }

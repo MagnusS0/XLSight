@@ -1,5 +1,4 @@
 using System.Collections;
-using XLSight.Models;
 using Xunit;
 
 namespace XLSight.Tests.Models;
@@ -194,7 +193,7 @@ public sealed class ExcelRowTests
     {
         var cells = new[] { ExcelCellValue.FromNumber(1.0), ExcelCellValue.FromNumber(2.0) };
         var row = new ExcelRow(3, cells, 2);
-        ExcelRow clone = row.CloneRow();
+        ExcelRow clone = row.ToSnapshot();
 
         Assert.Equal(row.RowIndex, clone.RowIndex);
         Assert.Equal(row.StartColumn, clone.StartColumn);
@@ -207,7 +206,7 @@ public sealed class ExcelRowTests
     public void CloneRow_EmptyRow_ClonesCorrectly()
     {
         var row = EmptyRow(rowIndex: 5, columnOffset: 1);
-        ExcelRow clone = row.CloneRow();
+        ExcelRow clone = row.ToSnapshot();
         Assert.Equal(0, clone.CellCount);
         Assert.Equal(5, clone.RowIndex);
     }

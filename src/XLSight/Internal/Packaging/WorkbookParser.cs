@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text;
 using System.Xml;
-using XLSight.Exceptions;
 
 namespace XLSight.Internal.Packaging;
 

@@ -1,7 +1,5 @@
 using System.IO.Compression;
 using System.Text;
-using XLSight.Exceptions;
-using XLSight.Models;
 using Xunit;
 
 namespace XLSight.Tests.PublicApi;
@@ -231,9 +229,7 @@ public sealed class ExcelWorkbookTests
 
         var result = workbook.ReadCell("Sheet1", "A1");
 
-        Assert.Equal(ExcelCellValue.FromNumber(42), result.Value);
-        Assert.Equal(1, result.Row);
-        Assert.Equal(1, result.Column);
+        Assert.Equal(ExcelCellValue.FromNumber(42), result);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 using System.IO.Compression;
 using System.Text;
-using XLSight.Models.Analysis;
+using XLSight.Analysis;
 using Xunit;
 
 namespace XLSight.Tests.Analysis;
@@ -181,7 +181,7 @@ public sealed class WorkbookAnalysisTests
     public void Analyze_MultipleSheets_ReturnsCorrectSheetCount()
     {
         using var ms = BuildWorkbook(WorkbookXmlTwoSheets, RelsXmlTwoSheets, EmptySheetXml, EmptySheetXml);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         WorkbookInfo info = workbook.Analyze();
 
@@ -194,7 +194,7 @@ public sealed class WorkbookAnalysisTests
     public void Analyze_BasicProperties_MatchWorkbookMetadata()
     {
         using var ms = BuildWorkbook(WorkbookXmlWithNamedRange, RelsXmlOneSheet, EmptySheetXml);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         WorkbookInfo info = workbook.Analyze();
 
@@ -209,7 +209,7 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_WithData_ReturnsUsedRange()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlA1B2Data);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
@@ -224,7 +224,7 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_EmptySheet_IsEmpty()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, EmptySheetXml);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
@@ -237,12 +237,12 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_NumericColumn_DominantTypeIsNumber()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlNumericColumn);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
         Assert.Single(info.Columns);
-        Assert.Equal(XLSight.Models.CellType.Number, info.Columns[0].DominantType);
+        Assert.Equal(CellType.Number, info.Columns[0].DominantType);
         Assert.Equal(3, info.Columns[0].NonEmptyCount);
     }
 
@@ -251,7 +251,7 @@ public sealed class WorkbookAnalysisTests
     {
         using var ms = BuildWorkbook(
             WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlHeaderThenData, sstXml: SstXmlNameScore);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
@@ -266,7 +266,7 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_MergedRegions_CollectedCorrectly()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlWithMerge);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data");
 
@@ -282,7 +282,7 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_ExactLevel_ReturnsOnlyExactMetadata()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlWithMerge);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data", AnalysisLevel.Exact);
 
@@ -299,7 +299,7 @@ public sealed class WorkbookAnalysisTests
     {
         using var ms = BuildWorkbook(
             WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlHeaderThenData, sstXml: SstXmlNameScore);
-        using var workbook = XLSight.ExcelWorkbook.Open(ms);
+        using var workbook = ExcelWorkbook.Open(ms);
 
         SheetInfo info = workbook.AnalyzeSheet("Data", AnalysisLevel.Observed);
 
@@ -316,7 +316,7 @@ public sealed class WorkbookAnalysisTests
     public void AnalyzeSheet_AfterDispose_ThrowsObjectDisposedException()
     {
         using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, EmptySheetXml);
-        var workbook = XLSight.ExcelWorkbook.Open(ms);
+        var workbook = ExcelWorkbook.Open(ms);
         workbook.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => workbook.AnalyzeSheet("Data"));
@@ -325,7 +325,7 @@ public sealed class WorkbookAnalysisTests
     [Fact]
     public void Analyze_ComplexWorkbook_SurfacesChartsAndSheetArtifacts()
     {
-        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+        using var workbook = ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
 
         WorkbookInfo info = workbook.Analyze();
 
@@ -360,7 +360,7 @@ public sealed class WorkbookAnalysisTests
     [Fact]
     public void Analyze_ComplexWorkbook_SeparatesValueAndDeclaredRanges()
     {
-        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+        using var workbook = ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
 
         SheetInfo info = workbook.AnalyzeSheet("Calculator");
 
@@ -375,7 +375,7 @@ public sealed class WorkbookAnalysisTests
     [Fact]
     public void Analyze_ComplexWorkbook_ExactLevel_SkipsObservedAndInference()
     {
-        using var workbook = XLSight.ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
+        using var workbook = ExcelWorkbook.Open(TestFilePath("complex_workbook.xlsx"));
 
         WorkbookInfo info = workbook.Analyze(AnalysisLevel.Exact);
 
