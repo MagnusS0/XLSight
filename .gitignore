@@ -485,6 +485,7 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 tests/XLSight.Tests/TestData/xl_large.xlsx
+tests/XLSight.Tests/TestData/xl_large.xlsb
 tests/XLSight.Tests/TestData/NYC_311_SR_2010-2020-sample-1M.csv
 tests/XLSight.Tests/TestData/NYC_311_SR_2010-2020-sample-1M.7z
 tests/XLSight.Tests/TestData/NYC_311_SR_2010-2020-sample-1M.xlsx

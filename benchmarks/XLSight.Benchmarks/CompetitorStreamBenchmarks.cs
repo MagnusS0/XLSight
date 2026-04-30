@@ -39,13 +39,13 @@ using XLSight;
 public class CompetitorStreamBenchmarks
 {
     private const string ComplexSheet = "Scenarios";
+    private const string XlLargeSheet = "Worksheet";
     private const string MidRangeAddress = "B10:N20";
 
     private string _complexPath   = null!;
     private string _largePath    = null!;
-    private string? _xlLargePath;
+    private string _xlLargePath  = null!;
     private int _largeColumns;
-    private int _xlLargeColumns;
 
     private static readonly ExcelRange s_midRange = ExcelRange.Parse(MidRangeAddress);
     private static readonly string[] s_midRangeColumns =
@@ -58,21 +58,12 @@ public class CompetitorStreamBenchmarks
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         _complexPath = Path.Combine(AppContext.BaseDirectory, "TestData", "complex_workbook.xlsx");
         _largePath   = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
-        var xlLarge  = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
-        _xlLargePath = File.Exists(xlLarge) ? xlLarge : null;
+        _xlLargePath = BenchmarkFixture.OptionalPath("xl_large.xlsx");
 
         using (var s = File.OpenRead(_largePath))
         using (var r = ExcelReaderFactory.CreateReader(s))
         {
             if (r.Read()) _largeColumns = r.FieldCount;
-        }
-
-        if (_xlLargePath is not null)
-        {
-            using var s = File.OpenRead(_xlLargePath);
-            using var r = ExcelReaderFactory.CreateReader(s);
-            NavigateToSheet(r, "Worksheet");
-            if (r.Read()) { _xlLargeColumns = r.FieldCount; }
         }
     }
 
@@ -176,62 +167,61 @@ public class CompetitorStreamBenchmarks
         return CombineCounts(rows, cells);
     }
 
-    // ── ~1M-row file (skipped if xl_large.xlsx not present) ─────────────────
+    // ── ~1M-row file (run explicitly when xl_large.xlsx is present) ─────────
 
     [Benchmark(Description = "XLSight reader AllRows (1M)")]
     public int XLSightReader_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) return -1;
-        return ConsumeXlsightReader(_xlLargePath, "Worksheet");
+        return ConsumeXlsightReader(RequireXlLargePath(), XlLargeSheet);
     }
 
     [Benchmark(Description = "XLSight reader First10 (1M)")]
     public int XLSightReader_XlLarge_First10()
     {
-        if (_xlLargePath is null) return -1;
-        return ConsumeXlsightReader(_xlLargePath, "Worksheet", 10);
+        return ConsumeXlsightReader(RequireXlLargePath(), XlLargeSheet, 10);
     }
 
     [Benchmark(Description = "XLSight safe AllRows (1M)")]
     public int XLSightSafe_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) return -1;
-        return ConsumeXlsightSafe(_xlLargePath, "Worksheet");
+        return ConsumeXlsightSafe(RequireXlLargePath(), XlLargeSheet);
     }
 
     [Benchmark(Description = "XLSight safe First10 (1M)")]
     public int XLSightSafe_XlLarge_First10()
     {
-        if (_xlLargePath is null) return -1;
-        return ConsumeXlsightSafe(_xlLargePath, "Worksheet", 10);
+        return ConsumeXlsightSafe(RequireXlLargePath(), XlLargeSheet, 10);
     }
 
     [Benchmark(Description = "MiniExcel AllRows (1M)")]
     public int MiniExcel_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) { return -1; }
-        return ConsumeMiniExcel(_xlLargePath, "Worksheet");
+        return ConsumeMiniExcel(RequireXlLargePath(), XlLargeSheet);
     }
 
     [Benchmark(Description = "MiniExcel First10 (1M)")]
     public int MiniExcel_XlLarge_First10()
     {
-        if (_xlLargePath is null) { return -1; }
-        return ConsumeMiniExcel(_xlLargePath, "Worksheet", 10);
+        return ConsumeMiniExcel(RequireXlLargePath(), XlLargeSheet, 10);
     }
 
     [Benchmark(Description = "ExcelDataReader AllRows (1M)")]
     public int ExcelDataReader_XlLarge_AllRows()
     {
-        if (_xlLargePath is null) { return -1; }
-        using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var stream = File.Open(RequireXlLargePath(), FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
-        NavigateToSheet(reader, "Worksheet");
+        NavigateToSheet(reader, XlLargeSheet);
         int rows = 0;
         int cells = 0;
+        int columns = 0;
         while (reader.Read())
         {
-            for (int i = 0; i < _xlLargeColumns; i++)
+            if (columns == 0)
+            {
+                columns = reader.FieldCount;
+            }
+
+            for (int i = 0; i < columns; i++)
             {
                 _ = reader.GetValue(i);
                 cells++;
@@ -246,15 +236,20 @@ public class CompetitorStreamBenchmarks
     [Benchmark(Description = "ExcelDataReader First10 (1M)")]
     public int ExcelDataReader_XlLarge_First10()
     {
-        if (_xlLargePath is null) { return -1; }
-        using var stream = File.Open(_xlLargePath!, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var stream = File.Open(RequireXlLargePath(), FileMode.Open, FileAccess.Read, FileShare.Read);
         using var reader = ExcelReaderFactory.CreateReader(stream);
-        NavigateToSheet(reader, "Worksheet");
+        NavigateToSheet(reader, XlLargeSheet);
         int rows = 0;
         int cells = 0;
+        int columns = 0;
         while (reader.Read() && rows < 10)
         {
-            for (int i = 0; i < _xlLargeColumns; i++)
+            if (columns == 0)
+            {
+                columns = reader.FieldCount;
+            }
+
+            for (int i = 0; i < columns; i++)
             {
                 _ = reader.GetValue(i);
                 cells++;
@@ -265,6 +260,8 @@ public class CompetitorStreamBenchmarks
 
         return CombineCounts(rows, cells);
     }
+
+    private string RequireXlLargePath() => BenchmarkFixture.RequireOptionalLargeFixture(_xlLargePath);
 
     private static void NavigateToSheet(IExcelDataReader reader, string sheetName)
     {

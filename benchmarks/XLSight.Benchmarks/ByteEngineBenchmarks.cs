@@ -21,7 +21,7 @@ using XLSight.Internal.Readers.Xlsx;
 public class ByteEngineBenchmarks
 {
     private string _largePath = null!;
-    private string? _xlLargePath;
+    private string _xlLargePath = null!;
 
     private SharedStringTable _largeSst = SharedStringTable.Empty;
     private StyleTable _largeStyles = StyleTable.Default;
@@ -37,14 +37,13 @@ public class ByteEngineBenchmarks
     public void Setup()
     {
         _largePath = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
-        var xlLarge = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
-        _xlLargePath = File.Exists(xlLarge) ? xlLarge : null;
+        _xlLargePath = BenchmarkFixture.OptionalPath("xl_large.xlsx");
 
         (_largeSst, _largeStyles, _largeWsBytes, _largeIsDate1904) = LoadFixture(_largePath, "Numbers");
-        if (_xlLargePath is not null)
+        if (ShouldLoadXlLargeFixture())
         {
             (_xlLargeSst, _xlLargeStyles, _xlLargeWsBytes, _xlLargeIsDate1904) =
-                LoadFixture(_xlLargePath, "Worksheet");
+                LoadFixture(RequireXlLargePath(), "Worksheet");
         }
     }
 
@@ -83,11 +82,7 @@ public class ByteEngineBenchmarks
     [Benchmark(Description = "ByteEngine IEnumerable (1M)")]
     public int ScannerOnly_ByteEngine_XlLarge_AllRows()
     {
-        if (_xlLargeWsBytes.Length == 0)
-        {
-            return -1;
-        }
-
+        EnsureXlLargeLoaded();
         using var stream = new MemoryStream(_xlLargeWsBytes, writable: false);
         int count = 0;
         foreach (var _ in XlsxSheetScanner.ScanRows(
@@ -135,11 +130,7 @@ public class ByteEngineBenchmarks
     [Benchmark(Description = "Cursor (1M)")]
     public int ScannerOnly_Cursor_XlLarge_AllRows()
     {
-        if (_xlLargeWsBytes.Length == 0)
-        {
-            return -1;
-        }
-
+        EnsureXlLargeLoaded();
         using var stream = new MemoryStream(_xlLargeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             stream, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
@@ -156,11 +147,7 @@ public class ByteEngineBenchmarks
     [Benchmark(Description = "Cursor First10 (1M)")]
     public int ScannerOnly_Cursor_XlLarge_First10()
     {
-        if (_xlLargeWsBytes.Length == 0)
-        {
-            return -1;
-        }
-
+        EnsureXlLargeLoaded();
         using var stream = new MemoryStream(_xlLargeWsBytes, writable: false);
         using var cursor = XlsxSheetScanner.OpenCursor(
             stream, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
@@ -184,11 +171,25 @@ public class ByteEngineBenchmarks
 
     [Benchmark(Description = "XLSight reader full-path (1M)")]
     public int FullPath_XLSightReader_XlLarge_AllRows()
-        => _xlLargePath is null ? -1 : ConsumeReader(_xlLargePath, "Worksheet");
+        => ConsumeReader(RequireXlLargePath(), "Worksheet");
 
     [Benchmark(Description = "XLSight safe full-path (1M)")]
     public int FullPath_XLSightStream_XlLarge_AllRows()
-        => _xlLargePath is null ? -1 : ConsumeSafe(_xlLargePath, "Worksheet");
+        => ConsumeSafe(RequireXlLargePath(), "Worksheet");
+
+    private void EnsureXlLargeLoaded()
+    {
+        if (_xlLargeWsBytes.Length == 0)
+        {
+            (_xlLargeSst, _xlLargeStyles, _xlLargeWsBytes, _xlLargeIsDate1904) =
+                LoadFixture(RequireXlLargePath(), "Worksheet");
+        }
+    }
+
+    private string RequireXlLargePath() => BenchmarkFixture.RequireOptionalLargeFixture(_xlLargePath);
+
+    private static bool ShouldLoadXlLargeFixture() =>
+        Environment.GetCommandLineArgs().Any(static arg => arg.Contains("XlLarge", StringComparison.Ordinal));
 
     private static int ConsumeReader(string path, string sheet, int maxRows = int.MaxValue)
     {
