@@ -2,6 +2,7 @@ using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Sinks;
+using XLSight.Internal.Vba;
 using XLSight.Analysis;
 
 namespace XLSight.Internal.Readers.Xlsx;
@@ -10,16 +11,18 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
 {
     private readonly XlsxPackage _package;
     private readonly WorkbookMetadata _metadata;
+    private readonly WorkbookFormat _format;
     private readonly Lazy<SharedStringTable> _sharedStrings;
     private readonly Lazy<StyleTable> _styles;
     private readonly Lazy<AnalyzerMetadata> _analyzerMetadata;
     private readonly Lazy<string[]> _sheetNames;
     private volatile bool _disposed;
 
-    internal XlsxWorkbookReader(XlsxPackage package, WorkbookMetadata metadata)
+    internal XlsxWorkbookReader(XlsxPackage package, WorkbookMetadata metadata, WorkbookFormat format = WorkbookFormat.Xlsx)
     {
         _package = package;
         _metadata = metadata;
+        _format = format;
         _sharedStrings = new Lazy<SharedStringTable>(LoadSharedStrings, LazyThreadSafetyMode.ExecutionAndPublication);
         _styles = new Lazy<StyleTable>(LoadStyles, LazyThreadSafetyMode.ExecutionAndPublication);
         _analyzerMetadata = new Lazy<AnalyzerMetadata>(
@@ -58,6 +61,15 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
 
     public bool IsFileBacked => _package.IsFileBacked;
 
+    public WorkbookFormat Format
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _format;
+        }
+    }
+
     public IReadOnlyList<string> SheetNames
     {
         get
@@ -83,6 +95,36 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             ThrowIfDisposed();
             return _metadata.HasMacros;
         }
+    }
+
+    public VbaProjectInfo? GetVbaProject()
+    {
+        ThrowIfDisposed();
+        if (!_metadata.HasMacros)
+        {
+            return null;
+        }
+
+        using var stream = OpenVbaProjectStream();
+        return stream is null ? null : VbaProjectParser.Parse(stream);
+    }
+
+    public string GetVbaModuleSource(string moduleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleName);
+        ThrowIfDisposed();
+
+        using var stream = OpenRequiredVbaProjectStream();
+        return VbaProjectParser.ReadModuleSource(stream, moduleName);
+    }
+
+    public byte[] GetVbaModuleSourceBytes(string moduleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleName);
+        ThrowIfDisposed();
+
+        using var stream = OpenRequiredVbaProjectStream();
+        return VbaProjectParser.ReadModuleSourceBytes(stream, moduleName);
     }
 
     public RangeResult ReadRange(string sheetName, ExcelRange range, ReadMode mode)
@@ -336,6 +378,12 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             ?? throw new MalformedWorkbookException($"Worksheet entry '{sheetPath}' was not found in the package.");
         return entry.OpenBuffered();
     }
+
+    private Stream? OpenVbaProjectStream() => _package.TryOpenEntryBuffered("xl/vbaProject.bin");
+
+    private Stream OpenRequiredVbaProjectStream()
+        => OpenVbaProjectStream()
+            ?? throw new InvalidOperationException("The workbook does not contain a VBA macro project.");
 
     private RangeResult ReadRangeCore(string sheetName, ExcelRange range, ReadMode mode)
     {

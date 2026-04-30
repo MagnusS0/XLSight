@@ -5,9 +5,13 @@ namespace XLSight.Internal.Readers;
 internal interface IWorkbookReader : IDisposable, IAsyncDisposable
 {
     public bool IsFileBacked { get; }
+    public WorkbookFormat Format { get; }
     public IReadOnlyList<string> SheetNames { get; }
     public bool IsDate1904 { get; }
     public bool HasMacros { get; }
+    public VbaProjectInfo? GetVbaProject();
+    public string GetVbaModuleSource(string moduleName);
+    public byte[] GetVbaModuleSourceBytes(string moduleName);
 
     public ExcelCellValue ReadCell(string sheetName, ExcelAddress address, ReadMode mode);
     public RangeResult ReadRange(string sheetName, ExcelRange range, ReadMode mode);

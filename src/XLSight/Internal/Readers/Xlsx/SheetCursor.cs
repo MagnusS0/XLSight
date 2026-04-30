@@ -170,6 +170,10 @@ internal sealed class SheetCursor : IRowCursor
         if (_disposed) { return; }
         _disposed = true;
         _done = true;
+        if (_current.CellCount > 0)
+        {
+            _cellPool.AsSpan(0, _current.CellCount).Clear();
+        }
         ArrayPool<ExcelCellValue>.Shared.Return(_cellPool, clearArray: false);
         _buf.Dispose();
     }

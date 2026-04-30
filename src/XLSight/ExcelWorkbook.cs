@@ -4,12 +4,14 @@ using XLSight.Analysis;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers;
+using XLSight.Internal.Readers.Xlsb;
 using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Vba;
 
 namespace XLSight;
 
 /// <summary>
-/// Provides synchronous and asynchronous access to an Excel workbook (.xlsx).
+/// Provides synchronous and asynchronous access to an Excel workbook (.xlsx, .xlsm, .xlsb).
 /// Supports reading cell values, ranges, streaming rows, and analyzing sheet structure.
 /// </summary>
 public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
@@ -31,11 +33,88 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <summary>Gets a value indicating whether the workbook uses the 1904 date system.</summary>
     public bool IsDate1904 => _engine.IsDate1904;
 
+    /// <summary>Gets the workbook container format.</summary>
+    public WorkbookFormat Format => _engine.Format;
+
     /// <summary>Gets a value indicating whether the workbook contains VBA macros.</summary>
     public bool HasMacros => _engine.HasMacros;
 
+    /// <summary>Parses and returns source-free VBA project metadata for macro-enabled Open XML workbooks.</summary>
+    /// <returns>VBA project metadata, or <see langword="null"/> when the workbook has no VBA project.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the VBA project exists but cannot be parsed.</exception>
+    public VbaProjectInfo? GetVbaProject()
+    {
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            return _engine.GetVbaProject();
+        }
+        catch (VbaProjectParseException ex)
+        {
+            throw new InvalidDataException("The VBA project could not be parsed.", ex);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    /// <summary>Reads and decodes a VBA module source by module name.</summary>
+    /// <param name="moduleName">The module name declared in the VBA project metadata.</param>
+    /// <returns>The decoded module source.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="moduleName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the workbook has no VBA project.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the VBA project or requested module cannot be parsed.</exception>
+    public string GetVbaModuleSource(string moduleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleName);
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            return _engine.GetVbaModuleSource(moduleName);
+        }
+        catch (VbaProjectParseException ex)
+        {
+            throw new InvalidDataException("The VBA module source could not be read.", ex);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    /// <summary>Reads decompressed raw VBA module source bytes by module name.</summary>
+    /// <param name="moduleName">The module name declared in the VBA project metadata.</param>
+    /// <returns>The decompressed raw module source bytes.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="moduleName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the workbook has no VBA project.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the VBA project or requested module cannot be parsed.</exception>
+    public byte[] GetVbaModuleSourceBytes(string moduleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleName);
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            return _engine.GetVbaModuleSourceBytes(moduleName);
+        }
+        catch (VbaProjectParseException ex)
+        {
+            throw new InvalidDataException("The VBA module source could not be read.", ex);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
     /// <summary>Opens a workbook from a seekable stream synchronously.</summary>
-    /// <param name="stream">A seekable, readable stream containing the .xlsx file.</param>
+    /// <param name="stream">A seekable, readable stream containing the .xlsx or .xlsm file.</param>
     /// <returns>A new <see cref="ExcelWorkbook"/> instance.</returns>
     /// <remarks>
     /// If the stream is seekable, it is used directly and must remain open for the workbook's lifetime.
@@ -56,19 +135,20 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Opens a workbook from a file path synchronously.</summary>
-    /// <param name="filePath">Path to the .xlsx file.</param>
+    /// <param name="filePath">Path to the .xlsx, .xlsm, or .xlsb file.</param>
     /// <returns>A new <see cref="ExcelWorkbook"/> instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="filePath"/> is null.</exception>
     public static ExcelWorkbook Open(string filePath)
     {
         ArgumentNullException.ThrowIfNull(filePath);
         XLSightEventSource.Log.WorkbookOpened(filePath);
+        WorkbookFormat format = GetFormatFromPath(filePath);
         var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return Create(fileStream, ownsStream: true);
+        return Create(fileStream, ownsStream: true, format);
     }
 
     /// <summary>Opens a workbook from a stream asynchronously.</summary>
-    /// <param name="stream">A readable stream containing the .xlsx file.</param>
+    /// <param name="stream">A readable stream containing the .xlsx or .xlsm file.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a new <see cref="ExcelWorkbook"/> instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="stream"/> is null.</exception>
@@ -79,7 +159,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Opens a workbook from a file path asynchronously.</summary>
-    /// <param name="filePath">Path to the .xlsx file.</param>
+    /// <param name="filePath">Path to the .xlsx, .xlsm, or .xlsb file.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a new <see cref="ExcelWorkbook"/> instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="filePath"/> is null.</exception>
@@ -100,28 +180,70 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     private static async Task<ExcelWorkbook> OpenFileAsyncCore(string filePath, CancellationToken ct)
     {
         XLSightEventSource.Log.WorkbookOpened(filePath);
+        WorkbookFormat format = GetFormatFromPath(filePath);
         var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var package = await XlsxPackage.OpenAsync(fileStream, ownsStream: true, ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
-        return CreateFromPackageSync(package);
+        return CreateFromPackageSync(package, format);
     }
 
-    private static ExcelWorkbook Create(Stream stream, bool ownsStream = false)
+    private static ExcelWorkbook Create(
+        Stream stream,
+        bool ownsStream = false,
+        WorkbookFormat format = WorkbookFormat.Xlsx)
     {
         var package = XlsxPackage.Open(stream, ownsStream: ownsStream);
-        return CreateFromPackageSync(package);
+        return CreateFromPackageSync(package, format);
     }
 
-    private static ExcelWorkbook CreateFromPackageSync(XlsxPackage package)
+    private static ExcelWorkbook CreateFromPackageSync(
+        XlsxPackage package,
+        WorkbookFormat format = WorkbookFormat.Xlsx)
     {
+        if (format == WorkbookFormat.Xlsb)
+        {
+            return CreateXlsbFromPackage(package);
+        }
+
         using var workbookStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
         using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
-        var def = WorkbookParser.Parse(workbookStream);
+        bool hasMacros = package.GetEntry("xl/vbaProject.bin") is not null;
+        var def = WorkbookParser.Parse(workbookStream, hasMacros);
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
         // SST and styles are loaded lazily inside the engine on first use.
-        var engine = new XlsxWorkbookReader(package, metadata);
+        var engine = new XlsxWorkbookReader(package, metadata, format);
         return new ExcelWorkbook(engine);
+    }
+
+    private static WorkbookFormat GetFormatFromPath(string filePath)
+    {
+        string extension = Path.GetExtension(filePath);
+        if (string.Equals(extension, ".xlsm", StringComparison.OrdinalIgnoreCase))
+        {
+            return WorkbookFormat.Xlsm;
+        }
+
+        if (string.Equals(extension, ".xlsb", StringComparison.OrdinalIgnoreCase))
+        {
+            return WorkbookFormat.Xlsb;
+        }
+
+        return WorkbookFormat.Xlsx;
+    }
+
+    private static ExcelWorkbook CreateXlsbFromPackage(XlsxPackage package)
+    {
+        var workbookEntry = package.GetEntry("xl/workbook.bin")
+            ?? throw new MalformedWorkbookException("XLSB workbook metadata entry 'xl/workbook.bin' was not found.");
+        var relsEntry = package.GetEntry("xl/_rels/workbook.bin.rels")
+            ?? throw new MalformedWorkbookException("XLSB workbook relationships entry 'xl/_rels/workbook.bin.rels' was not found.");
+
+        using Stream workbookStream = workbookEntry.OpenBuffered();
+        using Stream relsStream = relsEntry.OpenBuffered();
+        var relationshipPaths = XlsbRelationshipParser.Parse(relsStream);
+        var metadata = XlsbWorkbookParser.Parse(workbookStream, relationshipPaths);
+        return new ExcelWorkbook(new XlsbWorkbookReader(package, metadata));
     }
 
     // ── ReadCell (string overloads) ──────────────────────────────────────────
