@@ -75,6 +75,32 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Opens an entry stream, preferring a fresh independent archive for concurrent access.
+    /// Returns null when the entry does not exist.
+    /// </summary>
+    internal Stream? TryOpenEntryBuffered(string path)
+    {
+        Stream? fresh = TryOpenFreshEntry(path);
+        if (fresh is not null)
+        {
+            return fresh;
+        }
+
+        return GetEntry(path)?.OpenBuffered();
+    }
+
+    /// <summary>Builds the OPC relationships path for a given part path.</summary>
+    internal static string BuildRelationshipsPath(string ownerPath)
+    {
+        int slash = ownerPath.LastIndexOf('/');
+        string directory = slash >= 0 ? ownerPath[..slash] : string.Empty;
+        string fileName = slash >= 0 ? ownerPath[(slash + 1)..] : ownerPath;
+        return string.IsNullOrEmpty(directory)
+            ? $"_rels/{fileName}.rels"
+            : $"{directory}/_rels/{fileName}.rels";
+    }
+
+    /// <summary>
     /// Opens a fresh, independent <see cref="ZipArchive"/> for a single entry.
     /// Safe to call concurrently when <see cref="IsFileBacked"/> is true.
     /// Returns null if no file path is available or the entry is not found.

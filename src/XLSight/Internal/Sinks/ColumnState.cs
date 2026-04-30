@@ -50,10 +50,10 @@ internal sealed class ColumnState
 
     /// <summary>
     /// Fast path for <see cref="CellDataKind.SharedString"/> cells.
-    /// Uses the raw SST index for distinct tracking and <see cref="Metadata.SharedStringTable.GetCharCount"/>
+    /// Uses the raw SST index for distinct tracking and <see cref="ISharedStringSource.GetCharCount"/>
     /// for text length — both zero allocation.
     /// </summary>
-    internal void RecordSharedString(int sstIndex, Metadata.SharedStringTable sst)
+    internal void RecordSharedString(int sstIndex, ISharedStringSource sst)
     {
         NonEmptyCount++;
         TextCount++;
