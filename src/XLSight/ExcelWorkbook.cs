@@ -200,7 +200,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         XlsxPackage package,
         WorkbookFormat format = WorkbookFormat.Xlsx)
     {
-        if (format == WorkbookFormat.Xlsb)
+        WorkbookFormat effectiveFormat = DetectPackageFormat(package, format);
+        if (effectiveFormat == WorkbookFormat.Xlsb)
         {
             return CreateXlsbFromPackage(package);
         }
@@ -212,8 +213,20 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         var metadata = RelationshipsParser.Parse(relsStream, def);
 
         // SST and styles are loaded lazily inside the engine on first use.
-        var engine = new XlsxWorkbookReader(package, metadata, format);
+        var engine = new XlsxWorkbookReader(package, metadata, effectiveFormat);
         return new ExcelWorkbook(engine);
+    }
+
+    private static WorkbookFormat DetectPackageFormat(XlsxPackage package, WorkbookFormat format)
+    {
+        if (format == WorkbookFormat.Xlsb)
+        {
+            return WorkbookFormat.Xlsb;
+        }
+
+        bool hasWorkbookBin = package.GetEntry("xl/workbook.bin") is not null;
+        bool hasWorkbookXml = package.GetEntry("xl/workbook.xml") is not null;
+        return hasWorkbookBin || !hasWorkbookXml ? WorkbookFormat.Xlsb : format;
     }
 
     private static WorkbookFormat GetFormatFromPath(string filePath)

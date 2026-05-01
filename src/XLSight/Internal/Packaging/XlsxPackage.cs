@@ -80,6 +80,8 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     /// </summary>
     internal Stream? TryOpenEntryBuffered(string path)
     {
+        ThrowIfDisposed();
+
         Stream? fresh = TryOpenFreshEntry(path);
         if (fresh is not null)
         {
@@ -107,6 +109,8 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     /// </summary>
     internal Stream? TryOpenFreshEntry(string entryPath)
     {
+        ThrowIfDisposed();
+
         if (_backing.Stream is not FileStream backingFs)
         {
             return null;
