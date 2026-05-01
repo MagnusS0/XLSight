@@ -142,33 +142,42 @@ internal sealed class CompoundFileBinary
     private static List<uint> ReadDifat(byte[] data, CfbHeader header)
     {
         var difat = new List<uint>(109);
+        var fatSectors = new HashSet<uint>();
         for (var offset = 76; offset < HeaderSize; offset += 4)
         {
             var sector = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, 4));
-            if (sector != FreeSector)
-            {
-                difat.Add(sector);
-            }
+            AddDifatEntry(difat, fatSectors, sector);
         }
 
         var nextDifatSector = header.FirstDifatSector;
+        var visitedDifatSectors = new HashSet<uint>();
         for (var i = 0u; i < header.DifatSectorCount && nextDifatSector != EndOfChain; i++)
         {
+            if (!visitedDifatSectors.Add(nextDifatSector))
+            {
+                break;
+            }
+
             var sectorBytes = GetSector(data, header.SectorSize, nextDifatSector);
             var entriesPerDifatSector = (header.SectorSize / 4) - 1;
             for (var j = 0; j < entriesPerDifatSector; j++)
             {
                 var sector = BinaryPrimitives.ReadUInt32LittleEndian(sectorBytes.Slice(j * 4, 4));
-                if (sector != FreeSector)
-                {
-                    difat.Add(sector);
-                }
+                AddDifatEntry(difat, fatSectors, sector);
             }
 
             nextDifatSector = BinaryPrimitives.ReadUInt32LittleEndian(sectorBytes.Slice(header.SectorSize - 4, 4));
         }
 
         return difat;
+    }
+
+    private static void AddDifatEntry(List<uint> difat, HashSet<uint> fatSectors, uint sector)
+    {
+        if (sector != FreeSector && fatSectors.Add(sector))
+        {
+            difat.Add(sector);
+        }
     }
 
     private static uint[] ReadFat(byte[] data, CfbHeader header, List<uint> difat)

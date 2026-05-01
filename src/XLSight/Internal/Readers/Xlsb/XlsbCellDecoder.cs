@@ -352,6 +352,11 @@ internal static class XlsbCellDecoder
         }
 
         int index = XlsbBinary.ReadInt32(data, 0);
+        if (index < 0)
+        {
+            return ExcelCellValue.Empty;
+        }
+
         return ExcelCellValue.FromSharedString(getSharedString(index), index);
     }
 
@@ -371,6 +376,12 @@ internal static class XlsbCellDecoder
         }
 
         rawIndex = XlsbBinary.ReadInt32(data, 0);
+        if (rawIndex < 0)
+        {
+            rawIndex = -1;
+            return true;
+        }
+
         if (decode)
         {
             value = ExcelCellValue.FromSharedString(getSharedString(rawIndex), rawIndex);
