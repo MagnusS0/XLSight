@@ -19,7 +19,7 @@ public sealed class WorkbookAnalysisExact
     public required bool HasMacros { get; init; }
 
     /// <summary>Gets VBA project metadata when macro metadata was parsed.</summary>
-    public required VbaProjectInfo? VbaProject { get; init; }
+    public VbaProjectInfo? VbaProject { get; init; }
 
     /// <summary>Gets a value indicating whether the workbook uses the 1904 date system.</summary>
     public required bool IsDate1904 { get; init; }

@@ -32,29 +32,30 @@ internal static class VbaCompressedStream
                 throw new VbaProjectParseException($"Invalid VBA compressed stream: chunk signature {chunkSignature} is unsupported.");
             }
 
-            var chunkEnd = Math.Min(compressed.Length, chunkStart + compressedChunkSize + 3);
+            int chunkEnd = GetChunkEnd(compressed.Length, chunkStart, compressedChunkSize);
+
             var decompressedChunkStart = output.Count;
             if (!isCompressed)
             {
-                EnsureAvailable(compressed, offset, ChunkSize, "uncompressed chunk");
-                Append(output, compressed.Slice(offset, ChunkSize));
-                offset += ChunkSize;
+                AppendUncompressedChunk(compressed, output, ref offset, compressedChunkSize, chunkEnd);
                 continue;
             }
 
             while (offset < chunkEnd)
             {
+                EnsureChunkAvailable(compressed, offset, 1, chunkEnd, "flag byte");
                 var flags = compressed[offset++];
                 for (var bit = 0; bit < 8 && offset < chunkEnd; bit++)
                 {
                     if ((flags & (1 << bit)) == 0)
                     {
+                        EnsureChunkAvailable(compressed, offset, 1, chunkEnd, "literal");
                         Append(output, compressed.Slice(offset, 1));
                         offset++;
                         continue;
                     }
 
-                    EnsureAvailable(compressed, offset, 2, "copy token");
+                    EnsureChunkAvailable(compressed, offset, 2, chunkEnd, "copy token");
                     var token = BinaryPrimitives.ReadUInt16LittleEndian(compressed.Slice(offset, 2));
                     offset += 2;
                     CopyToken(output, decompressedChunkStart, token);
@@ -63,6 +64,35 @@ internal static class VbaCompressedStream
         }
 
         return [.. output];
+    }
+
+    private static int GetChunkEnd(int compressedLength, int chunkStart, int compressedChunkSize)
+    {
+        var chunkEnd = chunkStart + compressedChunkSize + 3;
+        if (chunkEnd < chunkStart || chunkEnd > compressedLength)
+        {
+            throw new VbaProjectParseException("Invalid VBA compressed stream: truncated chunk.");
+        }
+
+        return chunkEnd;
+    }
+
+    private static void AppendUncompressedChunk(
+        ReadOnlySpan<byte> compressed,
+        List<byte> output,
+        ref int offset,
+        int compressedChunkSize,
+        int chunkEnd)
+    {
+        var declaredSize = compressedChunkSize + 1;
+        if (declaredSize > ChunkSize)
+        {
+            throw new VbaProjectParseException("Invalid VBA compressed stream: uncompressed chunk exceeds supported bounds.");
+        }
+
+        EnsureChunkAvailable(compressed, offset, declaredSize, chunkEnd, "uncompressed chunk");
+        Append(output, compressed.Slice(offset, declaredSize));
+        offset += declaredSize;
     }
 
     private static void CopyToken(List<byte> output, int chunkStart, ushort token)
@@ -106,6 +136,14 @@ internal static class VbaCompressedStream
     private static void EnsureAvailable(ReadOnlySpan<byte> bytes, int offset, int length, string section)
     {
         if (offset < 0 || length < 0 || offset + length > bytes.Length)
+        {
+            throw new VbaProjectParseException($"Invalid VBA compressed stream: truncated {section}.");
+        }
+    }
+
+    private static void EnsureChunkAvailable(ReadOnlySpan<byte> bytes, int offset, int length, int chunkEnd, string section)
+    {
+        if (offset < 0 || length < 0 || offset + length > chunkEnd || offset + length > bytes.Length)
         {
             throw new VbaProjectParseException($"Invalid VBA compressed stream: truncated {section}.");
         }

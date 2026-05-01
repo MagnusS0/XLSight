@@ -314,7 +314,7 @@ internal static class VbaProjectParser
             1201 => Encoding.BigEndianUnicode,
             20127 => Encoding.ASCII,
             28591 => Encoding.Latin1,
-            1252 => Encoding.Latin1,
+            1252 => GetCodePageEncoding(1252),
             _ => null,
         };
 
@@ -329,6 +329,12 @@ internal static class VbaProjectParser
             Message = $"VBA project code page {codePage.Value} is not natively supported; UTF-8 fallback was used.",
         });
         return Encoding.UTF8;
+    }
+
+    private static Encoding GetCodePageEncoding(int codePage)
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding(codePage);
     }
 
     private static string Decode(Encoding encoding, byte[] bytes)

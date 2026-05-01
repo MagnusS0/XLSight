@@ -199,6 +199,11 @@ internal sealed class CompoundFileBinary
     {
         if (startSector == EndOfChain)
         {
+            if (maxLength != int.MaxValue && maxLength > 0)
+            {
+                throw new VbaProjectParseException("Invalid CFB file: FAT chain truncated.");
+            }
+
             return [];
         }
 
@@ -217,6 +222,11 @@ internal sealed class CompoundFileBinary
             var toCopy = Math.Min(sectorSize, maxLength - result.Count);
             result.AddRange(sectorBytes[..toCopy]);
             sector = GetFatNext(fat, sector, "FAT");
+        }
+
+        if (maxLength != int.MaxValue && result.Count < maxLength)
+        {
+            throw new VbaProjectParseException("Invalid CFB file: FAT chain truncated.");
         }
 
         return [.. result];
