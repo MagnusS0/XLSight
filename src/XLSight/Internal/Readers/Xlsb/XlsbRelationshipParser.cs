@@ -25,6 +25,12 @@ internal static class XlsbRelationshipParser
 
             string? id = reader.GetAttribute("Id");
             string? target = reader.GetAttribute("Target");
+            string? targetMode = reader.GetAttribute("TargetMode");
+            if (string.Equals(targetMode, "External", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(target))
             {
                 relationships[id] = ResolveWorkbookRelativePath(target);

@@ -205,6 +205,7 @@ internal static class XlsbWorksheetScanner
         int nextRowIndex = XlsbBinary.ReadRowIndex(record.Payload);
         if (nextRowIndex <= 0)
         {
+            rowIndex = 0;
             return true;
         }
 

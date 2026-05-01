@@ -130,14 +130,22 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
 
         XlsbSheetInfo sheet = FindSheet(sheetName);
         Stream sheetStream = OpenSheetStream(sheet.Path);
-        var cursor = XlsbWorksheetScanner.OpenCursor(
-            sheetStream,
-            _sharedStrings,
-            _styles.Value,
-            _metadata.UsesDate1904,
-            mode,
-            range);
-        return new OwnedRowCursor(sheetStream, cursor);
+        try
+        {
+            var cursor = XlsbWorksheetScanner.OpenCursor(
+                sheetStream,
+                _sharedStrings,
+                _styles.Value,
+                _metadata.UsesDate1904,
+                mode,
+                range);
+            return new OwnedRowCursor(sheetStream, cursor);
+        }
+        catch
+        {
+            sheetStream.Dispose();
+            throw;
+        }
     }
 
     public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1)

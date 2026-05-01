@@ -51,7 +51,13 @@ internal static class XlsbFormulaDecoder
         while (offset < tokens.Length)
         {
             byte token = tokens[offset];
-            if (TryHandleOperator(token, expressions))
+            OperatorResult operatorResult = TryHandleOperator(token, expressions);
+            if (operatorResult == OperatorResult.Invalid)
+            {
+                return string.Empty;
+            }
+
+            if (operatorResult == OperatorResult.Handled)
             {
                 offset++;
                 continue;
@@ -71,6 +77,13 @@ internal static class XlsbFormulaDecoder
         }
 
         return expressions.Count == 1 ? expressions.Pop() : string.Empty;
+    }
+
+    private enum OperatorResult
+    {
+        NotOperator,
+        Handled,
+        Invalid,
     }
 
     private static bool TryReadTokenBytes(ReadOnlySpan<byte> formula, out ReadOnlySpan<byte> tokens)
@@ -93,7 +106,7 @@ internal static class XlsbFormulaDecoder
         return true;
     }
 
-    private static bool TryHandleOperator(byte token, Stack<string> expressions)
+    private static OperatorResult TryHandleOperator(byte token, Stack<string> expressions)
     {
         string op = token switch
         {
@@ -119,28 +132,34 @@ internal static class XlsbFormulaDecoder
         {
             if (!TryPopBinary(expressions, out string left, out string right))
             {
-                return false;
+                return OperatorResult.Invalid;
             }
 
             expressions.Push($"{left}{op}{right}");
-            return true;
+            return OperatorResult.Handled;
         }
 
         switch (token)
         {
             case PtgUPlus:
-                return expressions.Count > 0;
+                return expressions.Count > 0 ? OperatorResult.Handled : OperatorResult.Invalid;
             case PtgUMinus when expressions.Count > 0:
                 expressions.Push($"-{expressions.Pop()}");
-                return true;
+                return OperatorResult.Handled;
+            case PtgUMinus:
+                return OperatorResult.Invalid;
             case PtgPercent when expressions.Count > 0:
                 expressions.Push($"{expressions.Pop()}%");
-                return true;
+                return OperatorResult.Handled;
+            case PtgPercent:
+                return OperatorResult.Invalid;
             case PtgParen when expressions.Count > 0:
                 expressions.Push($"({expressions.Pop()})");
-                return true;
+                return OperatorResult.Handled;
+            case PtgParen:
+                return OperatorResult.Invalid;
             default:
-                return false;
+                return OperatorResult.NotOperator;
         }
     }
 

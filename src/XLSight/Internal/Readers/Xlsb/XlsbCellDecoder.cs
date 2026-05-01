@@ -254,14 +254,46 @@ internal static class XlsbCellDecoder
 
     private static ExcelCellValue DecodeInlineString(ReadOnlySpan<byte> data)
     {
-        int offset = 0;
-        return ExcelCellValue.FromText(XlsbBinary.ReadWideString(data, ref offset));
+        return TryDecodeWideString(data, out string value)
+            ? ExcelCellValue.FromText(value)
+            : ExcelCellValue.Empty;
     }
 
     private static ExcelCellValue DecodeFormulaString(ReadOnlySpan<byte> data)
     {
-        int offset = 0;
-        return ExcelCellValue.FromText(XlsbBinary.ReadWideString(data, ref offset));
+        return TryDecodeWideString(data, out string value)
+            ? ExcelCellValue.FromText(value)
+            : ExcelCellValue.Empty;
+    }
+
+    private static bool TryDecodeWideString(ReadOnlySpan<byte> data, out string value)
+    {
+        value = string.Empty;
+        if (data.Length < 4)
+        {
+            return false;
+        }
+
+        uint charCount = XlsbBinary.ReadUInt32(data, 0);
+        if (charCount > int.MaxValue / 2 || charCount > (uint)((data.Length - 4) / 2))
+        {
+            return false;
+        }
+
+        try
+        {
+            int offset = 0;
+            value = XlsbBinary.ReadWideString(data, ref offset);
+            return true;
+        }
+        catch (MalformedWorkbookException)
+        {
+            return false;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
     }
 
     private static string DecodeFormula(int recordType, ReadOnlySpan<byte> data)
