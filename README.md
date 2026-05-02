@@ -1,6 +1,6 @@
 # XLSight
 
-[![NuGet](https://img.shields.io/badge/nuget-v0.2.0-blue)](https://www.nuget.org/packages/XLSight/)
+[![NuGet](https://img.shields.io/badge/nuget-v0.3.0-blue)](https://www.nuget.org/packages/XLSight/)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
