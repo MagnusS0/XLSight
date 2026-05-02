@@ -182,8 +182,14 @@ internal sealed class CompoundFileBinary
 
     private static uint[] ReadFat(byte[] data, CfbHeader header, List<uint> difat)
     {
+        int fatSectorCount = CheckedLength(header.FatSectorCount, "FAT sector count");
+        if (difat.Count < fatSectorCount)
+        {
+            throw new VbaProjectParseException("Invalid CFB file: incomplete DIFAT / missing FAT sectors.");
+        }
+
         var entries = new List<uint>(Math.Min(MaxFatEntries, difat.Count * header.SectorSize / 4));
-        foreach (var fatSector in difat.Take(CheckedLength(header.FatSectorCount, "FAT sector count")))
+        foreach (var fatSector in difat.Take(fatSectorCount))
         {
             if (fatSector >= DifatSector)
             {
