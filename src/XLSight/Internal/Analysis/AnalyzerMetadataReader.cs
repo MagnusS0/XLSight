@@ -3,6 +3,7 @@ using System.Text;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Vba;
 using XLSight.Analysis;
 
 namespace XLSight.Internal.Analysis;
@@ -13,7 +14,6 @@ internal static class AnalyzerMetadataReader
     private const string DrawingRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
     private const string PivotTableRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
     private const string CommentsRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
-    private const string ChartRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
     private const string PivotCacheDefinitionRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
 
     private static ReadOnlySpan<byte> TagTable => "table"u8;
@@ -22,7 +22,6 @@ internal static class AnalyzerMetadataReader
     private static ReadOnlySpan<byte> TagLocation => "location"u8;
     private static ReadOnlySpan<byte> TagWorksheetSource => "worksheetSource"u8;
     private static ReadOnlySpan<byte> TagComment => "comment"u8;
-    private static ReadOnlySpan<byte> TagFormula => "f"u8;
 
     private static ReadOnlySpan<byte> RefAttr => "ref="u8;
     private static ReadOnlySpan<byte> NameAttr => "name="u8;
@@ -47,7 +46,7 @@ internal static class AnalyzerMetadataReader
 
         return new AnalyzerMetadata
         {
-            WorkbookExact = BuildWorkbookExact(metadata, allTables, allPivotTables, allCharts),
+            WorkbookExact = BuildWorkbookExact(package, metadata, allTables, allPivotTables, allCharts),
             SheetsByPath = sheetsByPath,
         };
     }
@@ -57,7 +56,7 @@ internal static class AnalyzerMetadataReader
         var tables = new List<TableInfo>(tablePaths.Length);
         foreach (string tablePath in tablePaths)
         {
-            using var stream = TryOpenEntryBuffered(package, tablePath);
+            using var stream = package.TryOpenEntryBuffered(tablePath);
             if (stream is null)
             {
                 continue;
@@ -99,7 +98,7 @@ internal static class AnalyzerMetadataReader
         var pivots = new List<PivotTableInfo>(pivotPaths.Length);
         foreach (string pivotPath in pivotPaths)
         {
-            using var stream = TryOpenEntryBuffered(package, pivotPath);
+            using var stream = package.TryOpenEntryBuffered(pivotPath);
             if (stream is null)
             {
                 continue;
@@ -140,7 +139,7 @@ internal static class AnalyzerMetadataReader
             return null;
         }
 
-        using var stream = TryOpenEntryBuffered(package, cacheRel.Target);
+        using var stream = package.TryOpenEntryBuffered(cacheRel.Target);
         if (stream is null)
         {
             return null;
@@ -186,81 +185,6 @@ internal static class AnalyzerMetadataReader
         return null;
     }
 
-    private static List<ChartInfo> ReadCharts(XlsxPackage package, string sheetName, IReadOnlyList<string> drawingPaths)
-    {
-        var charts = new List<ChartInfo>();
-        foreach (string drawingPath in drawingPaths)
-        {
-            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> rels = ReadRelationships(package, drawingPath);
-            foreach (var rel in rels.Where(rel => string.Equals(rel.Type, ChartRelationshipType, StringComparison.Ordinal)))
-            {
-                ChartInfo? chart = ReadChart(package, sheetName, rel.Target);
-                if (chart is not null)
-                {
-                    charts.Add(chart);
-                }
-            }
-        }
-
-        return charts;
-    }
-
-    private static ChartInfo? ReadChart(XlsxPackage package, string sheetName, string chartPath)
-    {
-        using var stream = TryOpenEntryBuffered(package, chartPath);
-        if (stream is null)
-        {
-            return null;
-        }
-
-        using var buf = new ScanBuffer(stream);
-        var refs = new List<string>();
-
-        while (true)
-        {
-            var span = buf.Span;
-            var status = XmlByteReader.TryFindStartTag(span, TagFormula, out var match, out int partialIndex);
-            if (status == TagSearchResult.NotFound)
-            {
-                if (!XmlByteReader.RefillKeepingTagStart(buf, span, partialIndex))
-                {
-                    break;
-                }
-
-                continue;
-            }
-
-            if (status == TagSearchResult.NeedMoreData)
-            {
-                buf.Advance(match.Start);
-                if (!buf.Refill())
-                {
-                    break;
-                }
-
-                continue;
-            }
-
-            buf.Advance(match.EndExclusive);
-            if (!match.IsEmptyElement)
-            {
-                ReadOnlySpan<byte> valueBytes = XmlByteReader.ExtractUntilClose(buf, TagFormula);
-                if (!valueBytes.IsEmpty)
-                {
-                    refs.Add(Encoding.UTF8.GetString(valueBytes));
-                }
-            }
-        }
-
-        return new ChartInfo
-        {
-            Title = null,
-            Sheet = sheetName,
-            PartPath = chartPath,
-            SourceReferences = refs.Distinct(StringComparer.Ordinal).ToArray(),
-        };
-    }
-
     private static int ReadCommentCount(XlsxPackage package, string? commentsPath)
     {
         if (string.IsNullOrWhiteSpace(commentsPath))
@@ -268,7 +192,7 @@ internal static class AnalyzerMetadataReader
             return 0;
         }
 
-        using var stream = TryOpenEntryBuffered(package, commentsPath);
+        using var stream = package.TryOpenEntryBuffered(commentsPath);
         if (stream is null)
         {
             return 0;
@@ -310,25 +234,14 @@ internal static class AnalyzerMetadataReader
 
     private static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(XlsxPackage package, string ownerPath)
     {
-        string relPath = BuildRelationshipsPath(ownerPath);
-        using var relStream = TryOpenEntryBuffered(package, relPath);
+        string relPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
+        using var relStream = package.TryOpenEntryBuffered(relPath);
         if (relStream is null)
         {
             return [];
         }
 
         return [.. PackageRelationshipReader.Read(relStream, ownerPath).Values];
-    }
-
-    private static Stream? TryOpenEntryBuffered(XlsxPackage package, string path)
-    {
-        Stream? fresh = package.TryOpenFreshEntry(path);
-        if (fresh is not null)
-        {
-            return fresh;
-        }
-
-        return package.GetEntry(path)?.OpenBuffered();
     }
 
     private static string? TryGetUtf8Attribute(ReadOnlySpan<byte> attrBytes, ReadOnlySpan<byte> attrName)
@@ -350,22 +263,16 @@ internal static class AnalyzerMetadataReader
         return AddressParser.TryParse(charBuf[..chars], out ExcelRange parsed) ? parsed : null;
     }
 
-    private static string BuildRelationshipsPath(string ownerPath)
-    {
-        int slash = ownerPath.LastIndexOf('/');
-        string directory = slash >= 0 ? ownerPath[..slash] : string.Empty;
-        string fileName = slash >= 0 ? ownerPath[(slash + 1)..] : ownerPath;
-        return string.IsNullOrEmpty(directory)
-            ? $"_rels/{fileName}.rels"
-            : $"{directory}/_rels/{fileName}.rels";
-    }
-
     private static WorkbookAnalysisExact BuildWorkbookExact(
+        XlsxPackage package,
         WorkbookMetadata metadata,
         List<TableInfo> allTables,
         List<PivotTableInfo> allPivotTables,
         List<ChartInfo> allCharts)
     {
+        var warnings = new List<AnalysisWarning>();
+        VbaProjectInfo? vbaProject = ReadVbaProject(package, metadata, warnings);
+
         return new WorkbookAnalysisExact
         {
             NamedRanges = metadata.NamedRanges
@@ -380,9 +287,41 @@ internal static class AnalyzerMetadataReader
             PivotTables = allPivotTables,
             Charts = allCharts,
             HasMacros = metadata.HasMacros,
+            VbaProject = vbaProject,
             IsDate1904 = metadata.UsesDate1904,
-            Warnings = [],
+            Warnings = warnings,
         };
+    }
+
+    private static VbaProjectInfo? ReadVbaProject(
+        XlsxPackage package,
+        WorkbookMetadata metadata,
+        List<AnalysisWarning> warnings)
+    {
+        if (!metadata.HasMacros)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = package.TryOpenEntryBuffered("xl/vbaProject.bin");
+            return stream is null ? null : VbaProjectParser.Parse(stream);
+        }
+        catch (Exception ex) when (ex is VbaProjectParseException or IOException or InvalidDataException or ArgumentException or ArithmeticException)
+        {
+            AddVbaWarning(warnings, ex.Message);
+            return null;
+        }
+    }
+
+    private static void AddVbaWarning(List<AnalysisWarning> warnings, string message)
+    {
+        warnings.Add(new AnalysisWarning
+        {
+            Code = "vba.parse.failed",
+            Message = $"VBA project metadata could not be parsed: {message}",
+        });
     }
 
     private static void AddSheetMetadata(
@@ -416,7 +355,7 @@ internal static class AnalyzerMetadataReader
 
         List<TableInfo> tables = ReadTables(package, sheet.Name, tablePaths);
         List<PivotTableInfo> pivots = ReadPivots(package, sheet.Name, pivotPaths);
-        List<ChartInfo> charts = ReadCharts(package, sheet.Name, drawingPaths);
+        List<ChartInfo> charts = ChartMetadataReader.ReadCharts(package, sheet.Name, drawingPaths);
         int commentCount = ReadCommentCount(package, commentsPath);
 
         return (new SheetExactMetadata
@@ -468,6 +407,7 @@ internal static class AnalyzerMetadataReader
         return new AnalyzerMetadata
         {
             WorkbookExact = BuildWorkbookExact(
+                package,
                 metadata,
                 allTables.OrderBy(x => x.Order).Select(x => x.Info).ToList(),
                 allPivotTables.OrderBy(x => x.Order).Select(x => x.Info).ToList(),

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
 using XLSight.Internal.Analysis;
-using XLSight.Internal.Metadata;
 using XLSight.Analysis;
 
 namespace XLSight.Internal.Sinks;
@@ -26,7 +25,7 @@ internal partial struct AnalysisSink : IByteSheetSink
     private bool _hasPendingRow;
 
     // ── Configuration ─────────────────────────────────────────────────────────────
-    private readonly SharedStringTable _sst;
+    private readonly ISharedStringSource _sst;
     private readonly AnalysisLevel _level;
 
     // ── Column tracking ───────────────────────────────────────────────────────────
@@ -49,7 +48,7 @@ internal partial struct AnalysisSink : IByteSheetSink
     private int _arrayFormulaCount;
     private Dictionary<int, int>? _formulaCountByColumn;
 
-    public AnalysisSink(SharedStringTable sst, AnalysisLevel level = AnalysisLevel.Full)
+    public AnalysisSink(ISharedStringSource sst, AnalysisLevel level = AnalysisLevel.Full)
     {
         _sst = sst;
         _level = level;

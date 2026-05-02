@@ -9,7 +9,7 @@ public class AnalyzeBenchmarks
     private string  _smallPath       = null!;
     private string  _mediumPath      = null!;
     private string  _namedRangesPath = null!;
-    private string? _xlLargePath;
+    private string  _xlLargePath     = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -17,8 +17,7 @@ public class AnalyzeBenchmarks
         _smallPath       = Path.Combine(AppContext.BaseDirectory, "TestData", "small.xlsx");
         _mediumPath      = Path.Combine(AppContext.BaseDirectory, "TestData", "medium.xlsx");
         _namedRangesPath = Path.Combine(AppContext.BaseDirectory, "TestData", "named_ranges.xlsx");
-        var xlLarge      = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
-        _xlLargePath     = File.Exists(xlLarge) ? xlLarge : null;
+        _xlLargePath     = BenchmarkFixture.OptionalPath("xl_large.xlsx");
     }
 
     [Benchmark]
@@ -46,17 +45,12 @@ public class AnalyzeBenchmarks
     /// Full workbook analysis on xl_large.xlsx — 4 sheets, ~1.1M total rows.
     /// The dominant sheet (Worksheet) has ~986K rows × 8 cols; the others add
     /// 27K, 4K, and 100K rows. Exercises the full Analyze() path at scale.
-    /// Skipped if xl_large.xlsx is absent (excluded from source control).
+    /// Run explicitly with a filter when xl_large.xlsx is present (excluded from source control).
     /// </summary>
     [Benchmark]
-    public WorkbookInfo? AnalyzeWorkbook_XlLarge()
+    public WorkbookInfo AnalyzeWorkbook_XlLarge()
     {
-        if (_xlLargePath is null)
-        {
-            return null;
-        }
-
-        using var wb = ExcelWorkbook.Open(_xlLargePath);
+        using var wb = ExcelWorkbook.Open(BenchmarkFixture.RequireOptionalLargeFixture(_xlLargePath));
         return wb.Analyze();
     }
 }

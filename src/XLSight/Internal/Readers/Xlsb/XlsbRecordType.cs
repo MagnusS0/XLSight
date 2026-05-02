@@ -1,0 +1,55 @@
+namespace XLSight.Internal.Readers.Xlsb;
+
+internal static class XlsbRecordType
+{
+    internal const int BrtRowHdr = 0;
+    internal const int BrtCellBlank = 1;
+    internal const int BrtCellRk = 2;
+    internal const int BrtCellError = 3;
+    internal const int BrtCellBool = 4;
+    internal const int BrtCellReal = 5;
+    internal const int BrtCellSt = 6;
+    internal const int BrtCellIsst = 7;
+    internal const int BrtFmlaString = 8;
+    internal const int BrtFmlaNum = 9;
+    internal const int BrtFmlaBool = 10;
+    internal const int BrtFmlaError = 11;
+    internal const int BrtSSTItem = 19;
+    internal const int BrtName = 39;
+    internal const int BrtFmt = 44;
+    internal const int BrtXF = 47;
+    internal const int BrtDVal = 64;
+    internal const int BrtBeginBook = 131;
+    internal const int BrtBeginBundleShs = 143;
+    internal const int BrtBeginSheetData = 145;
+    internal const int BrtWsDim = 148;
+    internal const int BrtBeginSst = 159;
+    internal const int BrtEndSst = 160;
+    internal const int BrtMergeCell = 176;
+    internal const int BrtBeginPCDSource = 185;
+    internal const int BrtBeginPCDSRange = 187;
+    internal const int BrtBeginSXView = 280;
+    internal const int BrtBeginSXLocation = 314;
+    internal const int BrtBeginList = 343;
+    internal const int BrtBeginListCol = 347;
+    internal const int BrtBeginPivotCacheID = 386;
+    internal const int BrtBundleSh = 156;
+    internal const int BrtWbProp = 153;
+    internal const int BrtExternSheet = 362;
+    internal const int BrtEndSheetData = 146;
+    internal const int BrtBeginConditionalFormatting = 461;
+    internal const int BrtHLink = 494;
+    internal const int BrtBeginFmts = 615;
+    internal const int BrtBeginCellXFs = 617;
+    internal const int BrtEndStyles = 620;
+    internal const int BrtEndCellXFs = 619;
+    internal const int BrtBeginComments = 628;
+    internal const int BrtBeginCommentAuthors = 630;
+    internal const int BrtCommentAuthor = 632;
+    internal const int BrtBeginCommentList = 633;
+    internal const int BrtBeginComment = 635;
+    internal const int BrtEndComment = 636;
+    internal const int BrtCommentText = 637;
+    internal const int BrtBeginConditionalFormatting14 = 1046;
+    internal const int BrtDVal14 = 1053;
+}

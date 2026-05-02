@@ -4,17 +4,17 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-XLSight is a high-performance, zero-dependency Excel (.xlsx) reader and analyzer for .NET 10.
+XLSight is a high-performance, zero-dependency Excel (`.xlsx`, `.xlsm`, `.xlsb`) reader and analyzer for .NET 10.
 
 XLSight bypasses `XmlReader` on the hot path. It scans raw UTF-8 byte streams with SIMD-accelerated `IndexOf`/`SearchValues<byte>` operations and stores shared strings in a chunked, LOH-free arena to minimize per-cell allocations and heap fragmentation.
 
 - Processes the NYC 311 1M-row workbook in **4.10 s** with **157 MB** peak RSS using the public reader API, about **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
 - Reads the first 10 rows of a 1M-row sheet in about **300 μs** on both public streaming APIs. Use the borrowed reader for the lowest allocations, or the safe stream when you want independent row snapshots.
 
-> **Scope note:** XLSight currently focuses on `.xlsx` reads. Some comparison libraries also cover
-> formats such as `.xls`, `.csv`, `.xlsm`, or VBA content,
-> so their overall use-case surface is broader. The benchmarks here compare equivalent
-> `.xlsx` reads. Support for more formats may be added in the future.
+> **Scope note:** XLSight supports Open XML workbooks (`.xlsx`, `.xlsm`) and binary workbooks
+> (`.xlsb`), including source-free VBA project metadata. It does not execute VBA macros and
+> does not support legacy `.xls` or `.csv` files. Some comparison libraries cover those broader
+> formats, so the benchmark tables compare equivalent `.xlsx` reads unless noted otherwise.
 
 
 ## Installation
@@ -31,7 +31,7 @@ dotnet add package XLSight
 using XLSight;
 
 // Open from file path
-using var workbookFromFile = ExcelWorkbook.Open("report.xlsx");
+using var workbookFromFile = ExcelWorkbook.Open("report.xlsx"); // .xlsx, .xlsm, and .xlsb are supported
 
 // Open from a stream
 using var workbookFromStream = ExcelWorkbook.Open(stream);
@@ -190,6 +190,7 @@ using var workbook = ExcelWorkbook.Open("report.xlsx");
 WorkbookInfo info = workbook.Analyze();           // AnalysisLevel.Full by default
 Console.WriteLine($"Tables: {info.Tables.Count}");
 Console.WriteLine($"Has macros: {info.HasMacros}");
+Console.WriteLine($"VBA modules: {info.VbaProject?.Modules.Count ?? 0}");
 
 foreach (SheetInfo sheet in info.Sheets)
 {
@@ -216,6 +217,31 @@ SheetInfo    sheetAsync = await workbook.AnalyzeSheetAsync("Sheet1");
 not requested, and the convenience properties (`RowCount`, `Columns`, `UsedRange`,
 `FormulaColumns`, `InferredHeaderRowIndex`, and so on) return `null` instead of throwing.
 Use `TryGetObserved` / `TryGetInferred` when you want the full sub-objects explicitly.
+
+### VBA metadata
+
+For macro-enabled `.xlsm` and `.xlsb` workbooks, XLSight can inspect the embedded VBA project
+without executing any macros:
+
+```csharp
+using XLSight;
+using XLSight.Analysis;
+
+using var workbook = ExcelWorkbook.Open("report.xlsm");
+
+VbaProjectInfo? project = workbook.GetVbaProject();
+if (project is not null)
+{
+    foreach (VbaModuleInfo module in project.Modules)
+    {
+        Console.WriteLine($"{module.Name}: {module.Kind}");
+        string source = workbook.GetVbaModuleSource(module.Name);
+    }
+}
+```
+
+`GetVbaProject` returns source-free project metadata. `GetVbaModuleSource` and
+`GetVbaModuleSourceBytes` decode an individual module on demand.
 
 ### Column profiles
 
@@ -452,7 +478,7 @@ directly from the arena on lookup and collected by Gen 0.
 - **Zero dependencies** — only the .NET 10 BCL. `ZipArchive` handles the OOXML container; `XmlReader` parses one-time workbook metadata (styles, relationships); the sheet scanner and SST parser are custom byte-level engines that never invoke `XmlReader`.
 - **AOT-compatible** — annotated for Native AOT and trimming from day one.
 - **Dual streaming API** — `GetSheetReader*` exposes the lowest-allocation borrowed reader; `StreamSheet*` / `StreamRange*` snapshot rows automatically for safe enumeration and LINQ usage.
-- **Read-only** — XLSight reads and analyzes .xlsx files; it does not write them.
+- **Read-only** — XLSight reads and analyzes `.xlsx`, `.xlsm`, and `.xlsb` files; it does not write them or execute macros.
 - **Target framework** — .NET 10 (`net10.0`).
 
 ## License

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text;
 using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Sinks;
 
 namespace XLSight.Internal.Metadata;
 
@@ -14,7 +15,7 @@ namespace XLSight.Internal.Metadata;
 /// full table. Once the stream is exhausted the lazy state is released and subsequent
 /// lookups hit the arena directly with no locking overhead.
 /// </summary>
-internal sealed class SharedStringTable : IDisposable
+internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 {
     // 64 KB arena chunks — below the 85 KB LOH threshold.
     private const int ArenaChunkBits = 16;
@@ -92,7 +93,7 @@ internal sealed class SharedStringTable : IDisposable
     internal int CacheLength => _cacheLength;
     internal int FirstInfoChunkLength => _info.Count == 0 ? 0 : _info[0].Length;
 
-    internal string GetString(int index)
+    public string GetString(int index)
     {
         if (index >= _parsedCount && !_isComplete)
         {
@@ -113,7 +114,7 @@ internal sealed class SharedStringTable : IDisposable
     /// Returns the UTF-16 character count without materialising a <see cref="string"/>.
     /// Always zero-allocation — the arena contains clean UTF-8.
     /// </summary>
-    internal int GetCharCount(int index)
+    public int GetCharCount(int index)
     {
         if (index >= _parsedCount && !_isComplete) { EnsureParsed(index); }
         if ((uint)index >= (uint)_parsedCount) { return 0; }

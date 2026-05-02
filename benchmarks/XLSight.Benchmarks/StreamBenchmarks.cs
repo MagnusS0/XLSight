@@ -7,15 +7,14 @@ public class StreamBenchmarks
 {
     private string _largePath = null!;
     private string _stringHeavyPath = null!;
-    private string? _xlLargePath;
+    private string _xlLargePath = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _largePath       = Path.Combine(AppContext.BaseDirectory, "TestData", "large.xlsx");
         _stringHeavyPath = Path.Combine(AppContext.BaseDirectory, "TestData", "string_heavy.xlsx");
-        var xlLarge      = Path.Combine(AppContext.BaseDirectory, "TestData", "xl_large.xlsx");
-        _xlLargePath     = File.Exists(xlLarge) ? xlLarge : null;
+        _xlLargePath     = BenchmarkFixture.OptionalPath("xl_large.xlsx");
     }
 
     [Benchmark]
@@ -39,46 +38,28 @@ public class StreamBenchmarks
     [Benchmark]
     public int StreamSheet_XlLarge_AllRows()
     {
-        if (_xlLargePath is null)
-        {
-            return -1;
-        }
-
-        return ConsumeSafe(_xlLargePath, "Worksheet");
+        return ConsumeSafe(RequireXlLargePath(), "Worksheet");
     }
 
     [Benchmark]
     public int StreamSheet_XlLarge_First10()
     {
-        if (_xlLargePath is null)
-        {
-            return -1;
-        }
-
-        return ConsumeSafe(_xlLargePath, "Worksheet", 10);
+        return ConsumeSafe(RequireXlLargePath(), "Worksheet", 10);
     }
 
     [Benchmark]
     public int SheetReader_XlLarge_AllRows()
     {
-        if (_xlLargePath is null)
-        {
-            return -1;
-        }
-
-        return ConsumeReader(_xlLargePath, "Worksheet");
+        return ConsumeReader(RequireXlLargePath(), "Worksheet");
     }
 
     [Benchmark]
     public int SheetReader_XlLarge_First10()
     {
-        if (_xlLargePath is null)
-        {
-            return -1;
-        }
-
-        return ConsumeReader(_xlLargePath, "Worksheet", 10);
+        return ConsumeReader(RequireXlLargePath(), "Worksheet", 10);
     }
+
+    private string RequireXlLargePath() => BenchmarkFixture.RequireOptionalLargeFixture(_xlLargePath);
 
     private static int ConsumeSafe(string path, string sheet, int maxRows = int.MaxValue)
     {
