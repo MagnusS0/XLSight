@@ -72,7 +72,7 @@ internal sealed class CompoundFileBinary
                 header.SectorSize,
                 fat,
                 header.FirstMiniFatSector,
-                checked((int)header.MiniFatSectorCount * header.SectorSize));
+                CheckedLength((ulong)header.MiniFatSectorCount * (ulong)header.SectorSize, "mini FAT"));
         var miniFat = ReadUInt32Array(miniFatBytes);
 
         return new CompoundFileBinary(
@@ -259,13 +259,14 @@ internal sealed class CompoundFileBinary
 
     private static ReadOnlySpan<byte> GetSector(byte[] data, int sectorSize, uint sector)
     {
-        var offset = checked(HeaderSize + ((int)sector * sectorSize));
-        if (offset < HeaderSize || offset + sectorSize > data.Length)
+        long offsetLong = HeaderSize + ((long)sector * sectorSize);
+        long endLong = offsetLong + sectorSize;
+        if (offsetLong < HeaderSize || endLong > data.Length)
         {
             throw new VbaProjectParseException($"Invalid CFB file: sector {sector} points outside the file.");
         }
 
-        return data.AsSpan(offset, sectorSize);
+        return data.AsSpan((int)offsetLong, sectorSize);
     }
 
     private static List<DirectoryEntry> ReadDirectories(byte[] directoryBytes, int sectorSize)
