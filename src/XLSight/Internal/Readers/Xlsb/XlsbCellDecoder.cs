@@ -68,13 +68,15 @@ internal static class XlsbCellDecoder
         out int styleIndex,
         out ExcelCellValue value,
         out int rawIndex,
-        out bool isFormula)
+        out bool isFormula,
+        out ReadOnlySpan<byte> formulaSpan)
     {
         columnIndex = 0;
         kind = CellDataKind.Number;
         styleIndex = 0;
         value = ExcelCellValue.Empty;
         rawIndex = -1;
+        formulaSpan = [];
         isFormula = IsFormulaRecord(record.Type);
 
         if (!TryReadCellHeader(record.Payload, out columnIndex, out styleIndex))
@@ -83,13 +85,38 @@ internal static class XlsbCellDecoder
         }
 
         ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
+        if (isFormula)
+        {
+            formulaSpan = SliceFormulaBytes(record.Type, data);
+        }
+
         if (mode == ReadMode.Formulas && isFormula)
         {
             kind = CellDataKind.FormulaString;
-            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data, formulaContext));
+            value = ExcelCellValue.FromFormula(
+                formulaSpan.IsEmpty ? string.Empty : XlsbFormulaDecoder.Decode(formulaSpan, formulaContext));
             return true;
         }
 
+        return TryApplyRecordValue(record, data, styleIndex, getSharedString, styles, isDate1904, decodeSharedString,
+            out kind, out value, out rawIndex);
+    }
+
+    private static bool TryApplyRecordValue(
+        XlsbRecord record,
+        ReadOnlySpan<byte> data,
+        int styleIndex,
+        Func<int, string> getSharedString,
+        StyleTable styles,
+        bool isDate1904,
+        bool decodeSharedString,
+        out CellDataKind kind,
+        out ExcelCellValue value,
+        out int rawIndex)
+    {
+        kind = CellDataKind.Number;
+        value = ExcelCellValue.Empty;
+        rawIndex = -1;
         switch (record.Type)
         {
             case XlsbRecordType.BrtCellBlank:
@@ -329,6 +356,12 @@ internal static class XlsbCellDecoder
         }
 
         return XlsbFormulaDecoder.Decode(data[formulaOffset..], formulaContext);
+    }
+
+    private static ReadOnlySpan<byte> SliceFormulaBytes(int recordType, ReadOnlySpan<byte> data)
+    {
+        int offset = GetFormulaOffset(recordType, data);
+        return offset >= 0 && offset < data.Length ? data[offset..] : [];
     }
 
     private static int GetFormulaOffset(int recordType, ReadOnlySpan<byte> data)

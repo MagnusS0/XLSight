@@ -281,7 +281,8 @@ internal static class XlsbWorksheetScanner
                 out int styleIndex,
                 out ExcelCellValue value,
                 out int rawIndex,
-                out bool isFormula))
+                out bool isFormula,
+                out ReadOnlySpan<byte> formulaSpan))
         {
             return true;
         }
@@ -296,10 +297,9 @@ internal static class XlsbWorksheetScanner
             sink.OnFormula(columnIndex, isArray: false);
         }
 
-        if (isFormula && sink.TracksFormulaReferences && formulaContext is not null &&
-            XlsbCellDecoder.TryGetFormula(record, out ReadOnlySpan<byte> formula))
+        if (isFormula && sink.TracksFormulaReferences && formulaContext is not null && !formulaSpan.IsEmpty)
         {
-            XlsbFormulaDecoder.EmitReferences(formula, formulaContext, ref sink);
+            XlsbFormulaDecoder.EmitReferences(formulaSpan, formulaContext, ref sink);
         }
 
         return sink.OnCell(columnIndex, kind, styleIndex, value, rawIndex);
