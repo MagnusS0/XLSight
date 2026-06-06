@@ -114,7 +114,7 @@ internal static class ExternalLinkMetadataReader
             var attrBytes = remaining.Slice(match.AfterName, match.EndExclusive - match.AfterName);
             if (CellAttributeParser.TryGetAttributeValue(attrBytes, attr, out ReadOnlySpan<byte> valueBytes))
             {
-                string value = Encoding.UTF8.GetString(valueBytes);
+                string value = Utf8CellDecoder.UnescapeXml(Encoding.UTF8.GetString(valueBytes));
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     results.Add(value);
