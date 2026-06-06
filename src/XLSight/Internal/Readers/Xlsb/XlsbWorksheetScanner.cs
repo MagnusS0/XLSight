@@ -88,25 +88,6 @@ internal static class XlsbWorksheetScanner
 
     internal static void ScanSheet<TSink>(
         Stream worksheetStream,
-        XlsbSharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range,
-        ref TSink sink)
-        where TSink : struct, IByteSheetSink
-        => ScanSheet(
-            worksheetStream,
-            new Lazy<XlsbSharedStringTable>(() => sharedStrings, LazyThreadSafetyMode.PublicationOnly),
-            styles,
-            isDate1904,
-            mode,
-            range,
-            formulaContext: null,
-            ref sink);
-
-    internal static void ScanSheet<TSink>(
-        Stream worksheetStream,
         Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,

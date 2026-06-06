@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsb;
@@ -279,7 +280,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -341,7 +342,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -373,7 +374,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -398,14 +399,17 @@ public sealed class XlsbWorksheetScannerTests
         byte[] formula1 = XlsbTestRecords.CellFormula(XlsbTestRecords.FormulaRef(row: 1, column: 4));
         byte[] formula2 = XlsbTestRecords.CellFormula();
         using var payload = new MemoryStream();
-        payload.Write(BitConverter.GetBytes(flags));
+        Span<byte> buf4 = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(buf4, flags);
+        payload.Write(buf4);
         payload.Write(XlsbTestRecords.NullableWideString("Invalid"));
         payload.Write(XlsbTestRecords.NullableWideString("Choose a listed value"));
         payload.Write(XlsbTestRecords.NullableWideString("Selection"));
         payload.Write(XlsbTestRecords.NullableWideString("Pick one"));
         payload.Write(formula1);
         payload.Write(formula2);
-        payload.Write(BitConverter.GetBytes(1u));
+        BinaryPrimitives.WriteUInt32LittleEndian(buf4, 1u);
+        payload.Write(buf4);
         payload.Write(CreateRangePayload(firstRow: 2, firstColumn: 1, lastRow: 4, lastColumn: 1));
 
         using var stream = XlsbTestRecords.Stream(
@@ -415,7 +419,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -441,10 +445,10 @@ public sealed class XlsbWorksheetScannerTests
     private static byte[] CreateRangePayload(int firstRow, int firstColumn, int lastRow, int lastColumn)
     {
         byte[] payload = new byte[16];
-        BitConverter.GetBytes(firstRow - 1).CopyTo(payload, 0);
-        BitConverter.GetBytes(lastRow - 1).CopyTo(payload, 4);
-        BitConverter.GetBytes(firstColumn - 1).CopyTo(payload, 8);
-        BitConverter.GetBytes(lastColumn - 1).CopyTo(payload, 12);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), firstRow - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), lastRow - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), firstColumn - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(12, 4), lastColumn - 1);
         return payload;
     }
 

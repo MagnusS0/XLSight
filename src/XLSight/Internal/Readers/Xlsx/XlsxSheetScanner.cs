@@ -159,7 +159,7 @@ internal static partial class XlsxSheetScanner
     internal static bool SeekToSheetData(ScanBuffer buf, Stream stream, long seekHint, out ExcelRange? dimension)
     {
         bool found = SeekToSheetData(buf, stream, seekHint, out dimension, out bool emptySheetData);
-        return found && !emptySheetData;
+        return IsUsableSheetData(found, emptySheetData);
     }
 
     private static bool SeekToSheetData(
@@ -184,8 +184,10 @@ internal static partial class XlsxSheetScanner
     internal static bool ScanForSheetData(ScanBuffer buf, out ExcelRange? dimension)
     {
         bool found = ScanForSheetDataCore(buf, out dimension, out bool emptySheetData);
-        return found && !emptySheetData;
+        return IsUsableSheetData(found, emptySheetData);
     }
+
+    private static bool IsUsableSheetData(bool found, bool emptySheetData) => found && !emptySheetData;
 
     private static bool ScanForSheetDataCore(
         ScanBuffer buf,
