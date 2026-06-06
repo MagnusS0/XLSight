@@ -50,9 +50,9 @@ internal partial struct AnalysisSink : IByteSheetSink
     private int _arrayFormulaCount;
     private Dictionary<int, int>? _formulaCountByColumn;
     private Dictionary<FormulaDependencyKey, int>? _formulaDependencies;
-    private List<FormulaDependencyKey>? _currentFormulaTargets;
+    private HashSet<FormulaDependencyKey>? _currentFormulaTargets;
     private Dictionary<int, FormulaDependencyKey[]>? _sharedFormulaTargets;
-    private int _pendingSharedFormulaIndex;
+    private int? _pendingSharedFormulaIndex;
     private List<DataValidationInfo>? _dataValidations;
     private readonly string _sheetName;
 
@@ -119,7 +119,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     public void OnSharedFormulaDefinition(int sharedIndex)
     {
-        _pendingSharedFormulaIndex = sharedIndex + 1;
+        _pendingSharedFormulaIndex = sharedIndex;
     }
 
     public void OnSharedFormulaReference(int sharedIndex)
@@ -159,13 +159,11 @@ internal partial struct AnalysisSink : IByteSheetSink
         }
 
         var key = new FormulaDependencyKey(targetWorkbook, targetSheet);
-        _currentFormulaTargets ??= [];
-        if (_currentFormulaTargets.Contains(key))
+        if (!(_currentFormulaTargets ??= []).Add(key))
         {
             return;
         }
 
-        _currentFormulaTargets.Add(key);
         IncrementFormulaDependency(key);
     }
 
@@ -315,17 +313,16 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     private void FinalizeSharedFormulaDefinition()
     {
-        if (_pendingSharedFormulaIndex == 0)
+        if (_pendingSharedFormulaIndex is not { } sharedIndex)
         {
             return;
         }
 
-        int sharedIndex = _pendingSharedFormulaIndex - 1;
         _sharedFormulaTargets ??= [];
         _sharedFormulaTargets[sharedIndex] = _currentFormulaTargets is { Count: > 0 }
             ? [.. _currentFormulaTargets]
             : [];
-        _pendingSharedFormulaIndex = 0;
+        _pendingSharedFormulaIndex = null;
     }
 
     private void IncrementFormulaDependency(FormulaDependencyKey key)
@@ -346,7 +343,17 @@ internal partial struct AnalysisSink : IByteSheetSink
         return value.Contains('&', StringComparison.Ordinal) ? WebUtility.HtmlDecode(value) : value;
     }
 
-    private readonly record struct FormulaDependencyKey(string? Workbook, string Sheet);
+    private readonly record struct FormulaDependencyKey(string? Workbook, string Sheet)
+    {
+        public bool Equals(FormulaDependencyKey other) =>
+            StringComparer.OrdinalIgnoreCase.Equals(Workbook, other.Workbook) &&
+            StringComparer.OrdinalIgnoreCase.Equals(Sheet, other.Sheet);
+
+        public override int GetHashCode() =>
+            HashCode.Combine(
+                Workbook is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Workbook),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(Sheet));
+    }
 
     private FormulaColumnProfile[] BuildFormulaColumns()
     {
