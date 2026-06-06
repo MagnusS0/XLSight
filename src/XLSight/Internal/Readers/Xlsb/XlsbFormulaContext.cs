@@ -38,26 +38,13 @@ internal sealed class XlsbFormulaContext
         if (externSheet.FirstSheet == externSheet.LastSheet)
         {
             sheetName = firstSheet;
-            formulaPrefix = QuoteSheetName(firstSheet);
+            formulaPrefix = SheetNameUtils.QuoteSheetName(firstSheet);
             return true;
         }
 
         string lastSheet = _sheets[externSheet.LastSheet].Name;
         sheetName = $"{firstSheet}:{lastSheet}";
-        formulaPrefix = $"{QuoteSheetName(firstSheet)}:{QuoteSheetName(lastSheet)}";
+        formulaPrefix = $"{SheetNameUtils.QuoteSheetName(firstSheet)}:{SheetNameUtils.QuoteSheetName(lastSheet)}";
         return true;
-    }
-
-    private static string QuoteSheetName(string sheetName)
-    {
-        foreach (char ch in sheetName)
-        {
-            if (!char.IsLetterOrDigit(ch) && ch != '_')
-            {
-                return $"'{sheetName.Replace("'", "''", StringComparison.Ordinal)}'";
-            }
-        }
-
-        return sheetName;
     }
 }
