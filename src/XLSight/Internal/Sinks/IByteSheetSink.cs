@@ -24,6 +24,9 @@ internal interface IByteSheetSink
     /// </summary>
     public bool TracksFormulas { get; }
 
+    /// <summary>Gets whether cross-sheet and cross-workbook formula references are required.</summary>
+    public bool TracksFormulaReferences { get; }
+
     /// <summary>Called when a <c>&lt;dimension&gt;</c> element is found with the sheet's declared used range.</summary>
     public void OnDimension(in ExcelRange dimension);
 
@@ -50,6 +53,15 @@ internal interface IByteSheetSink
     /// </summary>
     public void OnFormula(int column, bool isArray);
 
+    /// <summary>Called for each cross-sheet or cross-workbook target referenced by the current formula.</summary>
+    public void OnFormulaReference(in FormulaReference reference);
+
+    /// <summary>Marks the current formula as the definition for an OOXML shared-formula index.</summary>
+    public void OnSharedFormulaDefinition(int sharedIndex);
+
+    /// <summary>Replays dependencies from a previously defined OOXML shared formula.</summary>
+    public void OnSharedFormulaReference(int sharedIndex);
+
     /// <summary>Called for each <c>&lt;mergeCell&gt;</c> element.</summary>
     public void OnMergeCell(in MergedRegion region);
 
@@ -57,7 +69,7 @@ internal interface IByteSheetSink
     public void OnConditionalFormatting();
 
     /// <summary>Called for each <c>&lt;dataValidation&gt;</c> element found after <c>&lt;/sheetData&gt;</c>.</summary>
-    public void OnDataValidation();
+    public void OnDataValidation(DataValidationInfo? validation);
 
     /// <summary>Called for each <c>&lt;hyperlink&gt;</c> element found after <c>&lt;/sheetData&gt;</c>.</summary>
     public void OnHyperlink();

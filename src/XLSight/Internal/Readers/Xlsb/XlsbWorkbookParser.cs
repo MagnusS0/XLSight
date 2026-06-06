@@ -21,7 +21,7 @@ internal static class XlsbWorkbookParser
         bool date1904 = false;
         var sheets = new List<XlsbSheetInfo>();
         var definedNames = new List<XlsbDefinedNameInfo>();
-        var externSheets = new List<XlsbExternSheet>();
+        var externSheets = new List<XlsbExternSheetInfo>();
 
         using var iter = new XlsbRecordIterator(workbookStream);
         while (iter.TryRead(out XlsbRecord record))
@@ -57,7 +57,7 @@ internal static class XlsbWorkbookParser
             throw new MalformedWorkbookException("XLSB workbook contains no worksheet metadata.");
         }
 
-        return new XlsbMetadata(sheets, date1904, definedNames);
+        return new XlsbMetadata(sheets, date1904, definedNames, externSheets);
     }
 
     private static XlsbSheetInfo? ParseSheet(
@@ -86,7 +86,7 @@ internal static class XlsbWorkbookParser
         return new XlsbSheetInfo(name, path);
     }
 
-    private static void ParseExternSheets(ReadOnlySpan<byte> payload, List<XlsbExternSheet> externSheets)
+    private static void ParseExternSheets(ReadOnlySpan<byte> payload, List<XlsbExternSheetInfo> externSheets)
     {
         externSheets.Clear();
         if (payload.Length < 4)
@@ -101,7 +101,7 @@ internal static class XlsbWorkbookParser
             uint externalLink = XlsbBinary.ReadUInt32(payload, offset);
             int firstSheet = XlsbBinary.ReadInt32(payload, offset + 4);
             int lastSheet = XlsbBinary.ReadInt32(payload, offset + 8);
-            externSheets.Add(new XlsbExternSheet(externalLink, firstSheet, lastSheet));
+            externSheets.Add(new XlsbExternSheetInfo(externalLink, firstSheet, lastSheet));
             offset += 12;
         }
     }
@@ -109,7 +109,7 @@ internal static class XlsbWorkbookParser
     private static XlsbDefinedNameInfo? ParseDefinedName(
         ReadOnlySpan<byte> payload,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         if (payload.Length < BrtNameFixedSize)
         {
@@ -147,7 +147,7 @@ internal static class XlsbWorkbookParser
         ReadOnlySpan<byte> payload,
         ref int offset,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         if (payload.Length - offset < 4)
         {
@@ -183,7 +183,7 @@ internal static class XlsbWorkbookParser
     private static string? DecodeReferenceFormula(
         ReadOnlySpan<byte> formula,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         var references = new Stack<string>();
         int offset = 0;
@@ -247,7 +247,7 @@ internal static class XlsbWorkbookParser
     private static string? DecodeCellReference(
         ReadOnlySpan<byte> formula,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         string? sheetPrefix = ResolveReferenceSheetPrefix(formula, sheets, externSheets);
         if (sheetPrefix is null)
@@ -264,7 +264,7 @@ internal static class XlsbWorkbookParser
     private static string? DecodeAreaReference(
         ReadOnlySpan<byte> formula,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         string? sheetPrefix = ResolveReferenceSheetPrefix(formula, sheets, externSheets);
         if (sheetPrefix is null)
@@ -291,7 +291,7 @@ internal static class XlsbWorkbookParser
     private static string? DecodeErrorReference(
         ReadOnlySpan<byte> formula,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         string? sheetPrefix = ResolveReferenceSheetPrefix(formula, sheets, externSheets);
         return sheetPrefix is null ? null : $"{sheetPrefix}!#REF!";
@@ -323,7 +323,7 @@ internal static class XlsbWorkbookParser
     private static string? ResolveReferenceSheetPrefix(
         ReadOnlySpan<byte> formula,
         IReadOnlyList<XlsbSheetInfo> sheets,
-        IReadOnlyList<XlsbExternSheet> externSheets)
+        IReadOnlyList<XlsbExternSheetInfo> externSheets)
     {
         int externSheetIndex = XlsbBinary.ReadUInt16(formula, 1);
         if (externSheetIndex >= externSheets.Count)
@@ -331,7 +331,7 @@ internal static class XlsbWorkbookParser
             return null;
         }
 
-        XlsbExternSheet externSheet = externSheets[externSheetIndex];
+        XlsbExternSheetInfo externSheet = externSheets[externSheetIndex];
         if (externSheet.ExternalLink != 0 ||
             externSheet.FirstSheet < 0 ||
             externSheet.LastSheet < externSheet.FirstSheet ||
@@ -413,6 +413,4 @@ internal static class XlsbWorkbookParser
             _ = XlsbBinary.ReadNullableWideString(payload, ref offset);
         }
     }
-
-    private sealed record XlsbExternSheet(uint ExternalLink, int FirstSheet, int LastSheet);
 }

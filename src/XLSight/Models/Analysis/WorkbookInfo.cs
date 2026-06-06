@@ -24,6 +24,9 @@ public sealed class WorkbookInfo
     /// <summary>Gets all charts defined in the workbook.</summary>
     public IReadOnlyList<ChartInfo> Charts => Exact.Charts;
 
+    /// <summary>Gets external workbooks referenced by this workbook.</summary>
+    public IReadOnlyList<ExternalWorkbookLinkInfo> ExternalLinks => Exact.ExternalLinks;
+
     /// <summary>Gets a value indicating whether the workbook contains VBA macros.</summary>
     public bool HasMacros => Exact.HasMacros;
 

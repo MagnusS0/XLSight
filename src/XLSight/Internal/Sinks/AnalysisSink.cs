@@ -1,5 +1,7 @@
 using System.Buffers;
+using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using XLSight.Internal.Analysis;
 using XLSight.Analysis;
 
@@ -47,10 +49,17 @@ internal partial struct AnalysisSink : IByteSheetSink
     private int _formulaCount;
     private int _arrayFormulaCount;
     private Dictionary<int, int>? _formulaCountByColumn;
+    private Dictionary<FormulaDependencyKey, int>? _formulaDependencies;
+    private List<FormulaDependencyKey>? _currentFormulaTargets;
+    private Dictionary<int, FormulaDependencyKey[]>? _sharedFormulaTargets;
+    private int _pendingSharedFormulaIndex;
+    private List<DataValidationInfo>? _dataValidations;
+    private readonly string _sheetName;
 
-    public AnalysisSink(ISharedStringSource sst, AnalysisLevel level = AnalysisLevel.Full)
+    public AnalysisSink(ISharedStringSource sst, string sheetName, AnalysisLevel level = AnalysisLevel.Full)
     {
         _sst = sst;
+        _sheetName = sheetName;
         _level = level;
         _minValueRow = int.MaxValue;
         _maxValueRow = int.MinValue;
@@ -73,7 +82,8 @@ internal partial struct AnalysisSink : IByteSheetSink
     }
 
     public bool NeedsDecodedValue => false;
-    public bool TracksFormulas => true;
+    public bool TracksFormulas => _level != AnalysisLevel.Exact;
+    public bool TracksFormulaReferences => _level != AnalysisLevel.Exact;
 
     public void OnDimension(in ExcelRange dimension) { _declaredDimension = dimension; }
 
@@ -98,6 +108,8 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     public void OnFormula(int column, bool isArray)
     {
+        FinalizeSharedFormulaDefinition();
+        _currentFormulaTargets?.Clear();
         _formulaCount++;
         if (isArray) { _arrayFormulaCount++; }
         _formulaCountByColumn ??= [];
@@ -105,8 +117,67 @@ internal partial struct AnalysisSink : IByteSheetSink
         _formulaCountByColumn[column] = existing + 1;
     }
 
+    public void OnSharedFormulaDefinition(int sharedIndex)
+    {
+        _pendingSharedFormulaIndex = sharedIndex + 1;
+    }
+
+    public void OnSharedFormulaReference(int sharedIndex)
+    {
+        if (_sharedFormulaTargets is null || !_sharedFormulaTargets.TryGetValue(sharedIndex, out FormulaDependencyKey[]? targets))
+        {
+            return;
+        }
+
+        foreach (FormulaDependencyKey target in targets)
+        {
+            IncrementFormulaDependency(target);
+        }
+    }
+
+    public void OnFormulaReference(in FormulaReference reference)
+    {
+        string targetSheet;
+        string? targetWorkbook;
+        if (reference.IsUtf8)
+        {
+            targetSheet = DecodeFormulaIdentifier(reference.SheetUtf8);
+            targetWorkbook = reference.WorkbookUtf8.IsEmpty
+                ? null
+                : DecodeFormulaIdentifier(reference.WorkbookUtf8);
+        }
+        else
+        {
+            targetSheet = reference.Sheet!;
+            targetWorkbook = reference.Workbook;
+        }
+
+        if (targetSheet.Length == 0 ||
+            (targetWorkbook is null && string.Equals(targetSheet, _sheetName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var key = new FormulaDependencyKey(targetWorkbook, targetSheet);
+        _currentFormulaTargets ??= [];
+        if (_currentFormulaTargets.Contains(key))
+        {
+            return;
+        }
+
+        _currentFormulaTargets.Add(key);
+        IncrementFormulaDependency(key);
+    }
+
     public void OnConditionalFormatting() { _cfCount++; }
-    public void OnDataValidation() { _dvCount++; }
+    public void OnDataValidation(DataValidationInfo? validation)
+    {
+        _dvCount++;
+        if (validation is not null)
+        {
+            (_dataValidations ??= []).Add(validation);
+        }
+    }
     public void OnHyperlink() { _hyperlinkCount++; }
 
     public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex)
@@ -152,6 +223,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     public void OnEnd()
     {
+        FinalizeSharedFormulaDefinition();
         if (_level == AnalysisLevel.Exact) { return; }
         if (_hasPendingRow) { FinalizeCurrentRow(); }
         SealRemainingBlocks();
@@ -171,6 +243,7 @@ internal partial struct AnalysisSink : IByteSheetSink
             // CF/DV/hyperlinks come from post-sheetData scan.
             ConditionalFormattingCount = _cfCount,
             DataValidationCount = _dvCount,
+            DataValidations = _dataValidations ?? [],
             HyperlinkCount = _hyperlinkCount,
             // Secondary file data remains from AnalyzerMetadataReader.
             Tables = exactMetadata.Exact.Tables,
@@ -217,9 +290,63 @@ internal partial struct AnalysisSink : IByteSheetSink
             FormulaCount = _formulaCount,
             ArrayFormulaCount = _arrayFormulaCount,
             FormulaColumns = BuildFormulaColumns(),
+            FormulaDependencies = BuildFormulaDependencies(),
             Columns = ColumnProfiler.BuildProfiles(_columnStates, headersByColumn, _formulaCountByColumn),
         };
     }
+
+    private FormulaDependencyInfo[] BuildFormulaDependencies()
+    {
+        if (_formulaDependencies is null || _formulaDependencies.Count == 0)
+        {
+            return [];
+        }
+
+        return [.. _formulaDependencies
+            .OrderBy(static pair => pair.Key.Workbook, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static pair => pair.Key.Sheet, StringComparer.OrdinalIgnoreCase)
+            .Select(static pair => new FormulaDependencyInfo
+            {
+                TargetWorkbook = pair.Key.Workbook,
+                TargetSheet = pair.Key.Sheet,
+                FormulaCount = pair.Value,
+            })];
+    }
+
+    private void FinalizeSharedFormulaDefinition()
+    {
+        if (_pendingSharedFormulaIndex == 0)
+        {
+            return;
+        }
+
+        int sharedIndex = _pendingSharedFormulaIndex - 1;
+        _sharedFormulaTargets ??= [];
+        _sharedFormulaTargets[sharedIndex] = _currentFormulaTargets is { Count: > 0 }
+            ? [.. _currentFormulaTargets]
+            : [];
+        _pendingSharedFormulaIndex = 0;
+    }
+
+    private void IncrementFormulaDependency(FormulaDependencyKey key)
+    {
+        _formulaDependencies ??= [];
+        _formulaDependencies.TryGetValue(key, out int count);
+        _formulaDependencies[key] = count + 1;
+    }
+
+    private static string DecodeFormulaIdentifier(ReadOnlySpan<byte> utf8)
+    {
+        string value = Encoding.UTF8.GetString(utf8);
+        if (value.Contains("''", StringComparison.Ordinal))
+        {
+            value = value.Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        return value.Contains('&', StringComparison.Ordinal) ? WebUtility.HtmlDecode(value) : value;
+    }
+
+    private readonly record struct FormulaDependencyKey(string? Workbook, string Sheet);
 
     private FormulaColumnProfile[] BuildFormulaColumns()
     {

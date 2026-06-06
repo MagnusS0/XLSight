@@ -153,7 +153,8 @@ public sealed class WorkbookAnalysisTests
         string sheetXml,
         string? sheet2Xml = null,
         string? sstXml = null,
-        string? stylesXml = null)
+        string? stylesXml = null,
+        IReadOnlyDictionary<string, string>? extraEntries = null)
     {
         var ms = new MemoryStream();
         using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
@@ -169,6 +170,13 @@ public sealed class WorkbookAnalysisTests
             if (sstXml is not null)
             {
                 WriteEntry(archive, "xl/sharedStrings.xml", sstXml);
+            }
+            if (extraEntries is not null)
+            {
+                foreach ((string path, string content) in extraEntries)
+                {
+                    WriteEntry(archive, path, content);
+                }
             }
         }
         ms.Position = 0;
@@ -280,6 +288,112 @@ public sealed class WorkbookAnalysisTests
         Assert.Equal(1, region.StartColumn);
         Assert.Equal(2, region.EndRow);
         Assert.Equal(2, region.EndColumn);
+    }
+
+    [Fact]
+    public void AnalyzeSheet_DataValidation_ExposesCompleteRule()
+    {
+        const string sheetXml = """
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData />
+              <dataValidations count="1">
+                <dataValidation type="list" sqref="B2 B4:B6" allowBlank="1"
+                    showDropDown="1" showInputMessage="1" showErrorMessage="1"
+                    errorStyle="warning" errorTitle="Invalid" error="Choose a listed value"
+                    promptTitle="Selection" prompt="Pick one">
+                  <formula1>'Lookup Data'!$A$1:$A$3</formula1>
+                </dataValidation>
+              </dataValidations>
+            </worksheet>
+            """;
+        using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, sheetXml);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        DataValidationInfo validation = Assert.Single(workbook.AnalyzeSheet("Data").DataValidations);
+
+        Assert.Equal(DataValidationType.List, validation.Type);
+        Assert.Equal("B2 B4:B6", validation.SequenceOfReferences);
+        Assert.Equal(2, validation.Ranges.Count);
+        Assert.Equal("'Lookup Data'!$A$1:$A$3", validation.Formula1);
+        Assert.True(validation.AllowBlank);
+        Assert.True(validation.ShowDropDown);
+        Assert.True(validation.ShowInputMessage);
+        Assert.True(validation.ShowErrorMessage);
+        Assert.Equal(DataValidationErrorStyle.Warning, validation.ErrorStyle);
+        Assert.Equal("Invalid", validation.ErrorTitle);
+        Assert.Equal("Choose a listed value", validation.ErrorMessage);
+        Assert.Equal("Selection", validation.PromptTitle);
+        Assert.Equal("Pick one", validation.PromptMessage);
+    }
+
+    [Fact]
+    public void AnalyzeSheet_CrossSheetFormulas_AggregatesDistinctFormulaCells()
+    {
+        const string formulaSheet = """
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1">
+                  <c r="A1"><f t="shared" si="0">Sheet2!A1+Sheet2!B1</f><v>0</v></c>
+                  <c r="B1"><f t="shared" si="0"/><v>0</v></c>
+                  <c r="C1"><f>Sheet2!C1</f><v>0</v></c>
+                </row>
+              </sheetData>
+            </worksheet>
+            """;
+        using var ms = BuildWorkbook(
+            WorkbookXmlTwoSheets,
+            RelsXmlTwoSheets,
+            formulaSheet,
+            EmptySheetXml);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        IReadOnlyList<FormulaDependencyInfo>? dependencies =
+            workbook.AnalyzeSheet("Sheet1", AnalysisLevel.Observed).FormulaDependencies;
+        Assert.NotNull(dependencies);
+        FormulaDependencyInfo dependency = Assert.Single(dependencies);
+
+        Assert.Null(dependency.TargetWorkbook);
+        Assert.Equal("Sheet2", dependency.TargetSheet);
+        Assert.Equal(3, dependency.FormulaCount);
+    }
+
+    [Fact]
+    public void Analyze_ExternalLink_ExposesTargetAndCachedNames()
+    {
+        const string workbookRelationships = """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml" />
+              <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml" />
+            </Relationships>
+            """;
+        var extras = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["xl/externalLinks/externalLink1.xml"] = """
+                <externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <externalBook>
+                    <sheetNames><sheetName val="Rates"/><sheetName val="Lookup"/></sheetNames>
+                    <definedNames><definedName name="TaxRate"/></definedNames>
+                  </externalBook>
+                </externalLink>
+                """,
+            ["xl/externalLinks/_rels/externalLink1.xml.rels"] = """
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="file:///C:/Data/A&amp;B.xlsx" TargetMode="External" />
+                </Relationships>
+                """,
+        };
+        using var ms = BuildWorkbook(
+            WorkbookXmlOneSheet,
+            workbookRelationships,
+            EmptySheetXml,
+            extraEntries: extras);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        ExternalWorkbookLinkInfo link = Assert.Single(workbook.Analyze(AnalysisLevel.Exact).ExternalLinks);
+
+        Assert.Equal("file:///C:/Data/A&B.xlsx", link.Target);
+        Assert.Equal(["Rates", "Lookup"], link.SheetNames);
+        Assert.Equal(["TaxRate"], link.DefinedNames);
     }
 
     [Fact]
@@ -431,6 +545,7 @@ public sealed class WorkbookAnalysisTests
                 Charts = [],
                 ConditionalFormattingCount = 0,
                 DataValidationCount = 0,
+                DataValidations = [],
                 HyperlinkCount = 0,
                 CommentCount = 0,
                 DrawingCount = 0,

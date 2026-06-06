@@ -15,6 +15,9 @@ public sealed class WorkbookAnalysisExact
     /// <summary>Gets all charts across the workbook.</summary>
     public required IReadOnlyList<ChartInfo> Charts { get; init; }
 
+    /// <summary>Gets external workbooks referenced by package external-link parts.</summary>
+    public required IReadOnlyList<ExternalWorkbookLinkInfo> ExternalLinks { get; init; }
+
     /// <summary>Gets a value indicating whether the workbook contains VBA macros.</summary>
     public required bool HasMacros { get; init; }
 

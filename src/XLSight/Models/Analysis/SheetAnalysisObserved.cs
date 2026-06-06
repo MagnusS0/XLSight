@@ -13,6 +13,7 @@ public sealed class SheetAnalysisObserved
         FormulaCount = 0,
         ArrayFormulaCount = 0,
         FormulaColumns = [],
+        FormulaDependencies = [],
         Columns = [],
     };
 
@@ -39,6 +40,9 @@ public sealed class SheetAnalysisObserved
 
     /// <summary>Gets formula counts by column.</summary>
     public required IReadOnlyList<FormulaColumnProfile> FormulaColumns { get; init; }
+
+    /// <summary>Gets cross-sheet and cross-workbook formula dependencies aggregated by target.</summary>
+    public required IReadOnlyList<FormulaDependencyInfo> FormulaDependencies { get; init; }
 
     /// <summary>Gets the column-level profiles for each column that contains data.</summary>
     public required IReadOnlyList<ColumnProfile> Columns { get; init; }

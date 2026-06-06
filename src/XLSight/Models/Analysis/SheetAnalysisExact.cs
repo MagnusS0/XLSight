@@ -24,6 +24,9 @@ public sealed class SheetAnalysisExact
     /// <summary>Gets the number of data validation rules defined in the sheet XML.</summary>
     public required int DataValidationCount { get; init; }
 
+    /// <summary>Gets the data-validation rules defined in the worksheet.</summary>
+    public required IReadOnlyList<DataValidationInfo> DataValidations { get; init; }
+
     /// <summary>Gets the number of hyperlinks defined in the sheet XML.</summary>
     public required int HyperlinkCount { get; init; }
 

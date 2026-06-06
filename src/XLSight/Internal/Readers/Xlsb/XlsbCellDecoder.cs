@@ -14,6 +14,7 @@ internal static class XlsbCellDecoder
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
+        XlsbFormulaContext? formulaContext,
         out int rowIndex,
         out int columnIndex,
         out ExcelCellValue value)
@@ -32,7 +33,7 @@ internal static class XlsbCellDecoder
         ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
         if (mode == ReadMode.Formulas && IsFormulaRecord(record.Type))
         {
-            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data));
+            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data, formulaContext));
             return true;
         }
 
@@ -61,6 +62,7 @@ internal static class XlsbCellDecoder
         bool isDate1904,
         ReadMode mode,
         bool decodeSharedString,
+        XlsbFormulaContext? formulaContext,
         out int columnIndex,
         out CellDataKind kind,
         out int styleIndex,
@@ -84,7 +86,7 @@ internal static class XlsbCellDecoder
         if (mode == ReadMode.Formulas && isFormula)
         {
             kind = CellDataKind.FormulaString;
-            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data));
+            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data, formulaContext));
             return true;
         }
 
@@ -296,7 +298,29 @@ internal static class XlsbCellDecoder
         }
     }
 
-    private static string DecodeFormula(int recordType, ReadOnlySpan<byte> data)
+    internal static bool TryGetFormula(XlsbRecord record, out ReadOnlySpan<byte> formula)
+    {
+        formula = [];
+        if (!IsFormulaRecord(record.Type) || record.Payload.Length < CellHeaderLength)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
+        int formulaOffset = GetFormulaOffset(record.Type, data);
+        if (formulaOffset < 0 || formulaOffset >= data.Length)
+        {
+            return false;
+        }
+
+        formula = data[formulaOffset..];
+        return true;
+    }
+
+    private static string DecodeFormula(
+        int recordType,
+        ReadOnlySpan<byte> data,
+        XlsbFormulaContext? formulaContext)
     {
         int formulaOffset = GetFormulaOffset(recordType, data);
         if (formulaOffset < 0 || formulaOffset >= data.Length)
@@ -304,7 +328,7 @@ internal static class XlsbCellDecoder
             return string.Empty;
         }
 
-        return XlsbFormulaDecoder.Decode(data[formulaOffset..]);
+        return XlsbFormulaDecoder.Decode(data[formulaOffset..], formulaContext);
     }
 
     private static int GetFormulaOffset(int recordType, ReadOnlySpan<byte> data)

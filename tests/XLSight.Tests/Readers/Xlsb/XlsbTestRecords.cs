@@ -207,6 +207,33 @@ internal static class XlsbTestRecords
         return token;
     }
 
+    internal static byte[] FormulaRef3d(int externSheetIndex, int row, int column)
+    {
+        byte[] token = new byte[9];
+        token[0] = 0x5A;
+        BinaryPrimitives.WriteUInt16LittleEndian(token.AsSpan(1, 2), checked((ushort)externSheetIndex));
+        BinaryPrimitives.WriteUInt32LittleEndian(token.AsSpan(3, 4), checked((uint)(row - 1)));
+        BinaryPrimitives.WriteUInt16LittleEndian(token.AsSpan(7, 2), checked((ushort)(column - 1)));
+        return token;
+    }
+
+    internal static byte[] FormulaArea3d(
+        int externSheetIndex,
+        int firstRow,
+        int firstColumn,
+        int lastRow,
+        int lastColumn)
+    {
+        byte[] token = new byte[15];
+        token[0] = 0x5B;
+        BinaryPrimitives.WriteUInt16LittleEndian(token.AsSpan(1, 2), checked((ushort)externSheetIndex));
+        BinaryPrimitives.WriteUInt32LittleEndian(token.AsSpan(3, 4), checked((uint)(firstRow - 1)));
+        BinaryPrimitives.WriteUInt32LittleEndian(token.AsSpan(7, 4), checked((uint)(lastRow - 1)));
+        BinaryPrimitives.WriteUInt16LittleEndian(token.AsSpan(11, 2), checked((ushort)(firstColumn - 1)));
+        BinaryPrimitives.WriteUInt16LittleEndian(token.AsSpan(13, 2), checked((ushort)(lastColumn - 1)));
+        return token;
+    }
+
     internal static byte[] FormulaInt(int value)
     {
         byte[] token = new byte[3];

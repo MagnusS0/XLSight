@@ -10,6 +10,7 @@ internal sealed class XlsbRowScanner : IDisposable
     private readonly bool _isDate1904;
     private readonly ReadMode _mode;
     private readonly ExcelRange _range;
+    private readonly XlsbFormulaContext? _formulaContext;
     private readonly ExcelCellValue[] _cellPool;
 
     private ExcelRow _current;
@@ -26,7 +27,8 @@ internal sealed class XlsbRowScanner : IDisposable
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
-        ExcelCellValue[] cellPool)
+        ExcelCellValue[] cellPool,
+        XlsbFormulaContext? formulaContext = null)
     {
         _iterator = iterator;
         _sharedStrings = sharedStrings;
@@ -35,6 +37,7 @@ internal sealed class XlsbRowScanner : IDisposable
         _mode = mode;
         _range = range;
         _cellPool = cellPool;
+        _formulaContext = formulaContext;
     }
 
     internal ExcelRow Current => _current;
@@ -200,6 +203,7 @@ internal sealed class XlsbRowScanner : IDisposable
             _styles,
             _isDate1904,
             _mode,
+            _formulaContext,
             out cellRowIndex,
             out columnIndex,
             out value);

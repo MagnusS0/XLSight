@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using XLSight.Internal.Sinks;
 
 namespace XLSight.Internal.Readers.Xlsb;
 
@@ -35,11 +36,15 @@ internal static class XlsbFormulaDecoder
     private const int PtgArea = 0x05;
     private const int PtgRefErr = 0x0A;
     private const int PtgAreaErr = 0x0B;
+    private const int PtgRef3d = 0x1A;
+    private const int PtgArea3d = 0x1B;
+    private const int PtgRefErr3d = 0x1C;
+    private const int PtgAreaErr3d = 0x1D;
     private const ushort ColumnMask = 0x3FFF;
     private const ushort ColumnRelativeFlag = 0x4000;
     private const ushort RowRelativeFlag = 0x8000;
 
-    internal static string Decode(ReadOnlySpan<byte> formula)
+    internal static string Decode(ReadOnlySpan<byte> formula, XlsbFormulaContext? context = null)
     {
         if (!TryReadTokenBytes(formula, out ReadOnlySpan<byte> tokens))
         {
@@ -68,7 +73,7 @@ internal static class XlsbFormulaDecoder
                 continue;
             }
 
-            if (TryHandleReference(tokens, ref offset, expressions))
+            if (TryHandleReference(tokens, ref offset, expressions, context))
             {
                 continue;
             }
@@ -77,6 +82,40 @@ internal static class XlsbFormulaDecoder
         }
 
         return expressions.Count == 1 ? expressions.Pop() : string.Empty;
+    }
+
+    internal static void EmitReferences<TSink>(
+        ReadOnlySpan<byte> formula,
+        XlsbFormulaContext context,
+        ref TSink sink)
+        where TSink : struct, IByteSheetSink
+    {
+        if (!TryReadTokenBytes(formula, out ReadOnlySpan<byte> tokens))
+        {
+            return;
+        }
+
+        int offset = 0;
+        while (offset < tokens.Length)
+        {
+            int tokenLength = GetTokenLength(tokens, offset);
+            if (tokenLength <= 0)
+            {
+                return;
+            }
+
+            int ptg = tokens[offset] & OperandTokenMask;
+            if (ptg is PtgRef3d or PtgArea3d or PtgRefErr3d or PtgAreaErr3d)
+            {
+                int externSheetIndex = BinaryPrimitives.ReadUInt16LittleEndian(tokens.Slice(offset + 1, 2));
+                if (context.TryResolveSheet(externSheetIndex, out string sheetName, out _))
+                {
+                    sink.OnFormulaReference(FormulaReference.FromText(null, sheetName));
+                }
+            }
+
+            offset += tokenLength;
+        }
     }
 
     private enum OperatorResult
@@ -198,7 +237,11 @@ internal static class XlsbFormulaDecoder
         }
     }
 
-    private static bool TryHandleReference(ReadOnlySpan<byte> tokens, ref int offset, Stack<string> expressions)
+    private static bool TryHandleReference(
+        ReadOnlySpan<byte> tokens,
+        ref int offset,
+        Stack<string> expressions,
+        XlsbFormulaContext? context)
     {
         int ptg = tokens[offset] & OperandTokenMask;
         switch (ptg)
@@ -224,8 +267,97 @@ internal static class XlsbFormulaDecoder
                 offset += 13;
                 return true;
             default:
-                return false;
+                return TryHandle3dReference(tokens, ref offset, expressions, context, ptg);
         }
+    }
+
+    private static bool TryHandle3dReference(
+        ReadOnlySpan<byte> tokens,
+        ref int offset,
+        Stack<string> expressions,
+        XlsbFormulaContext? context,
+        int ptg)
+    {
+        (int Length, bool IsArea, bool IsError) properties = ptg switch
+        {
+            PtgRef3d => (9, false, false),
+            PtgArea3d => (15, true, false),
+            PtgRefErr3d => (7, false, true),
+            PtgAreaErr3d => (7, true, true),
+            _ => default,
+        };
+        if (properties.Length == 0 || tokens.Length - offset < properties.Length)
+        {
+            return false;
+        }
+
+        expressions.Push(Decode3dReference(
+            tokens.Slice(offset, properties.Length),
+            context,
+            properties.IsArea,
+            properties.IsError));
+        offset += properties.Length;
+        return true;
+    }
+
+    private static string Decode3dReference(
+        ReadOnlySpan<byte> token,
+        XlsbFormulaContext? context,
+        bool isArea,
+        bool isError)
+    {
+        int externSheetIndex = BinaryPrimitives.ReadUInt16LittleEndian(token.Slice(1, 2));
+        if (context is null || !context.TryResolveSheet(externSheetIndex, out _, out string sheetPrefix))
+        {
+            return "#REF!";
+        }
+
+        if (isError)
+        {
+            return $"{sheetPrefix}!#REF!";
+        }
+
+        string address = isArea
+            ? DecodeAreaReference(token[3..])
+            : DecodeCellReference(token[3..]);
+        return $"{sheetPrefix}!{address}";
+    }
+
+    private static int GetTokenLength(ReadOnlySpan<byte> tokens, int offset)
+    {
+        byte token = tokens[offset];
+        if (token is >= PtgAdd and <= PtgParen)
+        {
+            return 1;
+        }
+
+        if (token == PtgStr)
+        {
+            if (tokens.Length - offset < 5)
+            {
+                return -1;
+            }
+
+            uint charCount = BinaryPrimitives.ReadUInt32LittleEndian(tokens.Slice(offset + 1, 4));
+            long stringLength = 5L + (charCount * 2L);
+            return stringLength <= tokens.Length - offset ? (int)stringLength : -1;
+        }
+
+        if (token is PtgErr or PtgBool) { return tokens.Length - offset >= 2 ? 2 : -1; }
+        if (token == PtgInt) { return tokens.Length - offset >= 3 ? 3 : -1; }
+        if (token == PtgNum) { return tokens.Length - offset >= 9 ? 9 : -1; }
+
+        int ptg = token & OperandTokenMask;
+        int length = ptg switch
+        {
+            PtgRef or PtgRefErr => 7,
+            PtgArea or PtgAreaErr => 13,
+            PtgRef3d => 9,
+            PtgArea3d => 15,
+            PtgRefErr3d or PtgAreaErr3d => 7,
+            _ => -1,
+        };
+        return length <= tokens.Length - offset ? length : -1;
     }
 
     private static string DecodeCellReference(ReadOnlySpan<byte> loc)

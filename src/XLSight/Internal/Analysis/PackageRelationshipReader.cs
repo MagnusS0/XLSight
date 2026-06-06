@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Readers.Xlsx;
@@ -10,8 +11,9 @@ internal static class PackageRelationshipReader
     private static ReadOnlySpan<byte> IdAttr => "Id="u8;
     private static ReadOnlySpan<byte> TypeAttr => "Type="u8;
     private static ReadOnlySpan<byte> TargetAttr => "Target="u8;
+    private static ReadOnlySpan<byte> TargetModeAttr => "TargetMode="u8;
 
-    internal sealed record RelationshipInfo(string Id, string Type, string Target);
+    internal sealed record RelationshipInfo(string Id, string Type, string Target, bool IsExternal);
 
     internal static IReadOnlyDictionary<string, RelationshipInfo> Read(Stream stream, string ownerPath)
     {
@@ -54,8 +56,13 @@ internal static class PackageRelationshipReader
                 {
                     string id = Encoding.UTF8.GetString(idBytes);
                     string type = Encoding.UTF8.GetString(typeBytes);
-                    string target = PackageRelationshipReader.ResolveRelativePath(ownerPath, Encoding.UTF8.GetString(targetBytes));
-                    relationships[id] = new RelationshipInfo(id, type, target);
+                    string rawTarget = WebUtility.HtmlDecode(Encoding.UTF8.GetString(targetBytes));
+                    bool isExternal = CellAttributeParser.TryGetAttributeValue(attrBytes, TargetModeAttr, out var modeBytes) &&
+                        modeBytes.SequenceEqual("External"u8);
+                    string target = isExternal
+                        ? rawTarget
+                        : PackageRelationshipReader.ResolveRelativePath(ownerPath, rawTarget);
+                    relationships[id] = new RelationshipInfo(id, type, target, isExternal);
                 }
 
                 buf.Advance(match.EndExclusive);

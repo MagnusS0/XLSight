@@ -16,11 +16,20 @@ internal sealed class XlsbSheetCursor : IRowCursor
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
-        ExcelRange range)
+        ExcelRange range,
+        XlsbFormulaContext? formulaContext = null)
     {
         _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
         _iterator = new XlsbRecordIterator(worksheetStream);
-        _scanner = new XlsbRowScanner(_iterator, sharedStrings, styles, isDate1904, mode, range, _cellPool);
+        _scanner = new XlsbRowScanner(
+            _iterator,
+            sharedStrings,
+            styles,
+            isDate1904,
+            mode,
+            range,
+            _cellPool,
+            formulaContext);
     }
 
     public ExcelRow Current => _scanner.Current;

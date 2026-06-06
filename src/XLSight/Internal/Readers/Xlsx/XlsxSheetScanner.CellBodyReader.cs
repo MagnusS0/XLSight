@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Net;
 using System.Text;
+using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Sinks;
 using static XLSight.Internal.Readers.Xlsx.XmlByteReader;
@@ -252,22 +253,19 @@ internal static partial class XlsxSheetScanner
     // When sink.TracksFormulas, formula detection is merged into the value scan (single pass).
     // The JIT dead-code-eliminates the formula-tracking branch for sinks where TracksFormulas = false.
     private static ExcelCellValue ReadCellValueForSink<TSink>(
-        ScanBuffer buf, CellDataKind kind, int styleIdx,
+        ScanBuffer buf, int column, CellDataKind kind, int styleIdx,
         SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
-        ReadMode mode, bool isEmpty, ref TSink sink, out int rawIndex,
-        out bool formulaFound, out bool isArrayFormula)
+        ReadMode mode, bool isEmpty, ref TSink sink, out int rawIndex)
         where TSink : struct, IByteSheetSink
     {
         rawIndex = -1;
-        formulaFound = false;
-        isArrayFormula = false;
         if (isEmpty) { return ExcelCellValue.Empty; }
         if (mode == ReadMode.Formulas) { return ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904); }
 
-        if (sink.TracksFormulas && kind != CellDataKind.InlineString)
+        if ((sink.TracksFormulas || sink.TracksFormulaReferences) && kind != CellDataKind.InlineString)
         {
             return ReadCellValueWithFormulaDetect(buf, kind, styleIdx, sharedStrings, styles, isDate1904,
-                decode: sink.NeedsDecodedValue, out rawIndex, out formulaFound, out isArrayFormula);
+                sink.NeedsDecodedValue, column, ref sink, out rawIndex);
         }
 
         if (kind == CellDataKind.SharedString)
@@ -281,18 +279,17 @@ internal static partial class XlsxSheetScanner
 
     /// <summary>
     /// Scans a cell body for <c>&lt;f&gt;</c>, <c>&lt;v&gt;</c>, and <c>&lt;/c&gt;</c> in a single
-    /// pass, returning the cached value from <c>&lt;v&gt;</c> and signalling formula presence via
-    /// <paramref name="formulaFound"/>. Finds <c>&lt;/c&gt;</c> first to bound all inner searches
-    /// to O(CellSize) rather than O(BufferSize).
+    /// pass, returning the cached value from <c>&lt;v&gt;</c> and emitting formula callbacks.
+    /// Finds <c>&lt;/c&gt;</c> first to bound all inner searches to O(CellSize) rather than O(BufferSize).
     /// </summary>
-    private static ExcelCellValue ReadCellValueWithFormulaDetect(
+    private static ExcelCellValue ReadCellValueWithFormulaDetect<TSink>(
         ScanBuffer buf, CellDataKind kind, int styleIdx,
         SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
-        bool decode, out int sstIndex, out bool formulaFound, out bool isArrayFormula)
+        bool decode, int column, ref TSink sink, out int sstIndex)
+        where TSink : struct, IByteSheetSink
     {
         sstIndex = -1;
-        formulaFound = false;
-        isArrayFormula = false;
+        bool formulaFound = false;
 
         while (true)
         {
@@ -320,7 +317,7 @@ internal static partial class XlsxSheetScanner
 
             if (fFound && (!vFound || fMatch.Start < vMatch.Start))
             {
-                AdvancePastFormula(buf, span, fMatch, ref formulaFound, ref isArrayFormula);
+                AdvancePastFormula(buf, span, fMatch, column, ref formulaFound, ref sink);
                 continue;
             }
 
@@ -367,16 +364,55 @@ internal static partial class XlsxSheetScanner
     }
 
     // Records formula presence and advances past the <f>...</f> body.
-    private static void AdvancePastFormula(ScanBuffer buf, ReadOnlySpan<byte> span, StartTagMatch fMatch,
-        ref bool formulaFound, ref bool isArrayFormula)
+    private static void AdvancePastFormula<TSink>(
+        ScanBuffer buf,
+        ReadOnlySpan<byte> span,
+        StartTagMatch fMatch,
+        int column,
+        ref bool formulaFound,
+        ref TSink sink)
+        where TSink : struct, IByteSheetSink
     {
+        int sharedIndex = -1;
+        bool isShared = false;
         if (!formulaFound)
         {
             var fAttrs = span.Slice(fMatch.AfterName, fMatch.EndExclusive - fMatch.AfterName);
-            isArrayFormula = CellAttributeParser.TryGetAttributeValue(fAttrs, TAttr, out var tb) && tb.SequenceEqual("array"u8);
+            bool hasType = CellAttributeParser.TryGetAttributeValue(fAttrs, TAttr, out var typeBytes);
+            bool isArrayFormula = hasType && typeBytes.SequenceEqual("array"u8);
+            isShared = hasType && typeBytes.SequenceEqual("shared"u8);
+            if (isShared && CellAttributeParser.TryGetAttributeValue(fAttrs, "si="u8, out var sharedIndexBytes))
+            {
+                _ = System.Buffers.Text.Utf8Parser.TryParse(sharedIndexBytes, out sharedIndex, out _);
+            }
+
+            if (sink.TracksFormulas)
+            {
+                sink.OnFormula(column, isArrayFormula);
+            }
             formulaFound = true;
         }
+
         buf.Advance(fMatch.EndExclusive);
-        if (!fMatch.IsEmptyElement) { SkipToEndTag(buf, TagFormula); }
+        if (fMatch.IsEmptyElement)
+        {
+            if (isShared && sharedIndex >= 0)
+            {
+                sink.OnSharedFormulaReference(sharedIndex);
+            }
+
+            return;
+        }
+
+        ReadOnlySpan<byte> formula = ExtractUntilClose(buf, TagFormula);
+        if (isShared && sharedIndex >= 0)
+        {
+            sink.OnSharedFormulaDefinition(sharedIndex);
+        }
+
+        if (sink.TracksFormulaReferences && !formula.IsEmpty)
+        {
+            FormulaReferenceParser.ParseUtf8(formula, ref sink);
+        }
     }
 }
