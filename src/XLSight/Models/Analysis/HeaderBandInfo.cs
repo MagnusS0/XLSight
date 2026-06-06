@@ -9,6 +9,4 @@ public sealed class HeaderBandInfo
     /// <summary>Gets the 1-based row indices covered by the band.</summary>
     public required IReadOnlyList<int> Rows { get; init; }
 
-    /// <summary>Gets a coarse confidence score from 0 to 1 for the inference.</summary>
-    public required double Confidence { get; init; }
 }

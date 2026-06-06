@@ -27,7 +27,7 @@ internal partial struct AnalysisSink
         return sets;
     }
 
-    private void AddRowCell(int column, ExcelCellValue value)
+    private void AddRowCell(int column, ExcelCellValue value, bool isFormula)
     {
         if (_pendingRowSpans.Count == 0 || column > _pendingRowSpans[^1].EndCol + 1)
         {
@@ -35,9 +35,6 @@ internal partial struct AnalysisSink
             {
                 StartCol = column,
                 EndCol = column,
-                CellCount = 0,
-                TextCount = 0,
-                NumericCount = 0,
             });
         }
         else
@@ -49,6 +46,7 @@ internal partial struct AnalysisSink
 
         var current = _pendingRowSpans[^1];
         current.CellCount++;
+        if (isFormula) { current.FormulaCount++; }
         if (value.CellType == CellType.Text) { current.TextCount++; }
         if (value.CellType is CellType.Number or CellType.Date or CellType.Boolean) { current.NumericCount++; }
         _pendingRowSpans[^1] = current;
@@ -83,6 +81,7 @@ internal partial struct AnalysisSink
             block.TotalCells += span.CellCount;
             block.TextCells += span.TextCount;
             block.NumericCells += span.NumericCount;
+            block.FormulaCells += span.FormulaCount;
             block.TouchedThisRow = true;
             block.GapRows = 0;
             _activeBlocks[bestIndex] = block;
@@ -151,14 +150,6 @@ internal partial struct AnalysisSink
             new ExcelAddress(block.EndCol, block.EndRow));
 
         RegionKind kind = InferRegionKind(block);
-        double confidence = kind switch
-        {
-            RegionKind.DataTable => 0.82,
-            RegionKind.ParameterBlock => 0.72,
-            RegionKind.HeaderBand => 0.75,
-            RegionKind.SummaryBlock => 0.65,
-            _ => 0.4,
-        };
 
         int evidenceFlags = 0;
         if (block.TextCells > 0) { evidenceFlags |= 1; }
@@ -173,9 +164,8 @@ internal partial struct AnalysisSink
             CellCount = block.TotalCells,
             RowCount = range.Height,
             ColumnCount = range.Width,
-            FormulaCount = 0,
+            FormulaCount = block.FormulaCells,
             HeaderRows = kind is RegionKind.DataTable or RegionKind.HeaderBand ? [block.StartRow] : [],
-            Confidence = confidence,
             Evidence = s_evidenceByFlags[evidenceFlags],
         });
     }
@@ -205,6 +195,7 @@ internal partial struct AnalysisSink
         public int CellCount;
         public int TextCount;
         public int NumericCount;
+        public int FormulaCount;
     }
 
     [StructLayout(LayoutKind.Auto)]
@@ -217,6 +208,7 @@ internal partial struct AnalysisSink
         public int TotalCells;
         public int TextCells;
         public int NumericCells;
+        public int FormulaCells;
         public bool TouchedThisRow;
         public int GapRows;
     }

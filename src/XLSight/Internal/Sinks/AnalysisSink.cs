@@ -53,6 +53,7 @@ internal partial struct AnalysisSink : IByteSheetSink
     private HashSet<FormulaDependencyKey>? _currentFormulaTargets;
     private Dictionary<int, FormulaDependencyKey[]>? _sharedFormulaTargets;
     private int? _pendingSharedFormulaIndex;
+    private bool _nextCellIsFormula;
     private List<DataValidationInfo>? _dataValidations;
     private readonly string _sheetName;
 
@@ -111,6 +112,7 @@ internal partial struct AnalysisSink : IByteSheetSink
         FinalizeSharedFormulaDefinition();
         _currentFormulaTargets?.Clear();
         _formulaCount++;
+        _nextCellIsFormula = true;
         if (isArray) { _arrayFormulaCount++; }
         _formulaCountByColumn ??= [];
         _formulaCountByColumn.TryGetValue(column, out int existing);
@@ -213,7 +215,9 @@ internal partial struct AnalysisSink : IByteSheetSink
             _firstRowByColumn.Add((column, value));
         }
 
-        AddRowCell(column, value);
+        bool isFormula = _nextCellIsFormula;
+        _nextCellIsFormula = false;
+        AddRowCell(column, value, isFormula);
         return true;
     }
 
@@ -392,7 +396,6 @@ internal partial struct AnalysisSink : IByteSheetSink
                     new ExcelAddress(usedRange.TopLeft.Column, headerRow),
                     new ExcelAddress(usedRange.BottomRight.Column, headerRow)),
                 Rows = [headerRow],
-                Confidence = 0.8,
             });
         }
 

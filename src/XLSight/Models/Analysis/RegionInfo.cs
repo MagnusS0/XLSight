@@ -24,9 +24,6 @@ public sealed class RegionInfo
     /// <summary>Gets the 1-based row indices identified as header rows within the region.</summary>
     public required IReadOnlyList<int> HeaderRows { get; init; }
 
-    /// <summary>Gets a coarse confidence score from 0 to 1 for the inferred kind.</summary>
-    public required double Confidence { get; init; }
-
     /// <summary>Gets compact evidence strings supporting the inference.</summary>
     public required IReadOnlyList<string> Evidence { get; init; }
 }
