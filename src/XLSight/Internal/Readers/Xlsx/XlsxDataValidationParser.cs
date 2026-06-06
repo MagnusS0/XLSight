@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 using XLSight.Analysis;
 using XLSight.Internal.Parsing;
@@ -15,22 +14,98 @@ internal static class XlsxDataValidationParser
 
     internal static DataValidationBuilder ParseAttributes(ReadOnlySpan<byte> attributes)
     {
-        return new DataValidationBuilder
+        var builder = new DataValidationBuilder();
+        var remaining = attributes;
+
+        while (!remaining.IsEmpty)
         {
-            Type = ParseType(ReadAttribute(attributes, "type="u8)),
-            SequenceOfReferences = Decode(ReadAttribute(attributes, "sqref="u8)),
-            Operator = ParseOperator(ReadAttribute(attributes, "operator="u8)),
-            AllowBlank = ReadBoolean(attributes, "allowBlank="u8),
-            ShowDropDown = ReadBoolean(attributes, "showDropDown="u8),
-            ShowInputMessage = ReadBoolean(attributes, "showInputMessage="u8),
-            ShowErrorMessage = ReadBoolean(attributes, "showErrorMessage="u8),
-            ErrorStyle = ParseErrorStyle(ReadAttribute(attributes, "errorStyle="u8)),
-            ErrorTitle = DecodeNullable(ReadAttribute(attributes, "errorTitle="u8)),
-            ErrorMessage = DecodeNullable(ReadAttribute(attributes, "error="u8)),
-            PromptTitle = DecodeNullable(ReadAttribute(attributes, "promptTitle="u8)),
-            PromptMessage = DecodeNullable(ReadAttribute(attributes, "prompt="u8)),
-        };
+            int eqPos = remaining.IndexOf((byte)'=');
+            if (eqPos < 0) { break; }
+
+            ReadOnlySpan<byte> namePart = remaining[..eqPos];
+            int nameEnd = namePart.Length - 1;
+            while (nameEnd >= 0 && IsXmlWhitespace(namePart[nameEnd])) { nameEnd--; }
+            int nameStart = nameEnd;
+            while (nameStart > 0 && !IsXmlWhitespace(namePart[nameStart - 1])) { nameStart--; }
+            ReadOnlySpan<byte> name = namePart[nameStart..(nameEnd + 1)];
+
+            int afterEq = eqPos + 1;
+            if ((uint)afterEq >= (uint)remaining.Length) { break; }
+
+            byte quote = remaining[afterEq];
+            if (quote is not ((byte)'"' or (byte)'\''))
+            {
+                remaining = remaining[afterEq..];
+                continue;
+            }
+
+            var valueSpan = remaining[(afterEq + 1)..];
+            int valueEnd = valueSpan.IndexOf(quote);
+            if (valueEnd < 0) { break; }
+
+            ApplyAttribute(ref builder, name, valueSpan[..valueEnd]);
+            remaining = valueSpan[(valueEnd + 1)..];
+        }
+
+        return builder;
     }
+
+    private static bool IsXmlWhitespace(byte b) => b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n';
+
+    private static void ApplyAttribute(ref DataValidationBuilder builder, ReadOnlySpan<byte> name, ReadOnlySpan<byte> value)
+    {
+        if (name.SequenceEqual("type"u8))
+        {
+            builder.Type = ParseType(value);
+        }
+        else if (name.SequenceEqual("sqref"u8))
+        {
+            builder.SequenceOfReferences = Decode(value);
+        }
+        else if (name.SequenceEqual("operator"u8))
+        {
+            builder.Operator = ParseOperator(value);
+        }
+        else if (name.SequenceEqual("allowBlank"u8))
+        {
+            builder.AllowBlank = ParseBoolean(value);
+        }
+        else if (name.SequenceEqual("showDropDown"u8))
+        {
+            builder.ShowDropDown = ParseBoolean(value);
+        }
+        else if (name.SequenceEqual("showInputMessage"u8))
+        {
+            builder.ShowInputMessage = ParseBoolean(value);
+        }
+        else if (name.SequenceEqual("showErrorMessage"u8))
+        {
+            builder.ShowErrorMessage = ParseBoolean(value);
+        }
+        else if (name.SequenceEqual("errorStyle"u8))
+        {
+            builder.ErrorStyle = ParseErrorStyle(value);
+        }
+        else if (name.SequenceEqual("errorTitle"u8))
+        {
+            builder.ErrorTitle = DecodeNullable(value);
+        }
+        else if (name.SequenceEqual("error"u8))
+        {
+            builder.ErrorMessage = DecodeNullable(value);
+        }
+        else if (name.SequenceEqual("promptTitle"u8))
+        {
+            builder.PromptTitle = DecodeNullable(value);
+        }
+        else if (name.SequenceEqual("prompt"u8))
+        {
+            builder.PromptMessage = DecodeNullable(value);
+        }
+    }
+
+    private static bool ParseBoolean(ReadOnlySpan<byte> value) =>
+        value.SequenceEqual("1"u8) || System.Text.Ascii.EqualsIgnoreCase(value, "true"u8);
 
     internal static DataValidationInfo? Complete(DataValidationBuilder builder, ReadOnlySpan<byte> body)
     {
@@ -110,40 +185,6 @@ internal static class XlsxDataValidationParser
         return ranges;
     }
 
-    private static ReadOnlySpan<byte> ReadAttribute(ReadOnlySpan<byte> attributes, ReadOnlySpan<byte> name) =>
-        CellAttributeParser.TryGetAttributeValue(attributes, name, out ReadOnlySpan<byte> value) ? value : [];
-
-    private static bool ReadBoolean(ReadOnlySpan<byte> attributes, ReadOnlySpan<byte> name)
-    {
-        ReadOnlySpan<byte> value = ReadAttribute(attributes, name);
-        return value.SequenceEqual("1"u8) || AsciiEqualsIgnoreCase(value, "true"u8);
-    }
-
-    private static bool AsciiEqualsIgnoreCase(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
-    {
-        if (left.Length != right.Length)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            byte leftValue = left[i];
-            byte rightValue = right[i];
-            if (leftValue is >= (byte)'A' and <= (byte)'Z')
-            {
-                leftValue += (byte)('a' - 'A');
-            }
-
-            if (leftValue != rightValue)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private static DataValidationType ParseType(ReadOnlySpan<byte> value) => value switch
     {
         _ when value.SequenceEqual("whole"u8) => DataValidationType.Whole,
@@ -181,16 +222,8 @@ internal static class XlsxDataValidationParser
             : DataValidationErrorStyle.Stop;
     }
 
-    private static string Decode(ReadOnlySpan<byte> value)
-    {
-        if (value.IsEmpty)
-        {
-            return string.Empty;
-        }
-
-        string text = Encoding.UTF8.GetString(value);
-        return text.Contains('&', StringComparison.Ordinal) ? WebUtility.HtmlDecode(text) : text;
-    }
+    private static string Decode(ReadOnlySpan<byte> value) =>
+        value.IsEmpty ? string.Empty : Utf8CellDecoder.UnescapeXml(Encoding.UTF8.GetString(value));
 
     private static string? DecodeNullable(ReadOnlySpan<byte> value)
     {
