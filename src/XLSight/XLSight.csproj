@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>High-performance streaming Excel workbook reading and analysis library for .NET</Description>
+    <Description>High-performance streaming Excel workbook reading and analysis library for .NET 10</Description>
     <!-- XML docs — required for NuGet consumers and enables IDE0005 on build -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- AOT and trimming compatibility — enforced from day one -->
@@ -12,7 +12,7 @@
     <PackageId>XLSight</PackageId>
     <Version>0.3.0</Version>
     <Authors>Magnus</Authors>
-    <Description>High-performance streaming Excel (.xlsx, .xlsm, .xlsb) reader and analyzer for .NET 10+. Zero dependencies, AOT-compatible, ZipArchive + XmlReader based.</Description>
+    <Description>High-performance streaming Excel (.xlsx, .xlsm, .xlsb) reader and analyzer for .NET 10. Zero dependencies, AOT-compatible, ZipArchive + XmlReader based.</Description>
     <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;openxml;dotnet;streaming;analysis;vba</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/MagnusS0/XLSight</PackageProjectUrl>
