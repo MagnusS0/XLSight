@@ -1,6 +1,7 @@
-using System.Xml;
+using System.Text;
 using XLSight.Analysis;
 using XLSight.Internal.Packaging;
+using XLSight.Internal.Readers.Xlsx;
 
 namespace XLSight.Internal.Analysis;
 
@@ -8,19 +9,17 @@ internal static class ExternalLinkMetadataReader
 {
     private const string ExternalLinkRelationshipSuffix = "/externalLink";
     private const string ExternalLinkPathRelationshipSuffix = "/externalLinkPath";
+    private static ReadOnlySpan<byte> TagSheetName => "sheetName"u8;
+    private static ReadOnlySpan<byte> TagDefinedName => "definedName"u8;
+    private static ReadOnlySpan<byte> ValAttr => "val="u8;
+    private static ReadOnlySpan<byte> NameAttr => "name="u8;
 
     internal static IReadOnlyList<ExternalWorkbookLinkInfo> Read(
         XlsxPackage package,
         string workbookPath)
     {
-        if (!package.Entries.Any(static entry =>
-                entry.FullName.StartsWith("xl/externalLinks/", StringComparison.OrdinalIgnoreCase)))
-        {
-            return [];
-        }
-
         IReadOnlyList<PackageRelationshipReader.RelationshipInfo> workbookRelationships =
-            ReadRelationships(package, workbookPath);
+            AnalyzerMetadataReader.ReadRelationships(package, workbookPath);
         var links = new List<ExternalWorkbookLinkInfo>();
 
         foreach (PackageRelationshipReader.RelationshipInfo relationship in workbookRelationships)
@@ -44,7 +43,7 @@ internal static class ExternalLinkMetadataReader
     private static ExternalWorkbookLinkInfo? ReadLink(XlsxPackage package, string linkPartPath)
     {
         IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships =
-            ReadRelationships(package, linkPartPath);
+            AnalyzerMetadataReader.ReadRelationships(package, linkPartPath);
         PackageRelationshipReader.RelationshipInfo? targetRelationship = relationships.FirstOrDefault(
             static relationship => relationship.IsExternal &&
                 relationship.Type.EndsWith(ExternalLinkPathRelationshipSuffix, StringComparison.Ordinal));
@@ -62,7 +61,7 @@ internal static class ExternalLinkMetadataReader
             {
                 ReadXmlMetadata(package, linkPartPath, sheetNames, definedNames);
             }
-            catch (Exception exception) when (exception is XmlException or IOException or InvalidDataException)
+            catch (Exception exception) when (exception is IOException or InvalidDataException)
             {
                 sheetNames.Clear();
                 definedNames.Clear();
@@ -89,47 +88,41 @@ internal static class ExternalLinkMetadataReader
             return;
         }
 
-        var settings = new XmlReaderSettings
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        ReadOnlySpan<byte> content = ms.GetBuffer().AsSpan(0, (int)ms.Length);
+
+        ScanTagAttribute(content, TagSheetName, ValAttr, sheetNames);
+        ScanTagAttribute(content, TagDefinedName, NameAttr, definedNames);
+    }
+
+    private static void ScanTagAttribute(
+        ReadOnlySpan<byte> content,
+        ReadOnlySpan<byte> tag,
+        ReadOnlySpan<byte> attr,
+        List<string> results)
+    {
+        ReadOnlySpan<byte> remaining = content;
+        while (true)
         {
-            DtdProcessing = DtdProcessing.Prohibit,
-            IgnoreComments = true,
-            IgnoreWhitespace = true,
-            XmlResolver = null,
-        };
-        using XmlReader reader = XmlReader.Create(stream, settings);
-        while (reader.Read())
-        {
-            if (reader.NodeType != XmlNodeType.Element)
+            var status = XmlByteReader.TryFindStartTag(remaining, tag, out StartTagMatch match, out _);
+            if (status != TagSearchResult.Found)
             {
-                continue;
+                break;
             }
 
-            if (string.Equals(reader.LocalName, "sheetName", StringComparison.Ordinal))
+            var attrBytes = remaining.Slice(match.AfterName, match.EndExclusive - match.AfterName);
+            if (CellAttributeParser.TryGetAttributeValue(attrBytes, attr, out ReadOnlySpan<byte> valueBytes))
             {
-                AddAttributeValue(reader, "val", sheetNames);
+                string value = Encoding.UTF8.GetString(valueBytes);
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    results.Add(value);
+                }
             }
-            else if (string.Equals(reader.LocalName, "definedName", StringComparison.Ordinal))
-            {
-                AddAttributeValue(reader, "name", definedNames);
-            }
+
+            remaining = remaining[match.EndExclusive..];
         }
     }
 
-    private static void AddAttributeValue(XmlReader reader, string attributeName, List<string> values)
-    {
-        string? value = reader.GetAttribute(attributeName);
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            values.Add(value);
-        }
-    }
-
-    private static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(
-        XlsxPackage package,
-        string ownerPath)
-    {
-        string relationshipPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
-        using Stream? stream = package.TryOpenEntryBuffered(relationshipPath);
-        return stream is null ? [] : [.. PackageRelationshipReader.Read(stream, ownerPath).Values];
-    }
 }

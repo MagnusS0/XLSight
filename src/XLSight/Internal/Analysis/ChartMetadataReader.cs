@@ -16,7 +16,7 @@ internal static class ChartMetadataReader
         var charts = new List<ChartInfo>();
         foreach (string drawingPath in drawingPaths)
         {
-            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> rels = ReadRelationships(package, drawingPath);
+            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> rels = AnalyzerMetadataReader.ReadRelationships(package, drawingPath);
             foreach (var rel in rels.Where(rel => string.Equals(rel.Type, ChartRelationshipType, StringComparison.Ordinal)))
             {
                 ChartInfo? chart = ReadChart(package, sheetName, rel.Target);
@@ -86,19 +86,6 @@ internal static class ChartMetadataReader
         };
     }
 
-    private static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(
-        XlsxPackage package,
-        string ownerPath)
-    {
-        string relPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
-        using Stream? relStream = package.TryOpenEntryBuffered(relPath);
-        if (relStream is null)
-        {
-            return [];
-        }
-
-        return [.. PackageRelationshipReader.Read(relStream, ownerPath).Values];
-    }
 
     private static string NormalizeFormulaText(string value)
     {

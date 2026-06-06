@@ -232,7 +232,7 @@ internal static class AnalyzerMetadataReader
         return count;
     }
 
-    private static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(XlsxPackage package, string ownerPath)
+    internal static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(XlsxPackage package, string ownerPath)
     {
         string relPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
         using var relStream = package.TryOpenEntryBuffered(relPath);
