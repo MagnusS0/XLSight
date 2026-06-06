@@ -176,9 +176,9 @@ Use `AnalysisLevel` to control how much work is performed:
 
 | Level | What is included |
 |---|---|
-| `Exact` | Metadata parsed from package XML: named ranges, tables, pivot tables, charts, merged regions, macros |
-| `Observed` | Everything in `Exact` plus a streaming scan: used range, row/column counts, per-column type profiles |
-| `Full` (default) | Everything in `Observed` plus inferred header row index |
+| `Exact` | Metadata parsed from package XML: named ranges, tables, pivot tables, charts, merged regions, data validations, external workbook links, macros |
+| `Observed` | Everything in `Exact` plus a streaming scan: used range, row/column counts, per-column type profiles, formula dependency aggregation |
+| `Full` (default) | Everything in `Observed` plus inferred regions and header row index |
 
 ```csharp
 using XLSight;
@@ -262,6 +262,62 @@ if (sheet.Columns is { } columns)
 
         if (col.MinNumericValue.HasValue)
             Console.WriteLine($"  range [{col.MinNumericValue} – {col.MaxNumericValue}]");
+    }
+}
+```
+
+### Data validations
+
+Data validation rules attached to cells are available at `AnalysisLevel.Exact` and above.
+Each `DataValidationInfo` carries the validation type, operator, formula constraints, allowed
+ranges, and the UI text shown to users:
+
+```csharp
+SheetInfo sheet = workbook.AnalyzeSheet("Input");
+
+foreach (DataValidationInfo dv in sheet.DataValidations)
+{
+    Console.WriteLine($"Type: {dv.Type}, Ranges: {string.Join(" ", dv.Ranges)}");
+
+    if (dv.Formula1 is { } f1) Console.WriteLine($"  Formula1: {f1}");
+    if (dv.Formula2 is { } f2) Console.WriteLine($"  Formula2: {f2}");
+    if (dv.Operator is { } op) Console.WriteLine($"  Operator: {op}");
+}
+```
+
+### External workbook links
+
+`WorkbookInfo.ExternalLinks` lists all external workbook references discovered in the file,
+including the cached sheet names and defined names stored inside each link part:
+
+```csharp
+WorkbookInfo info = workbook.Analyze();
+
+foreach (ExternalWorkbookLinkInfo link in info.ExternalLinks)
+{
+    Console.WriteLine($"Target: {link.Target}");
+    Console.WriteLine($"  Sheets: {string.Join(", ", link.SheetNames)}");
+    Console.WriteLine($"  Defined names: {string.Join(", ", link.DefinedNames)}");
+}
+```
+
+### Formula dependencies
+
+At `AnalysisLevel.Observed` and above, XLSight tracks which sheets and workbooks each formula
+cell references. `SheetInfo.FormulaDependencies` aggregates these into a per-target count,
+giving a quick picture of how sheets are connected:
+
+```csharp
+WorkbookInfo info = workbook.Analyze();
+
+foreach (SheetInfo sheet in info.Sheets)
+{
+    foreach (FormulaDependencyInfo dep in sheet.FormulaDependencies)
+    {
+        string target = dep.TargetWorkbook is { } wb
+            ? $"[{wb}]{dep.TargetSheet}"
+            : dep.TargetSheet;
+        Console.WriteLine($"{sheet.SheetName} → {target}: {dep.FormulaCount} formula(s)");
     }
 }
 ```
