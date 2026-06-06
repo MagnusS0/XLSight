@@ -38,6 +38,8 @@ internal static class XlsbFormulaDecoder
     private const int PtgAreaErr = 0x0B;
     private const int PtgRef3d = 0x1A;
     private const int PtgArea3d = 0x1B;
+    // PtgRefErr3d (0x1C) and PtgAreaErr3d (0x1D) share masked values with PtgErr (0x1C) and
+    // PtgBool (0x1D). Callers that use OperandTokenMask must guard on the raw byte first.
     private const int PtgRefErr3d = 0x1C;
     private const int PtgAreaErr3d = 0x1D;
     private const ushort ColumnMask = 0x3FFF;
@@ -104,13 +106,19 @@ internal static class XlsbFormulaDecoder
                 return;
             }
 
-            int ptg = tokens[offset] & OperandTokenMask;
-            if (ptg is PtgRef3d or PtgArea3d or PtgRefErr3d or PtgAreaErr3d)
+            byte rawToken = tokens[offset];
+            // PtgErr (0x1C) and PtgBool (0x1D) share masked values with PtgRefErr3d/PtgAreaErr3d.
+            // Guard explicitly so we never mistake a scalar for a 3D reference token.
+            if (rawToken is not (PtgErr or PtgBool))
             {
-                int externSheetIndex = BinaryPrimitives.ReadUInt16LittleEndian(tokens.Slice(offset + 1, 2));
-                if (context.TryResolveSheet(externSheetIndex, out string sheetName, out _))
+                int ptg = rawToken & OperandTokenMask;
+                if (ptg is PtgRef3d or PtgArea3d or PtgRefErr3d or PtgAreaErr3d)
                 {
-                    sink.OnFormulaReference(FormulaReference.FromText(null, sheetName));
+                    int externSheetIndex = BinaryPrimitives.ReadUInt16LittleEndian(tokens.Slice(offset + 1, 2));
+                    if (context.TryResolveSheet(externSheetIndex, out string sheetName, out _))
+                    {
+                        sink.OnFormulaReference(FormulaReference.FromText(null, sheetName));
+                    }
                 }
             }
 
