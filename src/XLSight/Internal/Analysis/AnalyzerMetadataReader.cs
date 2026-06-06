@@ -232,7 +232,7 @@ internal static class AnalyzerMetadataReader
         return count;
     }
 
-    private static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(XlsxPackage package, string ownerPath)
+    internal static IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(XlsxPackage package, string ownerPath)
     {
         string relPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
         using var relStream = package.TryOpenEntryBuffered(relPath);
@@ -286,6 +286,7 @@ internal static class AnalyzerMetadataReader
             Tables = allTables,
             PivotTables = allPivotTables,
             Charts = allCharts,
+            ExternalLinks = ExternalLinkMetadataReader.Read(package, "xl/workbook.xml"),
             HasMacros = metadata.HasMacros,
             VbaProject = vbaProject,
             IsDate1904 = metadata.UsesDate1904,
@@ -366,6 +367,7 @@ internal static class AnalyzerMetadataReader
                 MergedRegions = [],
                 ConditionalFormattingCount = 0,
                 DataValidationCount = 0,
+                DataValidations = [],
                 HyperlinkCount = 0,
                 Tables = tables,
                 PivotTables = pivots,

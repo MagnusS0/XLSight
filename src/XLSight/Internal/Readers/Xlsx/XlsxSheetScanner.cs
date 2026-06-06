@@ -108,7 +108,7 @@ internal static partial class XlsxSheetScanner
     {
         using var buf = new ScanBuffer(entryStream);
 
-        if (!SeekToSheetData(buf, entryStream, seekHint, out ExcelRange? dimension))
+        if (!SeekToSheetData(buf, entryStream, seekHint, out ExcelRange? dimension, out bool emptySheetData))
         {
             sink.OnEnd();
             return;
@@ -121,7 +121,7 @@ internal static partial class XlsxSheetScanner
 
         int lastRow = 0;
 
-        while (true)
+        while (!emptySheetData)
         {
             if (!TryReadRowStart(buf, ref lastRow, out bool emptyRow)) { break; }
             if (emptyRow) { continue; }
@@ -158,6 +158,18 @@ internal static partial class XlsxSheetScanner
 
     internal static bool SeekToSheetData(ScanBuffer buf, Stream stream, long seekHint, out ExcelRange? dimension)
     {
+        bool found = SeekToSheetData(buf, stream, seekHint, out dimension, out bool emptySheetData);
+        return IsUsableSheetData(found, emptySheetData);
+    }
+
+    private static bool SeekToSheetData(
+        ScanBuffer buf,
+        Stream stream,
+        long seekHint,
+        out ExcelRange? dimension,
+        out bool emptySheetData)
+    {
+        emptySheetData = false;
         if (seekHint >= 0 && stream.CanSeek)
         {
             stream.Seek(seekHint, SeekOrigin.Begin);
@@ -166,12 +178,24 @@ internal static partial class XlsxSheetScanner
             return true;
         }
 
-        return ScanForSheetData(buf, out dimension);
+        return ScanForSheetDataCore(buf, out dimension, out emptySheetData);
     }
 
     internal static bool ScanForSheetData(ScanBuffer buf, out ExcelRange? dimension)
     {
+        bool found = ScanForSheetDataCore(buf, out dimension, out bool emptySheetData);
+        return IsUsableSheetData(found, emptySheetData);
+    }
+
+    private static bool IsUsableSheetData(bool found, bool emptySheetData) => found && !emptySheetData;
+
+    private static bool ScanForSheetDataCore(
+        ScanBuffer buf,
+        out ExcelRange? dimension,
+        out bool emptySheetData)
+    {
         dimension = null;
+        emptySheetData = false;
         while (true)
         {
             var span = buf.Span;
@@ -214,7 +238,12 @@ internal static partial class XlsxSheetScanner
                 continue;
             }
 
-            if (sdMatch.IsEmptyElement) { return false; }
+            if (sdMatch.IsEmptyElement)
+            {
+                emptySheetData = true;
+                buf.Advance(sdMatch.EndExclusive);
+                return true;
+            }
             buf.Advance(sdMatch.EndExclusive);
             return true;
         }
@@ -440,10 +469,9 @@ internal static partial class XlsxSheetScanner
             }
 
             // Formula detection is merged into the value scan — no separate peek needed.
-            var value = ReadCellValueForSink(buf, kind, styleIdx, sharedStrings, styles, isDate1904, mode, isEmpty, ref sink, out int rawIndex, out bool formulaFound, out bool isArrayFormula);
-
-            // OnFormula before OnCell so sinks see formula info before the cell value.
-            if (formulaFound) { sink.OnFormula(currentCol, isArrayFormula); }
+            var value = ReadCellValueForSink(
+                buf, currentCol, kind, styleIdx, sharedStrings, styles, isDate1904,
+                mode, isEmpty, ref sink, out int rawIndex);
 
             if (!sink.OnCell(currentCol, kind, styleIdx, value, rawIndex))
             {
@@ -550,8 +578,14 @@ internal static partial class XlsxSheetScanner
         }
         else if (minPos == dvPos)
         {
-            sink.OnDataValidation();
+            var attributes = span.Slice(dvMatch.AfterName, dvMatch.EndExclusive - dvMatch.AfterName);
+            XlsxDataValidationParser.DataValidationBuilder builder =
+                XlsxDataValidationParser.ParseAttributes(attributes);
             buf.Advance(dvMatch.EndExclusive);
+            ReadOnlySpan<byte> body = dvMatch.IsEmptyElement
+                ? []
+                : ExtractUntilClose(buf, TagDataValidation);
+            sink.OnDataValidation(XlsxDataValidationParser.Complete(builder, body));
         }
         else
         {

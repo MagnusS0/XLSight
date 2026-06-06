@@ -331,7 +331,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         AnalysisLevel level)
     {
         using var sheetStream = OpenSheetStream(sheet.Path);
-        var sink = new AnalysisSink(_sharedStrings.Value, level);
+        var sink = new AnalysisSink(_sharedStrings.Value, sheet.Name, level);
         XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }

@@ -248,7 +248,7 @@ public sealed class RangeSinkTests
         var sink = new RangeSink(Range(1, 1, 1, 1), buffer);
         sink.OnMergeCell(new MergedRegion(1, 1, 2, 2));
         sink.OnConditionalFormatting();
-        sink.OnDataValidation();
+        sink.OnDataValidation(null);
         sink.OnHyperlink();
         sink.OnEnd();
         sink.OnDimension(Range(1, 1, 5, 5));

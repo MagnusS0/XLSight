@@ -64,6 +64,12 @@ public sealed class SheetInfo
     /// <summary>Gets the structured tables defined in this sheet.</summary>
     public IReadOnlyList<TableInfo> Tables => Exact.Tables;
 
+    /// <summary>Gets all data-validation rules defined in this sheet.</summary>
+    public IReadOnlyList<DataValidationInfo> DataValidations => Exact.DataValidations;
+
+    /// <summary>Gets cross-sheet and cross-workbook formula dependencies, or null when observed data is unavailable.</summary>
+    public IReadOnlyList<FormulaDependencyInfo>? FormulaDependencies => Observed?.FormulaDependencies;
+
     /// <summary>Gets the 1-based row index inferred as the header row, or <see langword="null"/> when inferred data is unavailable.</summary>
     public int? InferredHeaderRowIndex => Inferred?.HeaderRowIndex;
 

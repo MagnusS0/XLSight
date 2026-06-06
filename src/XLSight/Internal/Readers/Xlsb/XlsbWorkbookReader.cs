@@ -138,7 +138,8 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
                 _styles.Value,
                 _metadata.UsesDate1904,
                 mode,
-                range);
+                range,
+                _metadata.FormulaContext);
             return new OwnedRowCursor(sheetStream, cursor);
         }
         catch
@@ -309,6 +310,7 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
                 Tables = allTables,
                 PivotTables = allPivotTables,
                 Charts = allCharts,
+                ExternalLinks = ExternalLinkMetadataReader.Read(_package, "xl/workbook.bin"),
                 HasMacros = HasMacros,
                 VbaProject = vbaProject,
                 IsDate1904 = _metadata.UsesDate1904,
@@ -590,7 +592,7 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
         AnalysisLevel level)
     {
         using Stream sheetStream = OpenSheetStream(sheet.Path);
-        var sink = new AnalysisSink(_sharedStrings.Value, level);
+        var sink = new AnalysisSink(_sharedStrings.Value, sheet.Name, level);
         XlsbWorksheetScanner.ScanSheet(
             sheetStream,
             _sharedStrings,
@@ -598,6 +600,7 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
             _metadata.UsesDate1904,
             ReadMode.Values,
             ExcelRange.Unbounded,
+            _metadata.FormulaContext,
             ref sink);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }
@@ -619,6 +622,7 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
                 Charts = charts,
                 ConditionalFormattingCount = 0,
                 DataValidationCount = 0,
+                DataValidations = [],
                 HyperlinkCount = 0,
                 CommentCount = commentCount,
                 DrawingCount = drawingCount,
@@ -648,7 +652,8 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
             _styles.Value,
             _metadata.UsesDate1904,
             mode,
-            range))
+            range,
+            _metadata.FormulaContext))
         {
             int rowOffset = (row.RowIndex - range.TopLeft.Row) * range.Width;
             for (int column = range.TopLeft.Column; column <= range.BottomRight.Column; column++)

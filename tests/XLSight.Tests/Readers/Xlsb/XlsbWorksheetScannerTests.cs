@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Readers.Xlsb;
@@ -93,6 +94,42 @@ public sealed class XlsbWorksheetScannerTests
 
         Assert.Equal(CellType.Formula, row.GetCell(1).CellType);
         Assert.Equal("$A$1+1", row.GetCell(1).AsFormula());
+    }
+
+    [Fact]
+    public void ScanRows_InFormulaMode_Decodes3dReferences()
+    {
+        var context = new XlsbFormulaContext(
+            [new XlsbSheetInfo("Source", "source.bin"), new XlsbSheetInfo("Lookup Data", "lookup.bin")],
+            [new XlsbExternSheetInfo(0, 1, 1)]);
+        byte[] cellFormula = XlsbTestRecords.CellFormula(
+            XlsbTestRecords.FormulaRef3d(externSheetIndex: 0, row: 1, column: 2),
+            XlsbTestRecords.FormulaInt(1),
+            [0x03]);
+        byte[] areaFormula = XlsbTestRecords.CellFormula(
+            XlsbTestRecords.FormulaArea3d(
+                externSheetIndex: 0,
+                firstRow: 1,
+                firstColumn: 1,
+                lastRow: 2,
+                lastColumn: 2));
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.Row(1),
+            XlsbTestRecords.FormulaNumber(1, 0, cellFormula),
+            XlsbTestRecords.FormulaNumber(2, 0, areaFormula),
+            XlsbTestRecords.EndSheetData());
+
+        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Formulas,
+            ExcelRange.Unbounded,
+            context).Single();
+
+        Assert.Equal("'Lookup Data'!$B$1+1", row.GetCell(1).AsFormula());
+        Assert.Equal("'Lookup Data'!$A$1:$B$2", row.GetCell(2).AsFormula());
     }
 
     [Fact]
@@ -243,7 +280,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -255,6 +292,36 @@ public sealed class XlsbWorksheetScannerTests
         Assert.False(formula.IsArray);
         Assert.Equal(2, Assert.Single(sink.Cells).Column);
         Assert.Equal(["row:1", "formula:2", "cell:2"], sink.Events);
+    }
+
+    [Fact]
+    public void ScanSheet_Emits3dFormulaReferenceForAnalysis()
+    {
+        var context = new XlsbFormulaContext(
+            [new XlsbSheetInfo("Source", "source.bin"), new XlsbSheetInfo("Lookup", "lookup.bin")],
+            [new XlsbExternSheetInfo(0, 1, 1)]);
+        byte[] formula = XlsbTestRecords.CellFormula(
+            XlsbTestRecords.FormulaRef3d(externSheetIndex: 0, row: 1, column: 1));
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.Row(1),
+            XlsbTestRecords.FormulaNumber(1, 0, formula),
+            XlsbTestRecords.EndSheetData());
+        var sink = new CollectingSink(
+            needsDecodedValue: false,
+            tracksFormulas: true,
+            tracksFormulaReferences: true);
+
+        XlsbWorksheetScanner.ScanSheet(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            context,
+            ref sink);
+
+        Assert.Equal(["Lookup"], sink.ReferenceSheets);
     }
 
     [Fact]
@@ -275,7 +342,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -307,7 +374,7 @@ public sealed class XlsbWorksheetScannerTests
 
         XlsbWorksheetScanner.ScanSheet(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -325,6 +392,66 @@ public sealed class XlsbWorksheetScannerTests
         Assert.Equal(1, sink.HyperlinkCount);
     }
 
+    [Fact]
+    public void ScanSheet_EmitsDetailedDataValidation()
+    {
+        const uint flags = 3u | (1u << 4) | (1u << 8) | (1u << 9) | (1u << 18) | (1u << 19);
+        byte[] formula1 = XlsbTestRecords.CellFormula(XlsbTestRecords.FormulaRef(row: 1, column: 4));
+        byte[] formula2 = XlsbTestRecords.CellFormula();
+        using var payload = new MemoryStream();
+        Span<byte> buf4 = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(buf4, flags);
+        payload.Write(buf4);
+        payload.Write(XlsbTestRecords.NullableWideString("Invalid"));
+        payload.Write(XlsbTestRecords.NullableWideString("Choose a listed value"));
+        payload.Write(XlsbTestRecords.NullableWideString("Selection"));
+        payload.Write(XlsbTestRecords.NullableWideString("Pick one"));
+        payload.Write(formula1);
+        payload.Write(formula2);
+        BinaryPrimitives.WriteUInt32LittleEndian(buf4, 1u);
+        payload.Write(buf4);
+        payload.Write(CreateRangePayload(firstRow: 2, firstColumn: 1, lastRow: 4, lastColumn: 1));
+
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.EndSheetData(),
+            XlsbTestRecords.Record(XlsbRecordType.BrtDVal, payload.ToArray()));
+        var sink = new CollectingSink(needsDecodedValue: false, tracksFormulas: false);
+
+        XlsbWorksheetScanner.ScanSheet(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            ref sink);
+
+        DataValidationInfo validation = Assert.Single(sink.DataValidations);
+        Assert.Equal(DataValidationType.List, validation.Type);
+        Assert.Equal("A2:A4", validation.SequenceOfReferences);
+        Assert.Equal("$D$1", validation.Formula1);
+        Assert.Null(validation.Operator);
+        Assert.True(validation.AllowBlank);
+        Assert.True(validation.ShowDropDown);
+        Assert.True(validation.ShowInputMessage);
+        Assert.True(validation.ShowErrorMessage);
+        Assert.Equal(DataValidationErrorStyle.Warning, validation.ErrorStyle);
+        Assert.Equal("Invalid", validation.ErrorTitle);
+        Assert.Equal("Choose a listed value", validation.ErrorMessage);
+        Assert.Equal("Selection", validation.PromptTitle);
+        Assert.Equal("Pick one", validation.PromptMessage);
+    }
+
+    private static byte[] CreateRangePayload(int firstRow, int firstColumn, int lastRow, int lastColumn)
+    {
+        byte[] payload = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), firstRow - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), lastRow - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), firstColumn - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(12, 4), lastColumn - 1);
+        return payload;
+    }
+
     private sealed record CellEvent(
         int Column,
         CellDataKind Kind,
@@ -339,16 +466,23 @@ public sealed class XlsbWorksheetScannerTests
     {
         private readonly bool _needsDecodedValue;
         private readonly bool _tracksFormulas;
+        private readonly bool _tracksFormulaReferences;
 
-        internal CollectingSink(bool needsDecodedValue, bool tracksFormulas)
+        internal CollectingSink(
+            bool needsDecodedValue,
+            bool tracksFormulas,
+            bool tracksFormulaReferences = false)
         {
             _needsDecodedValue = needsDecodedValue;
             _tracksFormulas = tracksFormulas;
+            _tracksFormulaReferences = tracksFormulaReferences;
             Rows = [];
             Cells = [];
             Formulas = [];
             Events = [];
             MergedRegions = [];
+            DataValidations = [];
+            ReferenceSheets = [];
             Dimension = null;
             ConditionalFormattingCount = 0;
             DataValidationCount = 0;
@@ -358,11 +492,14 @@ public sealed class XlsbWorksheetScannerTests
 
         public bool NeedsDecodedValue => _needsDecodedValue;
         public bool TracksFormulas => _tracksFormulas;
+        public bool TracksFormulaReferences => _tracksFormulaReferences;
         internal List<int> Rows { get; }
         internal List<CellEvent> Cells { get; }
         internal List<FormulaEvent> Formulas { get; }
         internal List<string> Events { get; }
         internal List<MergedRegion> MergedRegions { get; }
+        internal List<DataValidationInfo> DataValidations { get; }
+        internal List<string> ReferenceSheets { get; }
         internal ExcelRange? Dimension { get; private set; }
         internal int ConditionalFormattingCount { get; private set; }
         internal int DataValidationCount { get; private set; }
@@ -390,9 +527,26 @@ public sealed class XlsbWorksheetScannerTests
             Events.Add($"formula:{column}");
         }
 
+        public void OnFormulaReference(in FormulaReference reference)
+        {
+            if (reference.Sheet is not null)
+            {
+                ReferenceSheets.Add(reference.Sheet);
+            }
+        }
+        public void OnSharedFormulaDefinition(int sharedIndex) { }
+        public void OnSharedFormulaReference(int sharedIndex) { }
+
         public void OnMergeCell(in MergedRegion region) { MergedRegions.Add(region); }
         public void OnConditionalFormatting() { ConditionalFormattingCount++; }
-        public void OnDataValidation() { DataValidationCount++; }
+        public void OnDataValidation(DataValidationInfo? validation)
+        {
+            DataValidationCount++;
+            if (validation is not null)
+            {
+                DataValidations.Add(validation);
+            }
+        }
         public void OnHyperlink() { HyperlinkCount++; }
         public void OnEnd() { Ended = true; }
     }

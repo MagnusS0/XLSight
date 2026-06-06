@@ -20,7 +20,8 @@ internal static class XlsbWorksheetScanner
             styles,
             isDate1904,
             mode,
-            range);
+            range,
+            formulaContext: null);
 
     internal static IEnumerable<ExcelRow> ScanRows(
         Stream worksheetStream,
@@ -28,11 +29,20 @@ internal static class XlsbWorksheetScanner
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
-        ExcelRange range)
+        ExcelRange range,
+        XlsbFormulaContext? formulaContext = null)
     {
         var cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
         using var iterator = new XlsbRecordIterator(worksheetStream);
-        using var scanner = new XlsbRowScanner(iterator, sharedStrings, styles, isDate1904, mode, range, cellPool);
+        using var scanner = new XlsbRowScanner(
+            iterator,
+            sharedStrings,
+            styles,
+            isDate1904,
+            mode,
+            range,
+            cellPool,
+            formulaContext);
 
         try
         {
@@ -63,7 +73,8 @@ internal static class XlsbWorksheetScanner
             styles,
             isDate1904,
             mode,
-            range);
+            range,
+            formulaContext: null);
 
     internal static XlsbSheetCursor OpenCursor(
         Stream worksheetStream,
@@ -71,12 +82,13 @@ internal static class XlsbWorksheetScanner
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
-        ExcelRange range)
-        => new(worksheetStream, sharedStrings, styles, isDate1904, mode, range);
+        ExcelRange range,
+        XlsbFormulaContext? formulaContext = null)
+        => new(worksheetStream, sharedStrings, styles, isDate1904, mode, range, formulaContext);
 
     internal static void ScanSheet<TSink>(
         Stream worksheetStream,
-        XlsbSharedStringTable sharedStrings,
+        Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
@@ -85,11 +97,12 @@ internal static class XlsbWorksheetScanner
         where TSink : struct, IByteSheetSink
         => ScanSheet(
             worksheetStream,
-            new Lazy<XlsbSharedStringTable>(() => sharedStrings, LazyThreadSafetyMode.PublicationOnly),
+            sharedStrings,
             styles,
             isDate1904,
             mode,
             range,
+            formulaContext: null,
             ref sink);
 
     internal static void ScanSheet<TSink>(
@@ -99,6 +112,7 @@ internal static class XlsbWorksheetScanner
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
+        XlsbFormulaContext? formulaContext,
         ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
@@ -119,7 +133,7 @@ internal static class XlsbWorksheetScanner
                 continue;
             }
 
-            if (TryHandleExactMetadata(record, shouldScanExactMetadata, ref sink))
+            if (TryHandleExactMetadata(record, shouldScanExactMetadata, formulaContext, ref sink))
             {
                 continue;
             }
@@ -130,7 +144,16 @@ internal static class XlsbWorksheetScanner
                 continue;
             }
 
-            if (!TryPushCell(record, currentRowIndex, sharedStrings, styles, isDate1904, mode, range, ref sink))
+            if (!TryPushCell(
+                    record,
+                    currentRowIndex,
+                    sharedStrings,
+                    styles,
+                    isDate1904,
+                    mode,
+                    range,
+                    formulaContext,
+                    ref sink))
             {
                 break;
             }
@@ -142,6 +165,7 @@ internal static class XlsbWorksheetScanner
     private static bool TryHandleExactMetadata<TSink>(
         XlsbRecord record,
         bool includePostSheetData,
+        XlsbFormulaContext? formulaContext,
         ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
@@ -175,8 +199,11 @@ internal static class XlsbWorksheetScanner
                 return true;
 
             case XlsbRecordType.BrtDVal when includePostSheetData:
+                sink.OnDataValidation(XlsbDataValidationParser.Parse(record.Payload, formulaContext));
+                return true;
+
             case XlsbRecordType.BrtDVal14 when includePostSheetData:
-                sink.OnDataValidation();
+                sink.OnDataValidation(null);
                 return true;
 
             case XlsbRecordType.BrtHLink when includePostSheetData:
@@ -232,6 +259,7 @@ internal static class XlsbWorksheetScanner
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
+        XlsbFormulaContext? formulaContext,
         ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
@@ -247,12 +275,14 @@ internal static class XlsbWorksheetScanner
                 isDate1904,
                 mode,
                 sink.NeedsDecodedValue,
+                formulaContext,
                 out int columnIndex,
                 out CellDataKind kind,
                 out int styleIndex,
                 out ExcelCellValue value,
                 out int rawIndex,
-                out bool isFormula))
+                out bool isFormula,
+                out ReadOnlySpan<byte> formulaSpan))
         {
             return true;
         }
@@ -265,6 +295,11 @@ internal static class XlsbWorksheetScanner
         if (isFormula && sink.TracksFormulas)
         {
             sink.OnFormula(columnIndex, isArray: false);
+        }
+
+        if (isFormula && sink.TracksFormulaReferences && formulaContext is not null && !formulaSpan.IsEmpty)
+        {
+            XlsbFormulaDecoder.EmitReferences(formulaSpan, formulaContext, ref sink);
         }
 
         return sink.OnCell(columnIndex, kind, styleIndex, value, rawIndex);

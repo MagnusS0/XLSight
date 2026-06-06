@@ -93,7 +93,7 @@ internal static class Utf8CellDecoder
         return ExcelCellValue.FromNumber(d);
     }
 
-    private static string UnescapeXml(string value)
+    internal static string UnescapeXml(string value)
     {
         if (!value.Contains('&', StringComparison.Ordinal))
         {
