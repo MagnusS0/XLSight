@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- XML docs — required for NuGet consumers and enables IDE0005 on build -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- AOT and trimming compatibility — enforced from day one -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>XLSight.Query</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Magnus</Authors>
+    <Description>Streaming single-pass query layer for XLSight: filter, group-by, and aggregate over Excel (.xlsx, .xlsm, .xlsb) ranges with bounded memory. Zero extra dependencies, AOT-compatible.</Description>
+    <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;query;aggregate;groupby;streaming;dotnet</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/MagnusS0/XLSight</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MagnusS0/XLSight</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XLSight\XLSight.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
