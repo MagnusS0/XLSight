@@ -29,6 +29,7 @@ internal partial struct AnalysisSink : IByteSheetSink
     // ── Configuration ─────────────────────────────────────────────────────────────
     private readonly ISharedStringSource _sst;
     private readonly AnalysisLevel _level;
+    private readonly int _distinctValuesCap;
 
     // ── Column tracking ───────────────────────────────────────────────────────────
     private Dictionary<int, ColumnState> _columnStates;
@@ -57,11 +58,12 @@ internal partial struct AnalysisSink : IByteSheetSink
     private List<DataValidationInfo>? _dataValidations;
     private readonly string _sheetName;
 
-    public AnalysisSink(ISharedStringSource sst, string sheetName, AnalysisLevel level = AnalysisLevel.Full)
+    public AnalysisSink(ISharedStringSource sst, string sheetName, AnalysisLevel level = AnalysisLevel.Full, AnalysisOptions? options = null)
     {
         _sst = sst;
         _sheetName = sheetName;
         _level = level;
+        _distinctValuesCap = (options ?? AnalysisOptions.Default).DistinctValuesCap;
         _minValueRow = int.MaxValue;
         _maxValueRow = int.MinValue;
         _minValueCol = int.MaxValue;
@@ -293,7 +295,7 @@ internal partial struct AnalysisSink : IByteSheetSink
             ArrayFormulaCount = _arrayFormulaCount,
             FormulaColumns = BuildFormulaColumns(),
             FormulaDependencies = BuildFormulaDependencies(),
-            Columns = ColumnProfiler.BuildProfiles(_columnStates, headersByColumn, _formulaCountByColumn),
+            Columns = ColumnProfiler.BuildProfiles(_columnStates, headersByColumn, _sst, _distinctValuesCap, _formulaCountByColumn),
         };
     }
 

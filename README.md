@@ -247,8 +247,9 @@ if (project is not null)
 
 `SheetInfo.Columns` gives a per-column profile available at `AnalysisLevel.Observed` and above.
 Each `ColumnProfile` captures the dominant cell type, inferred header, non-empty count,
-an estimated distinct-value count, and the numeric min/max — everything an agent or pipeline
-needs to understand a sheet's schema without reading the data itself.
+an estimated distinct-value count, the exact distinct values for low-cardinality columns,
+and the numeric min/max — everything an agent or pipeline needs to understand a sheet's
+schema without reading the data itself.
 
 ```csharp
 SheetInfo sheet = workbook.AnalyzeSheet("Data");
@@ -260,10 +261,22 @@ if (sheet.Columns is { } columns)
         string header = col.InferredHeader ?? $"Col {col.ColumnIndex}";
         Console.WriteLine($"{header}: {col.DominantType}, {col.NonEmptyCount} rows, ~{col.DistinctValueEstimate} distinct");
 
+        if (col.DistinctValues is { } values)
+            Console.WriteLine($"  values: {string.Join(", ", values)}");
+
         if (col.MinNumericValue.HasValue)
             Console.WriteLine($"  range [{col.MinNumericValue} – {col.MaxNumericValue}]");
     }
 }
+```
+
+`ColumnProfile.DistinctValues` is populated when a column's distinct count falls within
+`AnalysisOptions.DistinctValuesCap` (default 32). High-cardinality columns leave it `null`
+— use `DistinctValueEstimate` instead. Set `DistinctValuesCap = 0` to disable the feature entirely.
+
+```csharp
+var options = new AnalysisOptions { DistinctValuesCap = 50 };
+SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
 ```
 
 ### Data validations

@@ -12,6 +12,8 @@ internal static class ColumnProfiler
     internal static IReadOnlyList<ColumnProfile> BuildProfiles(
         Dictionary<int, ColumnState> columnStates,
         Dictionary<int, string> headersByColumn,
+        ISharedStringSource sst,
+        int distinctValuesCap,
         Dictionary<int, int>? formulaCountsByColumn = null)
     {
         int count = columnStates.Count;
@@ -32,14 +34,20 @@ internal static class ColumnProfiler
             int col = keys[i];
             headersByColumn.TryGetValue(col, out string? header);
             bool hasFormulas = formulaCountsByColumn?.ContainsKey(col) ?? false;
-            profiles.Add(BuildProfile(col, columnStates[col], header, hasFormulas));
+            profiles.Add(BuildProfile(col, columnStates[col], header, hasFormulas, sst, distinctValuesCap));
         }
 
         ArrayPool<int>.Shared.Return(keys);
         return profiles;
     }
 
-    private static ColumnProfile BuildProfile(int columnIndex, ColumnState state, string? header, bool hasFormulas)
+    private static ColumnProfile BuildProfile(
+        int columnIndex,
+        ColumnState state,
+        string? header,
+        bool hasFormulas,
+        ISharedStringSource sst,
+        int distinctValuesCap)
     {
         var dominantType = ResolveDominantType(state);
 
@@ -54,6 +62,7 @@ internal static class ColumnProfiler
             DominantType = dominantType,
             NonEmptyCount = state.NonEmptyCount,
             DistinctValueEstimate = state.DistinctCount,
+            DistinctValues = state.BuildDistinctValues(distinctValuesCap, sst),
             MinNumericValue = minNum,
             MaxNumericValue = maxNum,
             MaxTextLength = maxText,

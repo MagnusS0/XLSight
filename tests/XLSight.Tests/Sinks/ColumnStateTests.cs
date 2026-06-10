@@ -267,4 +267,113 @@ public sealed class ColumnStateTests
         // Only bit 1 set → 1 distinct boolean
         Assert.Equal(1, col.DistinctCount);
     }
+
+    // ── BuildDistinctValues ───────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildDistinctValues_SharedStrings_ResolvesAndSortsOrdinal()
+    {
+        var sst = SstBuilder.Make("EMEA", "APAC", "AMER");
+        var col = new ColumnState();
+        col.RecordSharedString(0, sst);
+        col.RecordSharedString(1, sst);
+        col.RecordSharedString(2, sst);
+        col.RecordSharedString(1, sst);
+
+        string[]? values = col.BuildDistinctValues(32, sst);
+
+        Assert.NotNull(values);
+        Assert.Equal(["AMER", "APAC", "EMEA"], values);
+    }
+
+    [Fact]
+    public void BuildDistinctValues_SstAndInlineCopiesOfSameText_Deduplicated()
+    {
+        var sst = SstBuilder.Make("EMEA");
+        var col = new ColumnState();
+        col.RecordSharedString(0, sst);
+        col.RecordValue(ExcelCellValue.FromText("EMEA"));
+        col.RecordValue(ExcelCellValue.FromText("APAC"));
+
+        string[]? values = col.BuildDistinctValues(32, sst);
+
+        Assert.NotNull(values);
+        Assert.Equal(["APAC", "EMEA"], values);
+    }
+
+    [Fact]
+    public void BuildDistinctValues_MixedKinds_GroupsTextNumberDateBoolean()
+    {
+        var sst = SstBuilder.Make("label");
+        var col = new ColumnState();
+        col.RecordValue(ExcelCellValue.FromBoolean(true));
+        col.RecordValue(ExcelCellValue.FromNumber(7.5));
+        col.RecordValue(ExcelCellValue.FromNumber(-2.0));
+        col.RecordValue(ExcelCellValue.FromDate(new DateTime(2024, 3, 1)));
+        col.RecordSharedString(0, sst);
+
+        string[]? values = col.BuildDistinctValues(32, sst);
+
+        Assert.NotNull(values);
+        Assert.Equal(["label", "-2", "7.5", "2024-03-01", "TRUE"], values);
+    }
+
+    [Fact]
+    public void BuildDistinctValues_DateWithTimeComponent_KeepsTimeInFormat()
+    {
+        var sst = SstBuilder.Make();
+        var col = new ColumnState();
+        col.RecordValue(ExcelCellValue.FromDate(new DateTime(2024, 3, 1, 14, 30, 0)));
+
+        string[]? values = col.BuildDistinctValues(32, sst);
+
+        Assert.NotNull(values);
+        Assert.Equal(["2024-03-01T14:30:00"], values);
+    }
+
+    [Fact]
+    public void BuildDistinctValues_CountAboveCap_ReturnsNull()
+    {
+        var sst = SstBuilder.Make();
+        var col = new ColumnState();
+        for (int i = 0; i < 33; i++)
+        {
+            col.RecordValue(ExcelCellValue.FromNumber(i));
+        }
+
+        Assert.Null(col.BuildDistinctValues(32, sst));
+    }
+
+    [Fact]
+    public void BuildDistinctValues_AfterTrackingCapLatched_ReturnsNull()
+    {
+        var sst = SstBuilder.Make();
+        var col = new ColumnState();
+        for (int i = 0; i < 1000; i++)
+        {
+            col.RecordValue(ExcelCellValue.FromNumber(i));
+        }
+
+        // Even a huge cap cannot recover values once tracking stopped.
+        Assert.Null(col.BuildDistinctValues(int.MaxValue, sst));
+    }
+
+    [Fact]
+    public void BuildDistinctValues_ZeroCap_ReturnsNull()
+    {
+        var sst = SstBuilder.Make();
+        var col = new ColumnState();
+        col.RecordValue(ExcelCellValue.FromNumber(1.0));
+
+        Assert.Null(col.BuildDistinctValues(0, sst));
+    }
+
+    [Fact]
+    public void BuildDistinctValues_EmptyColumn_ReturnsNull()
+    {
+        var sst = SstBuilder.Make();
+        var col = new ColumnState();
+
+        Assert.Null(col.BuildDistinctValues(32, sst));
+    }
 }

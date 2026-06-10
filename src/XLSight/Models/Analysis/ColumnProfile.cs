@@ -18,6 +18,14 @@ public sealed class ColumnProfile
     /// <summary>Gets an estimate of the number of distinct values in this column.</summary>
     public required int DistinctValueEstimate { get; init; }
 
+    /// <summary>
+    /// Gets the exact distinct values in this column when their count does not exceed
+    /// <see cref="AnalysisOptions.DistinctValuesCap"/>, or null for higher-cardinality columns
+    /// (use <see cref="DistinctValueEstimate"/> instead). Values are grouped by type
+    /// (text, number, date, boolean) and sorted within each group.
+    /// </summary>
+    public IReadOnlyList<string>? DistinctValues { get; init; }
+
     /// <summary>Gets the minimum numeric value found in this column, or null if no numeric cells exist.</summary>
     public required double? MinNumericValue { get; init; }
 

@@ -525,11 +525,13 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// Pass <c>-1</c> (default) to let the library choose automatically based on CPU count.
     /// Only applies when the workbook was opened from a file path.
     /// </param>
+    /// <param name="options">Analysis tuning options, or <see langword="null"/> for defaults.</param>
     /// <returns>A workbook info object describing all sheets, named ranges, and workbook properties.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     public WorkbookInfo Analyze(
         AnalysisLevel level = AnalysisLevel.Full,
-        int maxDegreeOfParallelism = -1)
+        int maxDegreeOfParallelism = -1,
+        AnalysisOptions? options = null)
     {
         ThrowIfDisposed();
         EnterOperation();
@@ -537,7 +539,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("level", level.ToString());
         try
         {
-            return _engine.Analyze(level, maxDegreeOfParallelism);
+            return _engine.Analyze(level, maxDegreeOfParallelism, options);
         }
         finally
         {
@@ -560,12 +562,14 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// Pass <c>-1</c> (default) to let the library choose automatically. Only applies when the
     /// workbook was opened from a file path.
     /// </param>
+    /// <param name="options">Analysis tuning options, or <see langword="null"/> for defaults.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a workbook info object.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     public async Task<WorkbookInfo> AnalyzeAsync(
         AnalysisLevel level = AnalysisLevel.Full,
         int maxDegreeOfParallelism = -1,
+        AnalysisOptions? options = null,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -574,7 +578,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("level", level.ToString());
         try
         {
-            return await _engine.AnalyzeAsync(level, maxDegreeOfParallelism, ct).ConfigureAwait(false);
+            return await _engine.AnalyzeAsync(level, maxDegreeOfParallelism, options, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -585,13 +589,15 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <summary>Analyzes a single sheet and returns its structural information.</summary>
     /// <param name="sheet">The sheet name.</param>
     /// <param name="level">The analysis depth to execute.</param>
+    /// <param name="options">Analysis tuning options, or <see langword="null"/> for defaults.</param>
     /// <returns>A sheet info object describing columns, merged regions, tables, and inferred headers.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     public SheetInfo AnalyzeSheet(
         string sheet,
-        AnalysisLevel level = AnalysisLevel.Full)
+        AnalysisLevel level = AnalysisLevel.Full,
+        AnalysisOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         ThrowIfDisposed();
@@ -602,7 +608,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("level", level.ToString());
         try
         {
-            return _engine.AnalyzeSheet(sheet, level);
+            return _engine.AnalyzeSheet(sheet, level, options);
         }
         finally
         {
@@ -619,11 +625,12 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     /// <exception cref="ObjectDisposedException">Thrown when this instance has been disposed.</exception>
     /// <exception cref="SheetNotFoundException">Thrown when the sheet does not exist.</exception>
     public Task<SheetInfo> AnalyzeSheetAsync(string sheet, CancellationToken ct)
-        => AnalyzeSheetAsync(sheet, AnalysisLevel.Full, ct);
+        => AnalyzeSheetAsync(sheet, AnalysisLevel.Full, options: null, ct);
 
     /// <summary>Analyzes a single sheet asynchronously and returns its structural information.</summary>
     /// <param name="sheet">The sheet name.</param>
     /// <param name="level">The analysis depth to execute.</param>
+    /// <param name="options">Analysis tuning options, or <see langword="null"/> for defaults.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>A task that returns a sheet info object.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="sheet"/> is null.</exception>
@@ -632,6 +639,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     public async Task<SheetInfo> AnalyzeSheetAsync(
         string sheet,
         AnalysisLevel level = AnalysisLevel.Full,
+        AnalysisOptions? options = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sheet);
@@ -643,7 +651,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         activity?.SetTag("level", level.ToString());
         try
         {
-            return await _engine.AnalyzeSheetAsync(sheet, level, ct).ConfigureAwait(false);
+            return await _engine.AnalyzeSheetAsync(sheet, level, options, ct).ConfigureAwait(false);
         }
         finally
         {

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace XLSight.Internal.Sinks;
 
 /// <summary>Per-column accumulator used by <see cref="AnalysisSink"/>.</summary>
@@ -150,6 +152,96 @@ internal sealed class ColumnState
         if (DistinctInlineStrings.Count >= DistinctCap)
         {
             LatchEstimateAndStopTracking();
+        }
+    }
+
+    /// <summary>
+    /// Materializes the distinct values as display strings when tracking is still exact and the
+    /// combined count is within <paramref name="cap"/>. Returns null when the column was capped,
+    /// is empty, or exceeds the cap. Values are grouped by kind (text, number, date, boolean)
+    /// and sorted within each kind for deterministic output.
+    /// </summary>
+    internal string[]? BuildDistinctValues(int cap, ISharedStringSource sst)
+    {
+        if (_capped || cap <= 0)
+        {
+            return null;
+        }
+
+        int count = DistinctCount;
+        if (count == 0 || count > cap)
+        {
+            return null;
+        }
+
+        var values = new List<string>(count);
+        AddDistinctTexts(values, sst);
+        AddDistinctNumbers(values);
+        AddDistinctDates(values);
+
+        if (BooleanCount > 0)
+        {
+            if ((BooleanSeen & 1) != 0) { values.Add("FALSE"); }
+            if ((BooleanSeen & 2) != 0) { values.Add("TRUE"); }
+        }
+
+        return [.. values];
+    }
+
+    private void AddDistinctTexts(List<string> values, ISharedStringSource sst)
+    {
+        if (DistinctSstIds is null && DistinctInlineStrings is null)
+        {
+            return;
+        }
+
+        // SST-resolved and inline copies of the same text must not appear twice.
+        var texts = new SortedSet<string>(StringComparer.Ordinal);
+        if (DistinctSstIds is not null)
+        {
+            foreach (int id in DistinctSstIds) { texts.Add(sst.GetString(id)); }
+        }
+
+        if (DistinctInlineStrings is not null)
+        {
+            foreach (string text in DistinctInlineStrings) { texts.Add(text); }
+        }
+
+        values.AddRange(texts);
+    }
+
+    private void AddDistinctNumbers(List<string> values)
+    {
+        if (DistinctNumbers is null)
+        {
+            return;
+        }
+
+        var numbers = new double[DistinctNumbers.Count];
+        int i = 0;
+        foreach (long bits in DistinctNumbers) { numbers[i++] = BitConverter.Int64BitsToDouble(bits); }
+        Array.Sort(numbers);
+        foreach (double number in numbers)
+        {
+            values.Add(number.ToString("G", CultureInfo.InvariantCulture));
+        }
+    }
+
+    private void AddDistinctDates(List<string> values)
+    {
+        if (DistinctDates is null)
+        {
+            return;
+        }
+
+        long[] ticks = [.. DistinctDates];
+        Array.Sort(ticks);
+        foreach (long t in ticks)
+        {
+            var date = new DateTime(t);
+            values.Add(date.ToString(
+                date.TimeOfDay == TimeSpan.Zero ? "yyyy-MM-dd" : "yyyy-MM-ddTHH:mm:ss",
+                CultureInfo.InvariantCulture));
         }
     }
 

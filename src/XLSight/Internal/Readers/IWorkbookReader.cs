@@ -19,10 +19,10 @@ internal interface IWorkbookReader : IDisposable, IAsyncDisposable
     public Task<ExcelCellValue> ReadCellAsync(string sheetName, ExcelAddress address, ReadMode mode, CancellationToken ct);
     public Task<RangeResult> ReadRangeAsync(string sheetName, ExcelRange range, ReadMode mode, CancellationToken ct);
 
-    public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1);
-    public SheetInfo AnalyzeSheet(string sheetName, AnalysisLevel level);
-    public Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, CancellationToken ct = default);
-    public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, CancellationToken ct);
+    public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1, AnalysisOptions? options = null);
+    public SheetInfo AnalyzeSheet(string sheetName, AnalysisLevel level, AnalysisOptions? options = null);
+    public Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, AnalysisOptions? options = null, CancellationToken ct = default);
+    public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, AnalysisOptions? options, CancellationToken ct);
 
     public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode);
 }

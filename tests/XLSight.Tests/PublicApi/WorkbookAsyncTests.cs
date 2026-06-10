@@ -210,7 +210,7 @@ public sealed class WorkbookAsyncTests
         using var ms = CreateWorkbook();
         await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(ms, TestContext.Current.CancellationToken);
 
-        var info = await workbook.AnalyzeSheetAsync("Sheet1", AnalysisLevel.Exact, TestContext.Current.CancellationToken);
+        var info = await workbook.AnalyzeSheetAsync("Sheet1", AnalysisLevel.Exact, options: null, TestContext.Current.CancellationToken);
 
         Assert.Equal(AnalysisLevel.Exact, info.Level);
         Assert.False(info.HasObserved);

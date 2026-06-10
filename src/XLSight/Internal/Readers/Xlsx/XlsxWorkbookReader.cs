@@ -221,15 +221,15 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         return new OwnedRowCursor(sheetStream, cursor);
     }
 
-    public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1)
+    public WorkbookInfo Analyze(AnalysisLevel level, int maxDegreeOfParallelism = -1, AnalysisOptions? options = null)
     {
         ThrowIfDisposed();
 
         AnalyzerMetadata analysisMetadata = _analyzerMetadata.Value;
         int dop = ResolveSheetDop(maxDegreeOfParallelism);
         var sheets = _package.IsFileBacked && dop > 1
-            ? AnalyzeSheetsParallel(analysisMetadata, level, dop)
-            : _metadata.Sheets.Select((s, i) => AnalyzeSheetCore(s, i, analysisMetadata, level)).ToList();
+            ? AnalyzeSheetsParallel(analysisMetadata, level, options, dop)
+            : _metadata.Sheets.Select((s, i) => AnalyzeSheetCore(s, i, analysisMetadata, level, options)).ToList();
 
         return new WorkbookInfo
         {
@@ -240,12 +240,12 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         };
     }
 
-    private List<SheetInfo> AnalyzeSheetsParallel(AnalyzerMetadata analysisMetadata, AnalysisLevel level, int dop)
+    private List<SheetInfo> AnalyzeSheetsParallel(AnalyzerMetadata analysisMetadata, AnalysisLevel level, AnalysisOptions? options, int dop)
     {
         var results = new SheetInfo[_metadata.Sheets.Count];
         Parallel.For(0, _metadata.Sheets.Count,
             new ParallelOptions { MaxDegreeOfParallelism = dop },
-            i => results[i] = AnalyzeSheetCore(_metadata.Sheets[i], i, analysisMetadata, level));
+            i => results[i] = AnalyzeSheetCore(_metadata.Sheets[i], i, analysisMetadata, level, options));
         return [.. results];
     }
 
@@ -257,17 +257,17 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         return Math.Min(requested, count);
     }
 
-    public SheetInfo AnalyzeSheet(string sheetName, AnalysisLevel level)
+    public SheetInfo AnalyzeSheet(string sheetName, AnalysisLevel level, AnalysisOptions? options = null)
     {
         ThrowIfDisposed();
 
         var (sheet, sheetIndex) = FindSheetWithIndex(sheetName);
         AnalyzerMetadata analysisMetadata = _analyzerMetadata.Value;
 
-        return AnalyzeSheetCore(sheet, sheetIndex, analysisMetadata, level);
+        return AnalyzeSheetCore(sheet, sheetIndex, analysisMetadata, level, options);
     }
 
-    public async Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, CancellationToken ct = default)
+    public async Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, AnalysisOptions? options = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
@@ -278,7 +278,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
         List<SheetInfo> sheets;
         if (_package.IsFileBacked && dop > 1)
         {
-            sheets = await AnalyzeSheetsParallelAsync(analysisMetadata, level, dop, ct).ConfigureAwait(false);
+            sheets = await AnalyzeSheetsParallelAsync(analysisMetadata, level, options, dop, ct).ConfigureAwait(false);
         }
         else
         {
@@ -286,7 +286,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             foreach (var (sheet, i) in _metadata.Sheets.Select((s, i) => (s, i)))
             {
                 ct.ThrowIfCancellationRequested();
-                sheets.Add(await Task.Run(() => AnalyzeSheetCore(sheet, i, analysisMetadata, level), ct).ConfigureAwait(false));
+                sheets.Add(await Task.Run(() => AnalyzeSheetCore(sheet, i, analysisMetadata, level, options), ct).ConfigureAwait(false));
             }
         }
 
@@ -300,7 +300,7 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
     }
 
     private async Task<List<SheetInfo>> AnalyzeSheetsParallelAsync(
-        AnalyzerMetadata analysisMetadata, AnalysisLevel level, int dop, CancellationToken ct)
+        AnalyzerMetadata analysisMetadata, AnalysisLevel level, AnalysisOptions? options, int dop, CancellationToken ct)
     {
         var results = new SheetInfo[_metadata.Sheets.Count];
         await Parallel.ForEachAsync(
@@ -309,29 +309,30 @@ internal sealed class XlsxWorkbookReader : IWorkbookReader
             async (i, ct2) =>
             {
                 results[i] = await Task.Run(
-                    () => AnalyzeSheetCore(_metadata.Sheets[i], i, analysisMetadata, level), ct2).ConfigureAwait(false);
+                    () => AnalyzeSheetCore(_metadata.Sheets[i], i, analysisMetadata, level, options), ct2).ConfigureAwait(false);
             }).ConfigureAwait(false);
         return [.. results];
     }
 
-    public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, CancellationToken ct)
+    public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, AnalysisOptions? options, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
         AnalyzerMetadata analysisMetadata = _analyzerMetadata.Value;
         var (sheet, sheetIndex) = FindSheetWithIndex(sheetName);
-        return Task.Run(() => AnalyzeSheetCore(sheet, sheetIndex, analysisMetadata, level), ct);
+        return Task.Run(() => AnalyzeSheetCore(sheet, sheetIndex, analysisMetadata, level, options), ct);
     }
 
     private SheetInfo AnalyzeSheetCore(
         WorkbookMetadata.WorkbookSheetInfo sheet,
         int sheetIndex,
         AnalyzerMetadata analysisMetadata,
-        AnalysisLevel level)
+        AnalysisLevel level,
+        AnalysisOptions? options)
     {
         using var sheetStream = OpenSheetStream(sheet.Path);
-        var sink = new AnalysisSink(_sharedStrings.Value, sheet.Name, level);
+        var sink = new AnalysisSink(_sharedStrings.Value, sheet.Name, level, options);
         XlsxSheetScanner.ScanSheet(sheetStream, _sharedStrings.Value, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }
