@@ -199,7 +199,7 @@ internal sealed class XlsbRowScanner : IDisposable
         => XlsbCellDecoder.TryDecode(
             record,
             rowIndex,
-            GetSharedString,
+            _sharedStrings,
             _styles,
             _isDate1904,
             _mode,
@@ -207,8 +207,6 @@ internal sealed class XlsbRowScanner : IDisposable
             out cellRowIndex,
             out columnIndex,
             out value);
-
-    private string GetSharedString(int index) => _sharedStrings.Value.GetString(index);
 
     private bool IncludeDecodedCell(
         int rowIndex,

@@ -10,7 +10,7 @@ internal static class XlsbCellDecoder
     internal static bool TryDecode(
         XlsbRecord record,
         int currentRowIndex,
-        Func<int, string> getSharedString,
+        Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
@@ -44,7 +44,7 @@ internal static class XlsbCellDecoder
             XlsbRecordType.BrtCellBool => DecodeBool(data),
             XlsbRecordType.BrtCellError => DecodeError(data),
             XlsbRecordType.BrtCellSt => DecodeInlineString(data),
-            XlsbRecordType.BrtCellIsst => DecodeSharedString(data, getSharedString),
+            XlsbRecordType.BrtCellIsst => DecodeSharedString(data, sharedStrings),
             XlsbRecordType.BrtFmlaNum => DecodeFormulaNumber(data, styleIndex, styles, isDate1904),
             XlsbRecordType.BrtFmlaString => DecodeFormulaString(data),
             XlsbRecordType.BrtFmlaBool => DecodeBool(data),
@@ -57,7 +57,7 @@ internal static class XlsbCellDecoder
 
     internal static bool TryDecodeForSink(
         XlsbRecord record,
-        Func<int, string> getSharedString,
+        Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
@@ -98,7 +98,7 @@ internal static class XlsbCellDecoder
             return true;
         }
 
-        return TryApplyRecordValue(record, data, styleIndex, getSharedString, styles, isDate1904, decodeSharedString,
+        return TryApplyRecordValue(record, data, styleIndex, sharedStrings, styles, isDate1904, decodeSharedString,
             out kind, out value, out rawIndex);
     }
 
@@ -106,7 +106,7 @@ internal static class XlsbCellDecoder
         XlsbRecord record,
         ReadOnlySpan<byte> data,
         int styleIndex,
-        Func<int, string> getSharedString,
+        Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         bool decodeSharedString,
@@ -143,7 +143,7 @@ internal static class XlsbCellDecoder
                 return true;
             case XlsbRecordType.BrtCellIsst:
                 kind = CellDataKind.SharedString;
-                return TryDecodeSharedStringForSink(data, getSharedString, decodeSharedString, out value, out rawIndex);
+                return TryDecodeSharedStringForSink(data, sharedStrings, decodeSharedString, out value, out rawIndex);
             case XlsbRecordType.BrtFmlaNum:
                 value = DecodeFormulaNumber(data, styleIndex, styles, isDate1904);
                 return true;
@@ -401,7 +401,7 @@ internal static class XlsbCellDecoder
 
     private static ExcelCellValue DecodeSharedString(
         ReadOnlySpan<byte> data,
-        Func<int, string> getSharedString)
+        Lazy<XlsbSharedStringTable> sharedStrings)
     {
         if (data.Length < 4)
         {
@@ -414,12 +414,12 @@ internal static class XlsbCellDecoder
             return ExcelCellValue.Empty;
         }
 
-        return ExcelCellValue.FromSharedString(getSharedString(index), index);
+        return ExcelCellValue.FromSharedString(sharedStrings.Value.GetString(index), index);
     }
 
     private static bool TryDecodeSharedStringForSink(
         ReadOnlySpan<byte> data,
-        Func<int, string> getSharedString,
+        Lazy<XlsbSharedStringTable> sharedStrings,
         bool decode,
         out ExcelCellValue value,
         out int rawIndex)
@@ -441,7 +441,7 @@ internal static class XlsbCellDecoder
 
         if (decode)
         {
-            value = ExcelCellValue.FromSharedString(getSharedString(rawIndex), rawIndex);
+            value = ExcelCellValue.FromSharedString(sharedStrings.Value.GetString(rawIndex), rawIndex);
         }
 
         return true;

@@ -18,13 +18,16 @@ internal sealed class ColumnState
     // Distinct tracking — typed per-kind to avoid string allocations.
     // SST: integer index (zero-alloc read); Numbers: double bits; Dates: double bits;
     // Booleans: two-bit flags; Errors: int code; Inline strings: string (unavoidable).
-    // Each set is nulled out once it hits DistinctCap and DistinctEstimate is latched.
-    internal HashSet<int>? DistinctSstIds = new();
-    internal HashSet<long>? DistinctNumbers = new();  // BitConverter.DoubleToInt64Bits
-    internal HashSet<long>? DistinctDates = new();    // BitConverter.DoubleToInt64Bits
-    internal HashSet<string>? DistinctInlineStrings = new(StringComparer.Ordinal);
+    // Each set is allocated on first use, and all sets are nulled out once the combined
+    // count hits DistinctCap and DistinctEstimate is latched (_capped distinguishes
+    // "never used" from "capped" so tracking stops permanently after the cap).
+    internal HashSet<int>? DistinctSstIds;
+    internal HashSet<long>? DistinctNumbers;  // BitConverter.DoubleToInt64Bits
+    internal HashSet<long>? DistinctDates;    // BitConverter.DoubleToInt64Bits
+    internal HashSet<string>? DistinctInlineStrings;
     internal byte BooleanSeen;   // bit 0 = false seen, bit 1 = true seen
     internal int DistinctEstimate;
+    private bool _capped;
 
     private const int DistinctCap = 1000;
 
@@ -64,13 +67,12 @@ internal sealed class ColumnState
             MaxTextLength = len;
         }
 
-        if (DistinctSstIds is not null)
+        if (!_capped)
         {
-            DistinctSstIds.Add(sstIndex);
+            (DistinctSstIds ??= []).Add(sstIndex);
             if (DistinctSstIds.Count >= DistinctCap)
             {
-                DistinctEstimate = DistinctCount;
-                NullAllSets();
+                LatchEstimateAndStopTracking();
             }
         }
     }
@@ -133,28 +135,28 @@ internal sealed class ColumnState
 
     private void TrackDistinctLong(ref HashSet<long>? set, long key)
     {
-        if (set is null) { return; }
-        set.Add(key);
+        if (_capped) { return; }
+        (set ??= []).Add(key);
         if (set.Count >= DistinctCap)
         {
-            DistinctEstimate = DistinctCount;
-            NullAllSets();
+            LatchEstimateAndStopTracking();
         }
     }
 
     private void TrackDistinctString(string value)
     {
-        if (DistinctInlineStrings is null) { return; }
-        DistinctInlineStrings.Add(value);
+        if (_capped) { return; }
+        (DistinctInlineStrings ??= new(StringComparer.Ordinal)).Add(value);
         if (DistinctInlineStrings.Count >= DistinctCap)
         {
-            DistinctEstimate = DistinctCount;
-            NullAllSets();
+            LatchEstimateAndStopTracking();
         }
     }
 
-    private void NullAllSets()
+    private void LatchEstimateAndStopTracking()
     {
+        DistinctEstimate = DistinctCount;
+        _capped = true;
         DistinctSstIds = null;
         DistinctNumbers = null;
         DistinctDates = null;
