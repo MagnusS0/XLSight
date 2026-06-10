@@ -270,7 +270,7 @@ internal static class XlsbWorksheetScanner
 
         if (!XlsbCellDecoder.TryDecodeForSink(
                 record,
-                index => sharedStrings.Value.GetString(index),
+                sharedStrings,
                 styles,
                 isDate1904,
                 mode,
