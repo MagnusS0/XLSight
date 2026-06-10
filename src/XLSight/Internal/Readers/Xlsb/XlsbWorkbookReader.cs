@@ -30,7 +30,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
 
     protected override bool HasMacrosCore() => Package.GetEntry("xl/vbaProject.bin") is not null;
 
-    protected override IRowCursor OpenCursorCore(XlsbSheetInfo sheet, ExcelRange range, ReadMode mode)
+    protected override IRowCursor OpenCursorCore(XlsbSheetInfo sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null)
     {
         Stream sheetStream = OpenExclusiveSheetStream(sheet.Path);
         try
@@ -42,7 +42,8 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
                 _metadata.UsesDate1904,
                 mode,
                 range,
-                _metadata.FormulaContext);
+                _metadata.FormulaContext,
+                projection);
             return new OwnedRowCursor(sheetStream, cursor);
         }
         catch

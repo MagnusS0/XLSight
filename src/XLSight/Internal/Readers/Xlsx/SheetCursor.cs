@@ -28,6 +28,7 @@ internal sealed class SheetCursor : IRowCursor
     private readonly bool _isDate1904;
     private readonly ReadMode _mode;
     private readonly ExcelRange _range;
+    private readonly RowProjection? _projection;
     private readonly ExcelCellValue[] _cellPool;
     // Cached once — an instance method group conversion allocates a new delegate per call.
     private readonly Func<bool> _moveNext;
@@ -44,13 +45,15 @@ internal sealed class SheetCursor : IRowCursor
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
-        long seekHint)
+        long seekHint,
+        RowProjection? projection = null)
     {
         _sharedStrings = sharedStrings;
         _styles = styles;
         _isDate1904 = isDate1904;
         _mode = mode;
         _range = range;
+        _projection = projection;
         _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
         _moveNext = MoveNext;
         _buf = new ScanBuffer(entryStream);
@@ -112,7 +115,7 @@ internal sealed class SheetCursor : IRowCursor
 
             if (XlsxSheetScanner.FillRowCells(
                 _buf, rowIndex, _sharedStrings, _styles, _isDate1904, _mode, _range, _cellPool,
-                out int startCol, out int width))
+                out int startCol, out int width, _projection))
             {
                 // ExcelRow wraps the shared pool memory — valid only until next MoveNext().
                 _current = new ExcelRow(rowIndex, _cellPool.AsMemory(0, width), startCol);

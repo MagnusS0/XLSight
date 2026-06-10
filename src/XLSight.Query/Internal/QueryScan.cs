@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using XLSight.Analysis;
+using XLSight.Internal.Readers;
 
 namespace XLSight.Query.Internal;
 
@@ -23,6 +24,7 @@ internal sealed class QueryScan
 
     // ── Bound at the header row ───────────────────────────────────────────────
     private bool _headerBound;
+    private int _boundHeaderRow;
     private string[] _columnNames = [];
     private int[] _columnIndices = [];
     private ResolvedFilter[] _filters = [];
@@ -70,6 +72,49 @@ internal sealed class QueryScan
         _distinctColumn = distinctColumn;
         _limit = limit;
         _maxGroups = maxGroups;
+    }
+
+    // ── Projection support ────────────────────────────────────────────────────
+
+    /// <summary>True once the header row was seen and all column references resolved.</summary>
+    public bool HeaderBound => _headerBound;
+
+    /// <summary>
+    /// Aggregate, grouped, and distinct queries read a fixed set of columns, so the data
+    /// scan can skip materializing every other in-range cell. Row queries return all columns.
+    /// </summary>
+    public bool SupportsProjection => _distinctColumn is not null || _aggregateSpecs.Length > 0;
+
+    /// <summary>The remaining data rows of <paramref name="range"/> after the bound header row, or null when none.</summary>
+    public ExcelRange? DataRangeAfterHeader(ExcelRange range)
+    {
+        if (_boundHeaderRow >= range.BottomRight.Row)
+        {
+            return null;
+        }
+
+        return new ExcelRange(
+            new ExcelAddress(range.TopLeft.Column, _boundHeaderRow + 1),
+            range.BottomRight);
+    }
+
+    /// <summary>The projection covering exactly the columns the query reads.</summary>
+    public RowProjection BuildProjection()
+    {
+        var columns = new List<int>(_filters.Length + _aggregateColumns.Length + 2);
+        foreach (ResolvedFilter filter in _filters)
+        {
+            columns.Add(filter.ColumnIndex);
+        }
+
+        foreach (int column in _aggregateColumns)
+        {
+            if (column >= 1) { columns.Add(column); }
+        }
+
+        if (_groupByColumn is not null) { columns.Add(_groupColumnIndex); }
+        if (_distinctColumn is not null) { columns.Add(_distinctColumnIndex); }
+        return new RowProjection(CollectionsMarshal.AsSpan(columns));
     }
 
     // ── Stats pruning ─────────────────────────────────────────────────────────
@@ -342,6 +387,7 @@ internal sealed class QueryScan
             _distinctColumnIndex = ResolveColumn(_distinctColumn);
         }
 
+        _boundHeaderRow = row.RowIndex;
         _headerBound = true;
     }
 

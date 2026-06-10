@@ -161,14 +161,9 @@ public sealed class SheetQuery
     public QueryResult Execute()
     {
         var scan = CreateScan(distinctColumn: null);
-        if (scan.TryPruneWithStats(_stats))
+        if (!scan.TryPruneWithStats(_stats))
         {
-            return scan.BuildResult();
-        }
-
-        using var reader = _workbook.GetRangeReader(_sheet, _range);
-        while (reader.Read() && scan.ProcessRow(reader.Current))
-        {
+            RunScan(scan);
         }
 
         return scan.BuildResult();
@@ -182,17 +177,9 @@ public sealed class SheetQuery
     public async Task<QueryResult> ExecuteAsync(CancellationToken ct = default)
     {
         var scan = CreateScan(distinctColumn: null);
-        if (scan.TryPruneWithStats(_stats))
+        if (!scan.TryPruneWithStats(_stats))
         {
-            return scan.BuildResult();
-        }
-
-        var reader = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
-        await using (reader.ConfigureAwait(false))
-        {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(reader.Current))
-            {
-            }
+            await RunScanAsync(scan, ct).ConfigureAwait(false);
         }
 
         return scan.BuildResult();
@@ -213,11 +200,7 @@ public sealed class SheetQuery
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(top);
 
         var scan = CreateScan(column);
-        using var reader = _workbook.GetRangeReader(_sheet, _range);
-        while (reader.Read() && scan.ProcessRow(reader.Current))
-        {
-        }
-
+        RunScan(scan);
         return scan.BuildDistinctValues(top);
     }
 
@@ -240,15 +223,83 @@ public sealed class SheetQuery
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(top);
 
         var scan = CreateScan(column);
-        var reader = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
-        await using (reader.ConfigureAwait(false))
+        await RunScanAsync(scan, ct).ConfigureAwait(false);
+        return scan.BuildDistinctValues(top);
+    }
+
+    /// <summary>
+    /// Drives the scan. Aggregate-shaped queries over a bounded range first probe for the
+    /// header row, then re-open the data rows with a column projection so cells the query
+    /// never reads are not materialized (no shared-string resolution, no number parsing).
+    /// Row queries return every column and use a single unprojected pass.
+    /// </summary>
+    private void RunScan(QueryScan scan)
+    {
+        if (scan.SupportsProjection && !_range.IsUnbounded)
         {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(reader.Current))
+            using (var probe = _workbook.GetRangeReader(_sheet, _range))
+            {
+                while (!scan.HeaderBound && probe.Read())
+                {
+                    scan.ProcessRow(probe.Current);
+                }
+            }
+
+            if (!scan.HeaderBound || scan.DataRangeAfterHeader(_range) is not { } dataRange)
+            {
+                return;
+            }
+
+            using var reader = _workbook.GetRangeReader(_sheet, dataRange, ReadMode.Values, scan.BuildProjection());
+            while (reader.Read() && scan.ProcessRow(reader.Current))
+            {
+            }
+
+            return;
+        }
+
+        using var fullReader = _workbook.GetRangeReader(_sheet, _range);
+        while (fullReader.Read() && scan.ProcessRow(fullReader.Current))
+        {
+        }
+    }
+
+    private async Task RunScanAsync(QueryScan scan, CancellationToken ct)
+    {
+        if (scan.SupportsProjection && !_range.IsUnbounded)
+        {
+            var probe = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
+            await using (probe.ConfigureAwait(false))
+            {
+                while (!scan.HeaderBound && await probe.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    scan.ProcessRow(probe.Current);
+                }
+            }
+
+            if (!scan.HeaderBound || scan.DataRangeAfterHeader(_range) is not { } dataRange)
+            {
+                return;
+            }
+
+            var reader = _workbook.GetRangeReader(_sheet, dataRange, ReadMode.Values, scan.BuildProjection());
+            await using (reader.ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(reader.Current))
+                {
+                }
+            }
+
+            return;
+        }
+
+        var fullReader = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
+        await using (fullReader.ConfigureAwait(false))
+        {
+            while (await fullReader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(fullReader.Current))
             {
             }
         }
-
-        return scan.BuildDistinctValues(top);
     }
 
     private QueryScan CreateScan(string? distinctColumn)

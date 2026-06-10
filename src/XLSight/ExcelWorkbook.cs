@@ -945,13 +945,21 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
-    private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode)
+    /// <summary>
+    /// Opens a borrowed row reader whose cells outside <paramref name="projection"/> keep
+    /// their position but are never materialized. Used by the XLSight.Query package to skip
+    /// value decoding (chiefly shared-string resolution) for columns a query never reads.
+    /// </summary>
+    internal ExcelSheetReader GetRangeReader(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection)
+        => GetRangeReaderCore(sheet, range, mode, projection);
+
+    private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null)
     {
         ThrowIfDisposed();
         EnterOperation();
         try
         {
-            return new ExcelSheetReader(_engine.OpenCursor(sheet, range, mode), ExitOperation);
+            return new ExcelSheetReader(_engine.OpenCursor(sheet, range, mode, projection), ExitOperation);
         }
         catch
         {

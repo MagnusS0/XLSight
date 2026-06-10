@@ -56,7 +56,8 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
     protected override IRowCursor OpenCursorCore(
         WorkbookMetadata.WorkbookSheetInfo sheet,
         ExcelRange range,
-        ReadMode mode)
+        ReadMode mode,
+        RowProjection? projection = null)
     {
         var sheetStream = OpenSheetStream(sheet.Path);
         var cursor = XlsxSheetScanner.OpenCursor(
@@ -65,7 +66,8 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
             _styles.Value,
             _metadata.UsesDate1904,
             mode,
-            range);
+            range,
+            projection: projection);
         return new OwnedRowCursor(sheetStream, cursor);
     }
 

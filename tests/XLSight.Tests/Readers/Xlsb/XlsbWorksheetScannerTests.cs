@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Readers;
 using XLSight.Internal.Readers.Xlsb;
 using XLSight.Internal.Sinks;
 using XLSight.Analysis;
@@ -234,6 +235,37 @@ public sealed class XlsbWorksheetScannerTests
         Assert.Equal(4, row.CellCount);
         Assert.Equal(2, row.GetCell(2).AsNumber());
         Assert.Equal(5, row.GetCell(5).AsNumber());
+    }
+
+    [Fact]
+    public void Cursor_WithProjection_SkipsValuesButKeepsCellPositions()
+    {
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.Row(1),
+            XlsbTestRecords.SharedString(1, 0),
+            XlsbTestRecords.Real(2, 42),
+            XlsbTestRecords.SharedString(3, 0),
+            XlsbTestRecords.EndSheetData());
+
+        using var cursor = new XlsbSheetCursor(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => new XlsbSharedStringTable(["shared"])),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            formulaContext: null,
+            projection: new RowProjection([2]));
+
+        Assert.True(cursor.MoveNext());
+        ExcelRow row = cursor.Current;
+        // The window still spans columns 1..3, but only the projected column carries a value.
+        Assert.Equal(1, row.StartColumn);
+        Assert.Equal(3, row.CellCount);
+        Assert.True(row.GetCell(1).IsEmpty);
+        Assert.Equal(42.0, row.GetCell(2).AsNumber());
+        Assert.True(row.GetCell(3).IsEmpty);
+        Assert.False(cursor.MoveNext());
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Text;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Readers;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Tests.Infrastructure;
 using Xunit;
@@ -301,5 +302,67 @@ public sealed class SheetCursorTests
         Assert.Equal("Item_1", rows[0].GetCell(1).AsText());
         Assert.Equal("Item_2", rows[1].GetCell(1).AsText());
         Assert.Equal("Item_3", rows[2].GetCell(1).AsText());
+    }
+
+    // ── Column projection ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void MoveNext_WithProjection_SkipsValuesButKeepsCellPositions()
+    {
+        var sst = SstBuilder.Make("alpha", "beta");
+        using var cursor = XlsxSheetScanner.OpenCursor(
+            XmlStream($"""
+                <worksheet xmlns="{Ns}">
+                  <sheetData>
+                    <row r="1">
+                      <c r="A1" t="s"><v>0</v></c>
+                      <c r="B1"><v>42</v></c>
+                      <c r="C1" t="s"><v>1</v></c>
+                    </row>
+                  </sheetData>
+                </worksheet>
+                """),
+            sst,
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            projection: new RowProjection([2]));
+
+        Assert.True(cursor.MoveNext());
+        var row = cursor.Current;
+        // The window still spans A..C, but only the projected column carries a value.
+        Assert.Equal(1, row.StartColumn);
+        Assert.Equal(3, row.CellCount);
+        Assert.True(row.GetCell(1).IsEmpty);
+        Assert.Equal(42.0, row.GetCell(2).AsNumber());
+        Assert.True(row.GetCell(3).IsEmpty);
+    }
+
+    [Fact]
+    public void MoveNext_RowWithOnlyProjectedOutCells_IsStillYielded()
+    {
+        using var cursor = XlsxSheetScanner.OpenCursor(
+            XmlStream($"""
+                <worksheet xmlns="{Ns}">
+                  <sheetData>
+                    <row r="1"><c r="A1"><v>1</v></c></row>
+                    <row r="2"><c r="A2"><v>2</v></c></row>
+                  </sheetData>
+                </worksheet>
+                """),
+            SharedStringTable.Empty,
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            projection: new RowProjection([5]));
+
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(1, cursor.Current.RowIndex);
+        Assert.True(cursor.Current.GetCell(1).IsEmpty);
+        Assert.True(cursor.MoveNext());
+        Assert.Equal(2, cursor.Current.RowIndex);
+        Assert.False(cursor.MoveNext());
     }
 }
