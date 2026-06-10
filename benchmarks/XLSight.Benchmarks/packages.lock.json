@@ -186,6 +186,12 @@
       },
       "xlsight": {
         "type": "Project"
+      },
+      "xlsight.query": {
+        "type": "Project",
+        "dependencies": {
+          "XLSight": "[0.4.0, )"
+        }
       }
     }
   }
