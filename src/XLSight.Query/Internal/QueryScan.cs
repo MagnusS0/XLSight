@@ -30,7 +30,7 @@ internal sealed class QueryScan
     private ResolvedFilter[] _filters = [];
     private int _groupColumnIndex;
     private string _groupColumnName = "";
-    private int[] _aggregateColumns = [];
+    private ResolvedAggregate[] _resolvedAggregates = [];
     private int _distinctColumnIndex;
 
     // ── Accumulation ──────────────────────────────────────────────────────────
@@ -39,6 +39,8 @@ internal sealed class QueryScan
     private bool _pruned;
     private readonly List<QueryResultRow> _rows = [];
     private AggregateAccumulator[]? _globalAggregates;
+    private ExcelCellValue _lastGroupKey;
+    private AggregateAccumulator[]? _lastGroupAccumulators;
     private readonly Dictionary<ExcelCellValue, AggregateAccumulator[]> _groups = [];
     private readonly List<ExcelCellValue> _groupOrder = [];
     private readonly Dictionary<ExcelCellValue, int> _distinctCounts = [];
@@ -47,6 +49,9 @@ internal sealed class QueryScan
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct ResolvedFilter(int ColumnIndex, QueryOp Op, ExcelCellValue Literal);
+
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct ResolvedAggregate(AggregateKind Kind, int ColumnIndex);
 
     private sealed class DirtyColumn
     {
@@ -101,15 +106,15 @@ internal sealed class QueryScan
     /// <summary>The projection covering exactly the columns the query reads.</summary>
     public RowProjection BuildProjection()
     {
-        var columns = new List<int>(_filters.Length + _aggregateColumns.Length + 2);
+        var columns = new List<int>(_filters.Length + _resolvedAggregates.Length + 2);
         foreach (ResolvedFilter filter in _filters)
         {
             columns.Add(filter.ColumnIndex);
         }
 
-        foreach (int column in _aggregateColumns)
+        foreach (ResolvedAggregate aggregate in _resolvedAggregates)
         {
-            if (column >= 1) { columns.Add(column); }
+            if (aggregate.ColumnIndex >= 1) { columns.Add(aggregate.ColumnIndex); }
         }
 
         if (_groupByColumn is not null) { columns.Add(_groupColumnIndex); }
@@ -255,17 +260,27 @@ internal sealed class QueryScan
     private void AccumulateGroup(in ExcelRow row)
     {
         ExcelCellValue key = row.GetCell(_groupColumnIndex);
-        if (!_groups.TryGetValue(key, out AggregateAccumulator[]? accumulators))
+
+        // Group keys in real sheets arrive in runs, so a one-entry memo skips the
+        // dictionary probe (and its full string hash) for consecutive equal keys.
+        AggregateAccumulator[]? accumulators = _lastGroupAccumulators;
+        if (accumulators is null || !key.Equals(_lastGroupKey))
         {
-            if (_groups.Count >= _maxGroups)
+            if (!_groups.TryGetValue(key, out accumulators))
             {
-                throw new TooManyGroupsException(
-                    $"Query exceeded {_maxGroups} groups — narrow the range, add filters, or raise the cap with WithGroupLimit(). For high-cardinality workloads use an external engine.");
+                if (_groups.Count >= _maxGroups)
+                {
+                    throw new TooManyGroupsException(
+                        $"Query exceeded {_maxGroups} groups — narrow the range, add filters, or raise the cap with WithGroupLimit(). For high-cardinality workloads use an external engine.");
+                }
+
+                accumulators = new AggregateAccumulator[_aggregateSpecs.Length];
+                _groups.Add(key, accumulators);
+                _groupOrder.Add(key);
             }
 
-            accumulators = new AggregateAccumulator[_aggregateSpecs.Length];
-            _groups.Add(key, accumulators);
-            _groupOrder.Add(key);
+            _lastGroupKey = key;
+            _lastGroupAccumulators = accumulators;
         }
 
         UpdateAggregates(accumulators, row);
@@ -275,22 +290,22 @@ internal sealed class QueryScan
     {
         for (int i = 0; i < accumulators.Length; i++)
         {
-            AggregateSpec spec = _aggregateSpecs[i];
-            if (spec.Kind == AggregateKind.Count)
+            ResolvedAggregate aggregate = _resolvedAggregates[i];
+            if (aggregate.Kind == AggregateKind.Count)
             {
                 accumulators[i].Count++;
                 continue;
             }
 
-            ref readonly ExcelCellValue cell = ref row.GetCellRef(_aggregateColumns[i]);
+            ref readonly ExcelCellValue cell = ref row.GetCellRef(aggregate.ColumnIndex);
             if (cell.IsEmpty)
             {
                 continue;
             }
 
-            if (!accumulators[i].TryAccumulate(spec.Kind, in cell))
+            if (!accumulators[i].TryAccumulate(aggregate.Kind, in cell))
             {
-                RecordDirty(spec.Column!, row.RowIndex);
+                RecordDirty(_aggregateSpecs[i].Column!, row.RowIndex);
             }
         }
     }
@@ -303,19 +318,14 @@ internal sealed class QueryScan
             return;
         }
 
-        if (_distinctCounts.TryGetValue(cell, out int count))
-        {
-            _distinctCounts[cell] = count + 1;
-            return;
-        }
-
-        if (_distinctCounts.Count >= _maxGroups)
+        ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(_distinctCounts, cell, out bool exists);
+        if (!exists && _distinctCounts.Count > _maxGroups)
         {
             throw new TooManyGroupsException(
                 $"DistinctValues exceeded {_maxGroups} distinct values — narrow the range, add filters, or raise the cap with WithGroupLimit().");
         }
 
-        _distinctCounts.Add(cell, 1);
+        count++;
     }
 
     private void RecordDirty(string column, int rowIndex)
@@ -370,10 +380,13 @@ internal sealed class QueryScan
             _filters[i] = new ResolvedFilter(ResolveColumn(spec.Column), spec.Op, spec.Literal);
         }
 
-        _aggregateColumns = new int[_aggregateSpecs.Length];
+        _resolvedAggregates = new ResolvedAggregate[_aggregateSpecs.Length];
         for (int i = 0; i < _aggregateSpecs.Length; i++)
         {
-            _aggregateColumns[i] = _aggregateSpecs[i].Column is { } column ? ResolveColumn(column) : -1;
+            AggregateSpec spec = _aggregateSpecs[i];
+            _resolvedAggregates[i] = new ResolvedAggregate(
+                spec.Kind,
+                spec.Column is { } column ? ResolveColumn(column) : -1);
         }
 
         if (_groupByColumn is not null)
