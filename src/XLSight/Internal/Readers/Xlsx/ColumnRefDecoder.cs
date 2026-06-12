@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Runtime.CompilerServices;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
@@ -15,6 +16,7 @@ internal static class ColumnRefDecoder
     /// <param name="column">1-based column index, or 0 on failure.</param>
     /// <param name="row">1-based row index, or 0 on failure.</param>
     /// <returns><see langword="true"/> if the reference was parsed successfully.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool TryParse(ReadOnlySpan<byte> bytes, out int column, out int row)
     {
         column = 0;

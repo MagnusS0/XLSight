@@ -1,19 +1,24 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace XLSight.Internal.Readers.Xlsb;
 
 internal static class XlsbBinary
 {
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int ReadInt32(ReadOnlySpan<byte> data, int offset) =>
         BinaryPrimitives.ReadInt32LittleEndian(data[offset..]);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static uint ReadUInt32(ReadOnlySpan<byte> data, int offset) =>
         BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static ushort ReadUInt16(ReadOnlySpan<byte> data, int offset) =>
         BinaryPrimitives.ReadUInt16LittleEndian(data[offset..]);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static double ReadDouble(ReadOnlySpan<byte> data, int offset) =>
         BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(data[offset..]));
 
@@ -70,6 +75,7 @@ internal static class XlsbBinary
         return ReadWideString(data, ref offset);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int ReadRowIndex(ReadOnlySpan<byte> payload)
     {
         if (payload.Length < 4)

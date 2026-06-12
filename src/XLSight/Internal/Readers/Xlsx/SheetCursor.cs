@@ -29,6 +29,8 @@ internal sealed class SheetCursor : IRowCursor
     private readonly ReadMode _mode;
     private readonly ExcelRange _range;
     private readonly ExcelCellValue[] _cellPool;
+    // Cached once — an instance method group conversion allocates a new delegate per call.
+    private readonly Func<bool> _moveNext;
 
     private ExcelRow _current;
     private int _lastRow;
@@ -50,6 +52,7 @@ internal sealed class SheetCursor : IRowCursor
         _mode = mode;
         _range = range;
         _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
+        _moveNext = MoveNext;
         _buf = new ScanBuffer(entryStream);
 
         if (!XlsxSheetScanner.SeekToSheetData(_buf, entryStream, seekHint, out _))
@@ -138,7 +141,7 @@ internal sealed class SheetCursor : IRowCursor
 
         int savedLastRow = _lastRow;
 
-        bool parsed = _buf.TryWithoutIO(MoveNext);
+        bool parsed = _buf.TryWithoutIO(_moveNext);
 
         if (parsed)
         {
