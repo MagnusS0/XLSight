@@ -25,7 +25,7 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.EndSheetData());
 
         var sharedStrings = new XlsbSharedStringTable(["shared"]);
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
             sharedStrings,
             StyleTable.Default,
@@ -57,7 +57,7 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.FormulaError(4, 0x07),
             XlsbTestRecords.EndSheetData());
 
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
             XlsbSharedStringTable.Empty,
             StyleTable.Default,
@@ -84,7 +84,7 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.FormulaNumber(1, 10.5, formula),
             XlsbTestRecords.EndSheetData());
 
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
             XlsbSharedStringTable.Empty,
             StyleTable.Default,
@@ -119,9 +119,9 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.FormulaNumber(2, 0, areaFormula),
             XlsbTestRecords.EndSheetData());
 
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
-            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
+            XlsbSharedStringTable.Empty,
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Formulas,
@@ -147,7 +147,7 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.EndSheetData());
 
         var range = new ExcelRange(new ExcelAddress(2, 2), new ExcelAddress(4, 2));
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
             XlsbSharedStringTable.Empty,
             StyleTable.Default,
@@ -173,7 +173,7 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.EndSheetData());
 
         var styles = new StyleTable([FormatClass.General, FormatClass.Date]);
-        ExcelRow row = XlsbWorksheetScanner.ScanRows(
+        ExcelRow row = ScanRows(
             stream,
             XlsbSharedStringTable.Empty,
             styles,
@@ -440,6 +440,37 @@ public sealed class XlsbWorksheetScannerTests
         Assert.Equal("Choose a listed value", validation.ErrorMessage);
         Assert.Equal("Selection", validation.PromptTitle);
         Assert.Equal("Pick one", validation.PromptMessage);
+    }
+
+    /// <summary>
+    /// Collects all rows through <see cref="XlsbSheetCursor"/>, snapshotting
+    /// each row so the pooled cursor buffer can be reused safely.
+    /// </summary>
+    private static List<ExcelRow> ScanRows(
+        Stream stream,
+        XlsbSharedStringTable sharedStrings,
+        StyleTable styles,
+        bool isDate1904,
+        ReadMode mode,
+        ExcelRange range,
+        XlsbFormulaContext? formulaContext = null)
+    {
+        using XlsbSheetCursor cursor = XlsbWorksheetScanner.OpenCursor(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => sharedStrings),
+            styles,
+            isDate1904,
+            mode,
+            range,
+            formulaContext);
+
+        var rows = new List<ExcelRow>();
+        while (cursor.MoveNext())
+        {
+            rows.Add(cursor.Current.ToSnapshot());
+        }
+
+        return rows;
     }
 
     private static byte[] CreateRangePayload(int firstRow, int firstColumn, int lastRow, int lastColumn)

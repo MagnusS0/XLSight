@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Parsing;
@@ -28,58 +27,6 @@ internal static partial class XlsxSheetScanner
 
     // ── Entry points ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Streams decoded <see cref="ExcelRow"/> values from a worksheet entry stream.
-    /// Each yielded row owns its cells array — safe to materialise with .ToList().
-    /// Equivalent in output to <c>WorksheetScanner.ScanRows</c> but operates on
-    /// raw UTF-8 bytes rather than via <see cref="System.Xml.XmlReader"/>.
-    /// </summary>
-    internal static IEnumerable<ExcelRow> ScanRows(
-        Stream entryStream,
-        SharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range,
-        long seekHint = -1)
-    {
-        using var buf = new ScanBuffer(entryStream);
-
-        if (!SeekToSheetData(buf, entryStream, seekHint, out _))
-        {
-            yield break;
-        }
-
-        var cellBuf = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
-        int lastRow = 0;
-
-        try
-        {
-            while (true)
-            {
-                if (!TryReadRowStart(buf, ref lastRow, out bool emptyRow)) { yield break; }
-                if (emptyRow) { continue; }
-
-                int rowIndex = lastRow;
-                if (!range.IsUnbounded && rowIndex > range.BottomRight.Row) { yield break; }
-                if (!range.IsUnbounded && rowIndex < range.TopLeft.Row) { SkipToEndTag(buf, TagRow); continue; }
-
-                if (FillRowCells(buf, rowIndex, sharedStrings, styles, isDate1904, mode, range, cellBuf,
-                    out int startCol, out int width))
-                {
-                    var cells = new ExcelCellValue[width];
-                    cellBuf.AsSpan(0, width).CopyTo(cells);
-                    cellBuf.AsSpan(0, width).Clear();
-                    yield return new ExcelRow(rowIndex, cells, startCol);
-                }
-            }
-        }
-        finally
-        {
-            ArrayPool<ExcelCellValue>.Shared.Return(cellBuf, clearArray: false);
-        }
-    }
-
     internal static SheetCursor OpenCursor(
         Stream entryStream,
         SharedStringTable sharedStrings,
@@ -92,8 +39,8 @@ internal static partial class XlsxSheetScanner
 
     /// <summary>
     /// Push-based sheet scanner. Drives <paramref name="sink"/> for every decoded cell.
-    /// Uses the same SIMD byte-scanning engine as <see cref="ScanRows"/> but avoids
-    /// per-row array allocation by calling the sink directly instead of yielding rows.
+    /// Uses the same SIMD byte-scanning engine as <see cref="SheetCursor"/> but avoids
+    /// per-row buffer management by calling the sink directly instead of yielding rows.
     /// </summary>
     internal static void ScanSheet<TSink>(
         Stream entryStream,

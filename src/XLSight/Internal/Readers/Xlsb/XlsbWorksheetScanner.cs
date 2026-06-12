@@ -1,4 +1,3 @@
-using System.Buffers;
 using XLSight.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Sinks;
@@ -7,59 +6,6 @@ namespace XLSight.Internal.Readers.Xlsb;
 
 internal static class XlsbWorksheetScanner
 {
-    internal static IEnumerable<ExcelRow> ScanRows(
-        Stream worksheetStream,
-        XlsbSharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range)
-        => ScanRows(
-            worksheetStream,
-            new Lazy<XlsbSharedStringTable>(() => sharedStrings, LazyThreadSafetyMode.PublicationOnly),
-            styles,
-            isDate1904,
-            mode,
-            range,
-            formulaContext: null);
-
-    internal static IEnumerable<ExcelRow> ScanRows(
-        Stream worksheetStream,
-        Lazy<XlsbSharedStringTable> sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range,
-        XlsbFormulaContext? formulaContext = null)
-    {
-        var cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
-        using var iterator = new XlsbRecordIterator(worksheetStream);
-        using var scanner = new XlsbRowScanner(
-            iterator,
-            sharedStrings,
-            styles,
-            isDate1904,
-            mode,
-            range,
-            cellPool,
-            formulaContext);
-
-        try
-        {
-            while (scanner.MoveNext())
-            {
-                var current = scanner.Current;
-                var cells = new ExcelCellValue[current.CellCount];
-                current.Cells.CopyTo(cells);
-                yield return new ExcelRow(current.RowIndex, cells, current.StartColumn);
-            }
-        }
-        finally
-        {
-            ArrayPool<ExcelCellValue>.Shared.Return(cellPool, clearArray: false);
-        }
-    }
-
     internal static XlsbSheetCursor OpenCursor(
         Stream worksheetStream,
         XlsbSharedStringTable sharedStrings,

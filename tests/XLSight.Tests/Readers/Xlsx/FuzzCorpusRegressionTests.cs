@@ -37,14 +37,13 @@ public sealed class FuzzCorpusRegressionTests
         try
         {
             using var stream = new MemoryStream(data, writable: false);
-            var rows = new List<ExcelRow>(Math.Min(32, MaxRowsToInspect));
-            foreach (var row in XlsxSheetScanner.ScanRows(stream, SharedStrings, StyleTable.Default, isDate1904: false, ReadMode.Values, ExcelRange.Unbounded))
+            using var cursor = XlsxSheetScanner.OpenCursor(
+                stream, SharedStrings, StyleTable.Default, isDate1904: false,
+                ReadMode.Values, ExcelRange.Unbounded);
+            int rows = 0;
+            while (rows < MaxRowsToInspect && cursor.MoveNext())
             {
-                rows.Add(row);
-                if (rows.Count >= MaxRowsToInspect)
-                {
-                    break;
-                }
+                rows++;
             }
         }
         catch (Exception ex) when (IsExpectedInputException(ex))
