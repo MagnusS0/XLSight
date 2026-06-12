@@ -10,7 +10,6 @@ internal static class XmlByteReader
 {
     internal static readonly SearchValues<byte> s_tagBoundaries = SearchValues.Create(">/ \t\r\n"u8);
     internal static readonly SearchValues<byte> s_xmlWhitespace = SearchValues.Create(" \t\r\n"u8);
-    internal const int NeedMoreDataSentinel = int.MinValue;
 
     internal static bool IsTagNameBoundary(byte ch) => s_tagBoundaries.Contains(ch);
 
@@ -115,12 +114,6 @@ internal static class XmlByteReader
 
             if (!TryGetOpenTagStart(span, nameIdx, out int tagStart))
             {
-                if (tagStart == NeedMoreDataSentinel)
-                {
-                    partialIndex = Math.Max(0, nameIdx - 1);
-                    match = new StartTagMatch(partialIndex, 0, 0, false);
-                    return TagSearchResult.NeedMoreData;
-                }
                 search = nameIdx + 1;
                 continue;
             }
@@ -158,7 +151,6 @@ internal static class XmlByteReader
 
             if (!TryGetCloseTagStart(span, nameIdx, out int ts))
             {
-                if (ts == NeedMoreDataSentinel) { partialIndex = Math.Max(0, nameIdx - 2); return TagSearchResult.NeedMoreData; }
                 search = nameIdx + 1;
                 continue;
             }
@@ -192,7 +184,11 @@ internal static class XmlByteReader
 
     private static bool TryGetOpenTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
     {
-        tagStart = NeedMoreDataSentinel;
+        // A candidate whose '<' would lie before span[0] can never match: the span's left
+        // edge is pinned (Advance only moves forward, refills append on the right), so
+        // waiting for more data cannot resolve it. Treat as a definitive non-match —
+        // returning NeedMoreData here deadlocks the caller's refill loop.
+        tagStart = -2;
         if (nameIdx == 0)
         {
             return false;
@@ -231,15 +227,12 @@ internal static class XmlByteReader
 
     private static bool TryGetCloseTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
     {
-        // nameIdx == 0: impossible to have "</prefix" before position 0 — definitive non-match.
-        // nameIdx == 1: span[0] could be '/' with '<' just before the buffer start — NeedMoreData.
-        if (nameIdx == 0)
-        {
-            tagStart = -2;
-            return false;
-        }
-
-        tagStart = NeedMoreDataSentinel;
+        // A candidate whose "</" would lie before span[0] can never match: the span's left
+        // edge is pinned (Advance only moves forward, refills append on the right), so
+        // waiting for more data cannot resolve it. Treat as a definitive non-match —
+        // returning NeedMoreData here deadlocks the caller's refill loop (e.g. inline
+        // string text whose second byte equals the tag name, like "Item" vs </t>).
+        tagStart = -2;
         if (nameIdx < 2)
         {
             return false;

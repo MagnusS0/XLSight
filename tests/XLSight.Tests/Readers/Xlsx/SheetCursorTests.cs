@@ -263,4 +263,43 @@ public sealed class SheetCursorTests
         Assert.Equal(1, rows[2].CellCount);
         Assert.Equal(99.0, rows[2].GetCell(3).AsNumber());
     }
+
+    // ── Async no-I/O loop regression ──────────────────────────────────────────
+
+    // Regression: inline string text with a tag-name collision at span index 1 (the
+    // 't' in "Item") made the no-I/O parse report NeedMoreData on every attempt, so
+    // the TryParseNext/RefillAsync loop never terminated.
+    [Fact]
+    public async Task TryParseNext_InlineStringTagNameCollision_Terminates()
+    {
+        using var cursor = OpenCursor($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>Item_1</t></is></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>Item_2</t></is></c></row>
+                <row r="3"><c r="A3" t="inlineStr"><is><t>Item_3</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        var rows = new List<ExcelRow>();
+        int attempts = 0;
+        while (attempts++ < 1000)
+        {
+            if (cursor.TryParseNext(out var row))
+            {
+                rows.Add(row.ToSnapshot());
+                continue;
+            }
+
+            if (cursor.IsSheetDone) { break; }
+            if (!await cursor.RefillAsync()) { break; }
+        }
+
+        Assert.True(attempts < 1000, "TryParseNext/RefillAsync loop did not terminate.");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("Item_1", rows[0].GetCell(1).AsText());
+        Assert.Equal("Item_2", rows[1].GetCell(1).AsText());
+        Assert.Equal("Item_3", rows[2].GetCell(1).AsText());
+    }
 }

@@ -842,6 +842,49 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal(4.0, rows[0].GetCell(4).AsNumber());
     }
 
+    // ── Tag-name collisions inside text content ──────────────────────────────
+
+    // Regression: a text byte matching the tag name at span index 1 (e.g. the 't' in
+    // "Item") made the end-tag search report NeedMoreData instead of skipping the
+    // candidate, so the value decoded as empty (and the async cursor looped forever).
+    [Theory]
+    [InlineData("Item_1")]
+    [InlineData("It")]
+    [InlineData("at the start")]
+    public void InlineString_TagNameCollisionAtSecondByte_DecodesFully(string text)
+    {
+        var rows = Scan($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal(text, rows[0].GetCell(1).AsText());
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(7)]
+    [InlineData(64)]
+    public void InlineString_TagNameCollision_SplitAcrossChunks_DecodesFully(int chunkSize)
+    {
+        var rows = ScanChunked($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>Item_1</t></is></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>Item_2</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """, chunkSize);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Item_1", rows[0].GetCell(1).AsText());
+        Assert.Equal("Item_2", rows[1].GetCell(1).AsText());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static List<ExcelRow> Scan(
