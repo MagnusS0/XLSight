@@ -178,10 +178,10 @@ public sealed class SheetCursorTests
         Assert.False(cursor.MoveNext());
     }
 
-    // ── Parity with ScanRows ──────────────────────────────────────────────────
+    // ── Row shape and values ──────────────────────────────────────────────────
 
     [Fact]
-    public void Parity_WithScanRows_SingleRow()
+    public void RowShape_SingleRow_WithColumnGap()
     {
         const string xml = $"""
             <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -194,32 +194,28 @@ public sealed class SheetCursorTests
             </worksheet>
             """;
 
-        var scanRows = XlsxSheetScanner.ScanRows(
-            XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
-            ReadMode.Values, ExcelRange.Unbounded).ToList();
-
         using var cursor = XlsxSheetScanner.OpenCursor(
             XmlStream(xml), SharedStringTable.Empty, StyleTable.Default, false,
             ReadMode.Values, ExcelRange.Unbounded);
 
-        var cursorRows = new List<ExcelRow>();
+        var rows = new List<ExcelRow>();
         foreach (var row in cursor)
         {
             // Clone to retain value after next MoveNext (for Assert below).
-            cursorRows.Add(row.ToSnapshot());
+            rows.Add(row.ToSnapshot());
         }
 
-        Assert.Equal(scanRows.Count, cursorRows.Count);
-        for (int i = 0; i < scanRows.Count; i++)
-        {
-            Assert.Equal(scanRows[i].RowIndex, cursorRows[i].RowIndex);
-            Assert.Equal(scanRows[i].StartColumn, cursorRows[i].StartColumn);
-            Assert.Equal(scanRows[i].CellCount, cursorRows[i].CellCount);
-        }
+        var single = Assert.Single(rows);
+        Assert.Equal(1, single.RowIndex);
+        Assert.Equal(1, single.StartColumn);
+        Assert.Equal(3, single.CellCount);
+        Assert.Equal(42.0, single.GetCell(1).AsNumber());
+        Assert.True(single.GetCell(2).IsEmpty);
+        Assert.Equal(3.14, single.GetCell(3).AsNumber());
     }
 
     [Fact]
-    public void Parity_WithScanRows_MultipleRows_MultipleColumns()
+    public void RowShape_MultipleRows_MultipleColumns()
     {
         const string xml = $"""
             <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -239,32 +235,71 @@ public sealed class SheetCursorTests
             """;
         var sst = SstBuilder.Make("hello");
 
-        var scanRows = XlsxSheetScanner.ScanRows(
-            XmlStream(xml), sst, StyleTable.Default, false,
-            ReadMode.Values, ExcelRange.Unbounded).ToList();
-
         using var cursor = XlsxSheetScanner.OpenCursor(
             XmlStream(xml), sst, StyleTable.Default, false,
             ReadMode.Values, ExcelRange.Unbounded);
 
-        var cursorRows = new List<ExcelRow>();
+        var rows = new List<ExcelRow>();
         foreach (var row in cursor)
         {
-            cursorRows.Add(row.ToSnapshot());
+            rows.Add(row.ToSnapshot());
         }
 
-        Assert.Equal(scanRows.Count, cursorRows.Count);
-        for (int i = 0; i < scanRows.Count; i++)
+        Assert.Equal(3, rows.Count);
+
+        Assert.Equal(1, rows[0].RowIndex);
+        Assert.Equal(1, rows[0].StartColumn);
+        Assert.Equal(2, rows[0].CellCount);
+        Assert.Equal(1.0, rows[0].GetCell(1).AsNumber());
+        Assert.Equal("hello", rows[0].GetCell(2).AsText());
+
+        Assert.Equal(2, rows[1].RowIndex);
+        Assert.Equal(1, rows[1].StartColumn);
+        Assert.Equal(1, rows[1].CellCount);
+        Assert.Equal(2.0, rows[1].GetCell(1).AsNumber());
+
+        Assert.Equal(5, rows[2].RowIndex);
+        Assert.Equal(3, rows[2].StartColumn);
+        Assert.Equal(1, rows[2].CellCount);
+        Assert.Equal(99.0, rows[2].GetCell(3).AsNumber());
+    }
+
+    // ── Async no-I/O loop regression ──────────────────────────────────────────
+
+    // Regression: inline string text with a tag-name collision at span index 1 (the
+    // 't' in "Item") made the no-I/O parse report NeedMoreData on every attempt, so
+    // the TryParseNext/RefillAsync loop never terminated.
+    [Fact]
+    public async Task TryParseNext_InlineStringTagNameCollision_Terminates()
+    {
+        using var cursor = OpenCursor($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>Item_1</t></is></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>Item_2</t></is></c></row>
+                <row r="3"><c r="A3" t="inlineStr"><is><t>Item_3</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        var rows = new List<ExcelRow>();
+        int attempts = 0;
+        while (attempts++ < 1000)
         {
-            var exp = scanRows[i];
-            var act = cursorRows[i];
-            Assert.Equal(exp.RowIndex, act.RowIndex);
-            Assert.Equal(exp.StartColumn, act.StartColumn);
-            Assert.Equal(exp.CellCount, act.CellCount);
-            for (int col = exp.StartColumn; col < exp.StartColumn + exp.CellCount; col++)
+            if (cursor.TryParseNext(out var row))
             {
-                Assert.Equal(exp.GetCell(col), act.GetCell(col));
+                rows.Add(row.ToSnapshot());
+                continue;
             }
+
+            if (cursor.IsSheetDone) { break; }
+            if (!await cursor.RefillAsync()) { break; }
         }
+
+        Assert.True(attempts < 1000, "TryParseNext/RefillAsync loop did not terminate.");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("Item_1", rows[0].GetCell(1).AsText());
+        Assert.Equal("Item_2", rows[1].GetCell(1).AsText());
+        Assert.Equal("Item_3", rows[2].GetCell(1).AsText());
     }
 }

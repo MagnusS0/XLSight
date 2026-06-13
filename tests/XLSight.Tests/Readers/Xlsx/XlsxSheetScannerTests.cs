@@ -411,7 +411,7 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal(2, rows.Count);
     }
 
-    // ── Parity against WorksheetScanner.ScanRows ─────────────────────────────
+    // ── Parity against the XmlReader-based engine ─────────────────────────────
 
     [Theory]
     [InlineData("small.xlsx")]
@@ -842,6 +842,49 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal(4.0, rows[0].GetCell(4).AsNumber());
     }
 
+    // ── Tag-name collisions inside text content ──────────────────────────────
+
+    // Regression: a text byte matching the tag name at span index 1 (e.g. the 't' in
+    // "Item") made the end-tag search report NeedMoreData instead of skipping the
+    // candidate, so the value decoded as empty (and the async cursor looped forever).
+    [Theory]
+    [InlineData("Item_1")]
+    [InlineData("It")]
+    [InlineData("at the start")]
+    public void InlineString_TagNameCollisionAtSecondByte_DecodesFully(string text)
+    {
+        var rows = Scan($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        Assert.Single(rows);
+        Assert.Equal(text, rows[0].GetCell(1).AsText());
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(7)]
+    [InlineData(64)]
+    public void InlineString_TagNameCollision_SplitAcrossChunks_DecodesFully(int chunkSize)
+    {
+        var rows = ScanChunked($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>Item_1</t></is></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>Item_2</t></is></c></row>
+              </sheetData>
+            </worksheet>
+            """, chunkSize);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Item_1", rows[0].GetCell(1).AsText());
+        Assert.Equal("Item_2", rows[1].GetCell(1).AsText());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static List<ExcelRow> Scan(
@@ -850,13 +893,7 @@ public sealed class XlsxSheetScannerTests
         ExcelRange? range = null)
     {
         using var stream = XmlStream(worksheetXml);
-        return XlsxSheetScanner.ScanRows(
-            stream,
-            sst ?? SharedStringTable.Empty,
-            StyleTable.Default,
-            isDate1904: false,
-            ReadMode.Values,
-            range ?? ExcelRange.Unbounded).ToList();
+        return CollectRows(stream, sst, ReadMode.Values, range);
     }
 
     private static List<ExcelRow> ScanChunked(
@@ -867,13 +904,7 @@ public sealed class XlsxSheetScannerTests
     {
         using var inner = XmlStream(worksheetXml);
         using var stream = new ChunkedReadStream(inner, chunkSize);
-        return XlsxSheetScanner.ScanRows(
-            stream,
-            sst ?? SharedStringTable.Empty,
-            StyleTable.Default,
-            isDate1904: false,
-            ReadMode.Values,
-            range ?? ExcelRange.Unbounded).ToList();
+        return CollectRows(stream, sst, ReadMode.Values, range);
     }
 
     private static List<ExcelRow> ScanFormulas(
@@ -882,13 +913,7 @@ public sealed class XlsxSheetScannerTests
         ExcelRange? range = null)
     {
         using var stream = XmlStream(worksheetXml);
-        return XlsxSheetScanner.ScanRows(
-            stream,
-            sst ?? SharedStringTable.Empty,
-            StyleTable.Default,
-            isDate1904: false,
-            ReadMode.Formulas,
-            range ?? ExcelRange.Unbounded).ToList();
+        return CollectRows(stream, sst, ReadMode.Formulas, range);
     }
 
     private static List<ExcelRow> ScanFormulasChunked(
@@ -899,13 +924,36 @@ public sealed class XlsxSheetScannerTests
     {
         using var inner = XmlStream(worksheetXml);
         using var stream = new ChunkedReadStream(inner, chunkSize);
-        return XlsxSheetScanner.ScanRows(
+        return CollectRows(stream, sst, ReadMode.Formulas, range);
+    }
+
+    /// <summary>
+    /// Collects all rows through <see cref="XlsxSheetScanner.OpenCursor"/>, snapshotting
+    /// each row so the pooled cursor buffer can be reused safely.
+    /// </summary>
+    private static List<ExcelRow> CollectRows(
+        Stream stream,
+        SharedStringTable? sst,
+        ReadMode mode,
+        ExcelRange? range,
+        StyleTable? styles = null,
+        bool isDate1904 = false)
+    {
+        using var cursor = XlsxSheetScanner.OpenCursor(
             stream,
             sst ?? SharedStringTable.Empty,
-            StyleTable.Default,
-            isDate1904: false,
-            ReadMode.Formulas,
-            range ?? ExcelRange.Unbounded).ToList();
+            styles ?? StyleTable.Default,
+            isDate1904,
+            mode,
+            range ?? ExcelRange.Unbounded);
+
+        var rows = new List<ExcelRow>();
+        while (cursor.MoveNext())
+        {
+            rows.Add(cursor.Current.ToSnapshot());
+        }
+
+        return rows;
     }
 
     private static List<ExcelRow> StreamWithXmlEngine(string path)
@@ -944,9 +992,9 @@ public sealed class XlsxSheetScannerTests
         if (wsEntry is null) { return []; }
 
         using var wsStream = wsEntry.OpenBuffered();
-        return XlsxSheetScanner.ScanRows(
-            wsStream, sst, styles, metadata.UsesDate1904,
-            ReadMode.Values, ExcelRange.Unbounded).ToList();
+        return CollectRows(
+            wsStream, sst, ReadMode.Values, ExcelRange.Unbounded,
+            styles, metadata.UsesDate1904);
     }
 
     private static void AssertRowsEqual(ExcelRow expected, ExcelRow actual, string file, int rowIdx)

@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Runtime.CompilerServices;
 using XLSight.Internal.Sinks;
 
 namespace XLSight.Internal.Readers.Xlsx;
@@ -80,6 +81,7 @@ internal static class CellAttributeParser
     internal static bool TryGetRefAttribute(ReadOnlySpan<byte> attrBytes, out ReadOnlySpan<byte> refValue)
         => TryGetAttributeValue(attrBytes, RefAttr, out refValue);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool TryGetAttributeValue(
         ReadOnlySpan<byte> attrBytes,
         ReadOnlySpan<byte> attributeName,

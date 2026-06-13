@@ -646,15 +646,18 @@ internal sealed class XlsbWorkbookReader : IWorkbookReader
         using Stream sheetStream = OpenSheetStream(sheet.Path);
         var buffer = new ExcelCellValue[cellCount];
 
-        foreach (ExcelRow row in XlsbWorksheetScanner.ScanRows(
+        using var cursor = XlsbWorksheetScanner.OpenCursor(
             sheetStream,
             _sharedStrings,
             _styles.Value,
             _metadata.UsesDate1904,
             mode,
             range,
-            _metadata.FormulaContext))
+            _metadata.FormulaContext);
+
+        while (cursor.MoveNext())
         {
+            ExcelRow row = cursor.Current;
             int rowOffset = (row.RowIndex - range.TopLeft.Row) * range.Width;
             for (int column = range.TopLeft.Column; column <= range.BottomRight.Column; column++)
             {

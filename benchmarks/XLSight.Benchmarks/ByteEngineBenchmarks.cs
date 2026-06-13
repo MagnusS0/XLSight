@@ -49,53 +49,7 @@ public class ByteEngineBenchmarks
 
     // ── Group 1: Scanner-only (internal microbenchmarks) ─────────────────────
 
-    [Benchmark(Baseline = true, Description = "ByteEngine IEnumerable (100K)")]
-    public int ScannerOnly_ByteEngine_Large_AllRows()
-    {
-        using var stream = new MemoryStream(_largeWsBytes, writable: false);
-        int count = 0;
-        foreach (var _ in XlsxSheetScanner.ScanRows(
-            stream, _largeSst, _largeStyles, _largeIsDate1904,
-            ReadMode.Values, ExcelRange.Unbounded))
-        {
-            count++;
-        }
-
-        return count;
-    }
-
-    [Benchmark(Description = "ByteEngine IEnumerable First10 (100K)")]
-    public int ScannerOnly_ByteEngine_Large_First10()
-    {
-        using var stream = new MemoryStream(_largeWsBytes, writable: false);
-        int count = 0;
-        foreach (var _ in XlsxSheetScanner.ScanRows(
-            stream, _largeSst, _largeStyles, _largeIsDate1904,
-            ReadMode.Values, ExcelRange.Unbounded).Take(10))
-        {
-            count++;
-        }
-
-        return count;
-    }
-
-    [Benchmark(Description = "ByteEngine IEnumerable (1M)")]
-    public int ScannerOnly_ByteEngine_XlLarge_AllRows()
-    {
-        EnsureXlLargeLoaded();
-        using var stream = new MemoryStream(_xlLargeWsBytes, writable: false);
-        int count = 0;
-        foreach (var _ in XlsxSheetScanner.ScanRows(
-            stream, _xlLargeSst, _xlLargeStyles, _xlLargeIsDate1904,
-            ReadMode.Values, ExcelRange.Unbounded))
-        {
-            count++;
-        }
-
-        return count;
-    }
-
-    [Benchmark(Description = "Cursor (100K)")]
+    [Benchmark(Baseline = true, Description = "Cursor (100K)")]
     public int ScannerOnly_Cursor_Large_AllRows()
     {
         using var stream = new MemoryStream(_largeWsBytes, writable: false);
