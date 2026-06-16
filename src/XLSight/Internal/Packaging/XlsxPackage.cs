@@ -107,7 +107,13 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     /// Safe to call concurrently when <see cref="IsFileBacked"/> is true.
     /// Returns null if no file path is available or the entry is not found.
     /// </summary>
-    internal Stream? TryOpenFreshEntry(string entryPath)
+    internal Stream? TryOpenFreshEntry(string entryPath) =>
+        TryOpenFreshEntryCore(entryPath, addBuffer: true);
+
+    internal Stream? TryOpenFreshEntryUnbuffered(string entryPath) =>
+        TryOpenFreshEntryCore(entryPath, addBuffer: false);
+
+    private OwnedEntryStream? TryOpenFreshEntryCore(string entryPath, bool addBuffer)
     {
         ThrowIfDisposed();
 
@@ -128,7 +134,10 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
             return null;
         }
 
-        return new OwnedEntryStream(new BufferedStream(entry.Open(), 65536), zip);
+        Stream raw = entry.Open();
+        // addBuffer=false when the caller supplies its own pool buffer (e.g. XlsbRecordIterator),
+        // avoiding a redundant 65 KB heap allocation that would otherwise pressure the GC.
+        return new OwnedEntryStream(addBuffer ? new BufferedStream(raw, 65536) : raw, zip);
     }
 
     private static ZipArchiveEntry? FindEntry(ZipArchive archive, string path)
@@ -173,58 +182,5 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         {
             ThrowHelpers.ThrowObjectDisposed(nameof(XlsxPackage));
         }
-    }
-}
-
-/// <summary>
-/// Wraps a zip entry stream and disposes an <see cref="IDisposable"/> owner (the ZipArchive)
-/// when this stream is disposed, ensuring the archive stays alive until the entry is fully read.
-/// </summary>
-file sealed class OwnedEntryStream(Stream inner, IDisposable owner) : Stream
-{
-    public override bool CanRead => inner.CanRead;
-    public override bool CanSeek => inner.CanSeek;
-    public override bool CanWrite => inner.CanWrite;
-    public override long Length => inner.Length;
-
-    public override long Position
-    {
-        get => inner.Position;
-        set => inner.Position = value;
-    }
-
-    public override void Flush() => inner.Flush();
-    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
-    public override int Read(Span<byte> buffer) => inner.Read(buffer);
-    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
-    public override void SetLength(long value) => inner.SetLength(value);
-    public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
-    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
-        => inner.ReadAsync(buffer, offset, count, ct);
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-        => inner.ReadAsync(buffer, ct);
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            inner.Dispose();
-            owner.Dispose();
-        }
-        base.Dispose(disposing);
-    }
-
-    public override async ValueTask DisposeAsync()
-    {
-        await inner.DisposeAsync().ConfigureAwait(false);
-        if (owner is IAsyncDisposable asyncOwner)
-        {
-            await asyncOwner.DisposeAsync().ConfigureAwait(false);
-        }
-        else
-        {
-            owner.Dispose();
-        }
-        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

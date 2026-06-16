@@ -6,7 +6,7 @@ using Xunit;
 namespace XLSight.Tests.Packaging;
 
 /// <summary>
-/// Tests for the private-nested OwnedEntryStream class inside XlsxPackage,
+/// Tests for OwnedEntryStream through XlsxPackage,
 /// exercised through <see cref="XlsxPackage.TryOpenFreshEntry"/> which requires
 /// a file-backed (FileStream) package.
 /// </summary>
@@ -108,6 +108,16 @@ public sealed class OwnedEntryStreamTests : IDisposable
         var buf = new byte[64];
         int read = stream!.Read(buf.AsSpan());
         Assert.True(read > 0);
+    }
+
+    [Fact]
+    public void TryOpenFreshEntry_ReadByte_ReturnsByteFromEntry()
+    {
+        using var package = OpenFileBacked();
+        using Stream? stream = package.TryOpenFreshEntry("xl/workbook.xml");
+        Assert.NotNull(stream);
+
+        Assert.NotEqual(-1, stream!.ReadByte());
     }
 
 
@@ -248,7 +258,9 @@ public sealed class OwnedEntryStreamTests : IDisposable
         using var package = OpenFileBacked();
         Stream? stream = package.TryOpenFreshEntry("xl/workbook.xml");
         Assert.NotNull(stream);
-        await stream!.DisposeAsync(); // should not throw
+        await stream!.DisposeAsync();
+        await stream.DisposeAsync();
+        stream.Dispose();
     }
 
     // ── Entry not found returns null ──────────────────────────────────────────
