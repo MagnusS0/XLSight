@@ -113,6 +113,10 @@ internal static class XlsbBinary
             new ExcelAddress(lastColumn + 1, lastRow + 1));
     }
 
+    internal static string FormatRange(ExcelRange range) => range.TopLeft == range.BottomRight
+        ? range.TopLeft.ToString()
+        : $"{range.TopLeft}:{range.BottomRight}";
+
     internal static string ReadRichStringTextWithOffset(ReadOnlySpan<byte> data, ref int offset)
     {
         if (data.Length - offset <= 0)
