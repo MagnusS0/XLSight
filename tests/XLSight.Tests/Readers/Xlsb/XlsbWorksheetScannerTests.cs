@@ -194,9 +194,9 @@ public sealed class XlsbWorksheetScannerTests
             XlsbTestRecords.Real(1, 2),
             XlsbTestRecords.EndSheetData());
 
-        using var cursor = XlsbWorksheetScanner.OpenCursor(
+        using var cursor = new XlsbSheetCursor(
             stream,
-            XlsbSharedStringTable.Empty,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
             StyleTable.Default,
             isDate1904: false,
             ReadMode.Values,
@@ -209,6 +209,31 @@ public sealed class XlsbWorksheetScannerTests
         Assert.Equal(2.0, second.GetCell(1).AsNumber());
         Assert.False(cursor.TryParseNext(out _));
         Assert.True(cursor.IsSheetDone);
+    }
+
+    [Fact]
+    public void Cursor_UnboundedRange_PreservesOutOfOrderCellColumns()
+    {
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.Row(1),
+            XlsbTestRecords.Real(5, 5),
+            XlsbTestRecords.Real(2, 2),
+            XlsbTestRecords.EndSheetData());
+
+        using var cursor = new XlsbSheetCursor(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => XlsbSharedStringTable.Empty),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            ExcelRange.Unbounded);
+
+        Assert.True(cursor.MoveNext());
+        ExcelRow row = cursor.Current;
+        Assert.Equal(2, row.StartColumn);
+        Assert.Equal(4, row.CellCount);
+        Assert.Equal(2, row.GetCell(2).AsNumber());
+        Assert.Equal(5, row.GetCell(5).AsNumber());
     }
 
     [Fact]
@@ -318,8 +343,8 @@ public sealed class XlsbWorksheetScannerTests
             isDate1904: false,
             ReadMode.Values,
             ExcelRange.Unbounded,
-            context,
-            ref sink);
+            ref sink,
+            context);
 
         Assert.Equal(["Lookup"], sink.ReferenceSheets);
     }
@@ -455,7 +480,7 @@ public sealed class XlsbWorksheetScannerTests
         ExcelRange range,
         XlsbFormulaContext? formulaContext = null)
     {
-        using XlsbSheetCursor cursor = XlsbWorksheetScanner.OpenCursor(
+        using XlsbSheetCursor cursor = new(
             stream,
             new Lazy<XlsbSharedStringTable>(() => sharedStrings),
             styles,

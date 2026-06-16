@@ -9,52 +9,75 @@ internal static class XlsbCellDecoder
 
     internal static bool TryDecode(
         XlsbRecord record,
-        int currentRowIndex,
         Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
         XlsbFormulaContext? formulaContext,
-        out int rowIndex,
+        out int columnIndex,
+        out ExcelCellValue value) => TryDecodeForSink(
+            record,
+            sharedStrings,
+            styles,
+            isDate1904,
+            mode,
+            decodeSharedString: true,
+            formulaContext,
+            out columnIndex,
+            out _,
+            out _,
+            out value,
+            out _,
+            out _,
+            out _);
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    internal static bool TryDecodeCommonValue(
+        XlsbRecord record,
+        Lazy<XlsbSharedStringTable> sharedStrings,
+        StyleTable styles,
+        bool isDate1904,
         out int columnIndex,
         out ExcelCellValue value)
     {
-        rowIndex = 0;
-        columnIndex = 0;
-        value = ExcelCellValue.Empty;
-
-        if (currentRowIndex <= 0 ||
-            !TryReadCellHeader(record.Payload, out columnIndex, out int styleIndex))
+        ReadOnlySpan<byte> payload = record.Payload;
+        if (!TryReadCellHeader(payload, out columnIndex, out int styleIndex))
         {
+            value = ExcelCellValue.Empty;
             return false;
         }
 
-        rowIndex = currentRowIndex;
-        ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
-        if (mode == ReadMode.Formulas && IsFormulaRecord(record.Type))
+        ReadOnlySpan<byte> data = payload[CellHeaderLength..];
+        switch (record.Type)
         {
-            value = ExcelCellValue.FromFormula(DecodeFormula(record.Type, data, formulaContext));
-            return true;
+            case XlsbRecordType.BrtCellRk:
+                value = DecodeRk(data, styleIndex, styles, isDate1904);
+                return true;
+            case XlsbRecordType.BrtCellReal:
+                value = data.Length >= 8
+                    ? DecodeNumber(XlsbBinary.ReadDouble(data, 0), styleIndex, styles, isDate1904)
+                    : ExcelCellValue.Empty;
+                return true;
+            case XlsbRecordType.BrtCellIsst:
+                if (data.Length >= 4)
+                {
+                    int index = XlsbBinary.ReadInt32(data, 0);
+                    value = index >= 0
+                        ? ExcelCellValue.FromSharedString(sharedStrings.Value.GetString(index), index)
+                        : ExcelCellValue.Empty;
+                }
+                else
+                {
+                    value = ExcelCellValue.Empty;
+                }
+                return true;
+            default:
+                value = ExcelCellValue.Empty;
+                return false;
         }
-
-        value = record.Type switch
-        {
-            XlsbRecordType.BrtCellRk => DecodeRk(data, styleIndex, styles, isDate1904),
-            XlsbRecordType.BrtCellReal => DecodeReal(data, styleIndex, styles, isDate1904),
-            XlsbRecordType.BrtCellBool => DecodeBool(data),
-            XlsbRecordType.BrtCellError => DecodeError(data),
-            XlsbRecordType.BrtCellSt => DecodeInlineString(data),
-            XlsbRecordType.BrtCellIsst => DecodeSharedString(data, sharedStrings),
-            XlsbRecordType.BrtFmlaNum => DecodeFormulaNumber(data, styleIndex, styles, isDate1904),
-            XlsbRecordType.BrtFmlaString => DecodeFormulaString(data),
-            XlsbRecordType.BrtFmlaBool => DecodeBool(data),
-            XlsbRecordType.BrtFmlaError => DecodeError(data),
-            _ => ExcelCellValue.Empty,
-        };
-
-        return true;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     internal static bool TryDecodeForSink(
         XlsbRecord record,
         Lazy<XlsbSharedStringTable> sharedStrings,
@@ -79,12 +102,13 @@ internal static class XlsbCellDecoder
         formulaSpan = [];
         isFormula = IsFormulaRecord(record.Type);
 
-        if (!TryReadCellHeader(record.Payload, out columnIndex, out styleIndex))
+        ReadOnlySpan<byte> payload = record.Payload;
+        if (!TryReadCellHeader(payload, out columnIndex, out styleIndex))
         {
             return false;
         }
 
-        ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
+        ReadOnlySpan<byte> data = payload[CellHeaderLength..];
         if (isFormula)
         {
             formulaSpan = SliceFormulaBytes(record.Type, data);
@@ -102,6 +126,7 @@ internal static class XlsbCellDecoder
             out kind, out value, out rawIndex);
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static bool TryApplyRecordValue(
         XlsbRecord record,
         ReadOnlySpan<byte> data,
@@ -125,48 +150,41 @@ internal static class XlsbCellDecoder
                 value = DecodeRk(data, styleIndex, styles, isDate1904);
                 return true;
             case XlsbRecordType.BrtCellReal:
-                value = DecodeReal(data, styleIndex, styles, isDate1904);
+            case XlsbRecordType.BrtFmlaNum:
+                value = data.Length >= 8
+                    ? DecodeNumber(XlsbBinary.ReadDouble(data, 0), styleIndex, styles, isDate1904)
+                    : ExcelCellValue.Empty;
                 return true;
             case XlsbRecordType.BrtCellBool:
             case XlsbRecordType.BrtFmlaBool:
                 kind = CellDataKind.Boolean;
-                value = DecodeBool(data);
+                value = data.IsEmpty ? ExcelCellValue.Empty : ExcelCellValue.FromBoolean(data[0] != 0);
                 return true;
             case XlsbRecordType.BrtCellError:
             case XlsbRecordType.BrtFmlaError:
                 kind = CellDataKind.Error;
-                value = DecodeError(data);
+                value = data.IsEmpty
+                    ? ExcelCellValue.Empty
+                    : ExcelCellValue.FromError(XlsbFormulaDecoder.GetErrorText(data[0]));
                 return true;
             case XlsbRecordType.BrtCellSt:
                 kind = CellDataKind.InlineString;
-                value = DecodeInlineString(data);
+                value = DecodeString(data);
                 return true;
             case XlsbRecordType.BrtCellIsst:
                 kind = CellDataKind.SharedString;
                 return TryDecodeSharedStringForSink(data, sharedStrings, decodeSharedString, out value, out rawIndex);
-            case XlsbRecordType.BrtFmlaNum:
-                value = DecodeFormulaNumber(data, styleIndex, styles, isDate1904);
-                return true;
             case XlsbRecordType.BrtFmlaString:
                 kind = CellDataKind.FormulaString;
-                value = DecodeFormulaString(data);
+                value = DecodeString(data);
                 return true;
             default:
                 return false;
         }
     }
 
-    internal static bool TryReadCellLocation(ReadOnlySpan<byte> payload, out int columnIndex)
-    {
-        columnIndex = 0;
-        if (payload.Length < CellHeaderLength)
-        {
-            return false;
-        }
-
-        columnIndex = checked(XlsbBinary.ReadInt32(payload, 0) + 1);
-        return columnIndex is > 0 and <= ExcelLimits.MaxColumns;
-    }
+    internal static bool TryReadCellLocation(ReadOnlySpan<byte> payload, out int columnIndex) =>
+        TryReadCellHeader(payload, out columnIndex, out _);
 
     internal static bool TryReadCellHeader(
         ReadOnlySpan<byte> payload,
@@ -217,34 +235,6 @@ internal static class XlsbCellDecoder
         return DecodeNumber(number, styleIndex, styles, isDate1904);
     }
 
-    private static ExcelCellValue DecodeReal(
-        ReadOnlySpan<byte> data,
-        int styleIndex,
-        StyleTable styles,
-        bool isDate1904)
-    {
-        if (data.Length < 8)
-        {
-            return ExcelCellValue.Empty;
-        }
-
-        return DecodeNumber(XlsbBinary.ReadDouble(data, 0), styleIndex, styles, isDate1904);
-    }
-
-    private static ExcelCellValue DecodeFormulaNumber(
-        ReadOnlySpan<byte> data,
-        int styleIndex,
-        StyleTable styles,
-        bool isDate1904)
-    {
-        if (data.Length >= 8)
-        {
-            return DecodeNumber(XlsbBinary.ReadDouble(data, 0), styleIndex, styles, isDate1904);
-        }
-
-        return ExcelCellValue.Empty;
-    }
-
     private static ExcelCellValue DecodeNumber(
         double number,
         int styleIndex,
@@ -261,39 +251,10 @@ internal static class XlsbCellDecoder
         return ExcelCellValue.FromNumber(number);
     }
 
-    private static ExcelCellValue DecodeBool(ReadOnlySpan<byte> data)
-    {
-        if (data.IsEmpty)
-        {
-            return ExcelCellValue.Empty;
-        }
-
-        return ExcelCellValue.FromBoolean(data[0] != 0);
-    }
-
-    private static ExcelCellValue DecodeError(ReadOnlySpan<byte> data)
-    {
-        if (data.IsEmpty)
-        {
-            return ExcelCellValue.Empty;
-        }
-
-        return ExcelCellValue.FromError(GetErrorText(data[0]));
-    }
-
-    private static ExcelCellValue DecodeInlineString(ReadOnlySpan<byte> data)
-    {
-        return TryDecodeWideString(data, out string value)
+    private static ExcelCellValue DecodeString(ReadOnlySpan<byte> data) =>
+        TryDecodeWideString(data, out string value)
             ? ExcelCellValue.FromText(value)
             : ExcelCellValue.Empty;
-    }
-
-    private static ExcelCellValue DecodeFormulaString(ReadOnlySpan<byte> data)
-    {
-        return TryDecodeWideString(data, out string value)
-            ? ExcelCellValue.FromText(value)
-            : ExcelCellValue.Empty;
-    }
 
     private static bool TryDecodeWideString(ReadOnlySpan<byte> data, out string value)
     {
@@ -315,11 +276,7 @@ internal static class XlsbCellDecoder
             value = XlsbBinary.ReadWideString(data, ref offset);
             return true;
         }
-        catch (MalformedWorkbookException)
-        {
-            return false;
-        }
-        catch (OverflowException)
+        catch (Exception ex) when (ex is MalformedWorkbookException or OverflowException)
         {
             return false;
         }
@@ -328,34 +285,14 @@ internal static class XlsbCellDecoder
     internal static bool TryGetFormula(XlsbRecord record, out ReadOnlySpan<byte> formula)
     {
         formula = [];
-        if (!IsFormulaRecord(record.Type) || record.Payload.Length < CellHeaderLength)
+        ReadOnlySpan<byte> payload = record.Payload;
+        if (!IsFormulaRecord(record.Type) || payload.Length < CellHeaderLength)
         {
             return false;
         }
 
-        ReadOnlySpan<byte> data = record.Payload[CellHeaderLength..];
-        int formulaOffset = GetFormulaOffset(record.Type, data);
-        if (formulaOffset < 0 || formulaOffset >= data.Length)
-        {
-            return false;
-        }
-
-        formula = data[formulaOffset..];
-        return true;
-    }
-
-    private static string DecodeFormula(
-        int recordType,
-        ReadOnlySpan<byte> data,
-        XlsbFormulaContext? formulaContext)
-    {
-        int formulaOffset = GetFormulaOffset(recordType, data);
-        if (formulaOffset < 0 || formulaOffset >= data.Length)
-        {
-            return string.Empty;
-        }
-
-        return XlsbFormulaDecoder.Decode(data[formulaOffset..], formulaContext);
+        formula = SliceFormulaBytes(record.Type, payload[CellHeaderLength..]);
+        return !formula.IsEmpty;
     }
 
     private static ReadOnlySpan<byte> SliceFormulaBytes(int recordType, ReadOnlySpan<byte> data)
@@ -399,24 +336,6 @@ internal static class XlsbCellDecoder
         return offset <= data.Length ? offset : -1;
     }
 
-    private static ExcelCellValue DecodeSharedString(
-        ReadOnlySpan<byte> data,
-        Lazy<XlsbSharedStringTable> sharedStrings)
-    {
-        if (data.Length < 4)
-        {
-            return ExcelCellValue.Empty;
-        }
-
-        int index = XlsbBinary.ReadInt32(data, 0);
-        if (index < 0)
-        {
-            return ExcelCellValue.Empty;
-        }
-
-        return ExcelCellValue.FromSharedString(sharedStrings.Value.GetString(index), index);
-    }
-
     private static bool TryDecodeSharedStringForSink(
         ReadOnlySpan<byte> data,
         Lazy<XlsbSharedStringTable> sharedStrings,
@@ -447,22 +366,8 @@ internal static class XlsbCellDecoder
         return true;
     }
 
-    private static bool IsFormulaRecord(int recordType) => recordType
-        is XlsbRecordType.BrtFmlaString
-        or XlsbRecordType.BrtFmlaNum
-        or XlsbRecordType.BrtFmlaBool
-        or XlsbRecordType.BrtFmlaError;
+    private static bool IsFormulaRecord(int recordType) =>
+        (uint)(recordType - XlsbRecordType.BrtFmlaString) <=
+        (uint)(XlsbRecordType.BrtFmlaError - XlsbRecordType.BrtFmlaString);
 
-    private static string GetErrorText(byte errorCode) => errorCode switch
-    {
-        0x00 => "#NULL!",
-        0x07 => "#DIV/0!",
-        0x0F => "#VALUE!",
-        0x17 => "#REF!",
-        0x1D => "#NAME?",
-        0x24 => "#NUM!",
-        0x2A => "#N/A",
-        0x2B => "#GETTING_DATA",
-        _ => $"#ERR{errorCode}",
-    };
 }
