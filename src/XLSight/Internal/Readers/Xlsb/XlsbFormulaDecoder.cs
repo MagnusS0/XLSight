@@ -46,7 +46,16 @@ internal static class XlsbFormulaDecoder
     private const ushort ColumnRelativeFlag = 0x4000;
     private const ushort RowRelativeFlag = 0x8000;
 
-    internal static string Decode(ReadOnlySpan<byte> formula, XlsbFormulaContext? context = null)
+    internal static string Decode(ReadOnlySpan<byte> formula, XlsbFormulaContext? context = null) =>
+        Decode(formula, context, referencesOnly: false);
+
+    internal static string DecodeDefinedName(ReadOnlySpan<byte> formula, XlsbFormulaContext context) =>
+        Decode(formula, context, referencesOnly: true);
+
+    private static string Decode(
+        ReadOnlySpan<byte> formula,
+        XlsbFormulaContext? context,
+        bool referencesOnly)
     {
         if (!TryReadTokenBytes(formula, out ReadOnlySpan<byte> tokens))
         {
@@ -58,24 +67,24 @@ internal static class XlsbFormulaDecoder
         while (offset < tokens.Length)
         {
             byte token = tokens[offset];
-            OperatorResult operatorResult = TryHandleOperator(token, expressions);
-            if (operatorResult == OperatorResult.Invalid)
+            int operatorResult = TryHandleOperator(token, expressions);
+            if (operatorResult < 0)
             {
                 return string.Empty;
             }
 
-            if (operatorResult == OperatorResult.Handled)
+            if (operatorResult > 0)
             {
                 offset++;
                 continue;
             }
 
-            if (TryHandleScalar(tokens, ref offset, expressions))
+            if (!referencesOnly && TryHandleScalar(tokens, ref offset, expressions))
             {
                 continue;
             }
 
-            if (TryHandleReference(tokens, ref offset, expressions, context))
+            if (TryHandleReference(tokens, ref offset, expressions, context, referencesOnly))
             {
                 continue;
             }
@@ -84,6 +93,15 @@ internal static class XlsbFormulaDecoder
         }
 
         return expressions.Count == 1 ? expressions.Pop() : string.Empty;
+    }
+
+    private static bool IsAbsoluteAddress(ReadOnlySpan<byte> tokens, int rowOffset, int columnOffset = 4)
+    {
+        uint row = BinaryPrimitives.ReadUInt32LittleEndian(tokens.Slice(rowOffset, 4));
+        ushort column = BinaryPrimitives.ReadUInt16LittleEndian(tokens.Slice(rowOffset + columnOffset, 2));
+        return row < ExcelLimits.MaxRows &&
+            (column & (ColumnRelativeFlag | RowRelativeFlag)) == 0 &&
+            (column & ColumnMask) < ExcelLimits.MaxColumns;
     }
 
     internal static void EmitReferences<TSink>(
@@ -126,13 +144,6 @@ internal static class XlsbFormulaDecoder
         }
     }
 
-    private enum OperatorResult
-    {
-        NotOperator,
-        Handled,
-        Invalid,
-    }
-
     private static bool TryReadTokenBytes(ReadOnlySpan<byte> formula, out ReadOnlySpan<byte> tokens)
     {
         tokens = [];
@@ -153,9 +164,9 @@ internal static class XlsbFormulaDecoder
         return true;
     }
 
-    private static OperatorResult TryHandleOperator(byte token, Stack<string> expressions)
+    private static int TryHandleOperator(byte token, Stack<string> expressions)
     {
-        string op = token switch
+        string? op = token switch
         {
             PtgAdd => "+",
             PtgSub => "-",
@@ -172,42 +183,35 @@ internal static class XlsbFormulaDecoder
             PtgIsect => " ",
             PtgUnion => ",",
             PtgRange => ":",
-            _ => string.Empty,
+            _ => null,
         };
 
-        if (op.Length > 0)
+        if (op is not null)
         {
-            if (!TryPopBinary(expressions, out string left, out string right))
-            {
-                return OperatorResult.Invalid;
-            }
+            if (expressions.Count < 2) { return -1; }
 
+            string right = expressions.Pop();
+            string left = expressions.Pop();
             expressions.Push($"{left}{op}{right}");
-            return OperatorResult.Handled;
+            return 1;
         }
 
-        switch (token)
+        if (token is not (PtgUPlus or PtgUMinus or PtgPercent or PtgParen))
         {
-            case PtgUPlus:
-                return expressions.Count > 0 ? OperatorResult.Handled : OperatorResult.Invalid;
-            case PtgUMinus when expressions.Count > 0:
-                expressions.Push($"-{expressions.Pop()}");
-                return OperatorResult.Handled;
-            case PtgUMinus:
-                return OperatorResult.Invalid;
-            case PtgPercent when expressions.Count > 0:
-                expressions.Push($"{expressions.Pop()}%");
-                return OperatorResult.Handled;
-            case PtgPercent:
-                return OperatorResult.Invalid;
-            case PtgParen when expressions.Count > 0:
-                expressions.Push($"({expressions.Pop()})");
-                return OperatorResult.Handled;
-            case PtgParen:
-                return OperatorResult.Invalid;
-            default:
-                return OperatorResult.NotOperator;
+            return 0;
         }
+
+        if (expressions.Count == 0) { return -1; }
+
+        string operand = expressions.Pop();
+        expressions.Push(token switch
+        {
+            PtgUMinus => $"-{operand}",
+            PtgPercent => $"{operand}%",
+            PtgParen => $"({operand})",
+            _ => operand,
+        });
+        return 1;
     }
 
     private static bool TryHandleScalar(ReadOnlySpan<byte> tokens, ref int offset, Stack<string> expressions)
@@ -249,62 +253,44 @@ internal static class XlsbFormulaDecoder
         ReadOnlySpan<byte> tokens,
         ref int offset,
         Stack<string> expressions,
-        XlsbFormulaContext? context)
+        XlsbFormulaContext? context,
+        bool referencesOnly)
     {
         int ptg = tokens[offset] & OperandTokenMask;
-        switch (ptg)
+        int length = ptg switch
         {
-            case PtgRef:
-                if (tokens.Length - offset < 7) { return false; }
-                expressions.Push(DecodeCellReference(tokens.Slice(offset + 1, 6)));
-                offset += 7;
-                return true;
-            case PtgArea:
-                if (tokens.Length - offset < 13) { return false; }
-                expressions.Push(DecodeAreaReference(tokens.Slice(offset + 1, 12)));
-                offset += 13;
-                return true;
-            case PtgRefErr:
-                if (tokens.Length - offset < 7) { return false; }
-                expressions.Push("#REF!");
-                offset += 7;
-                return true;
-            case PtgAreaErr:
-                if (tokens.Length - offset < 13) { return false; }
-                expressions.Push("#REF!");
-                offset += 13;
-                return true;
-            default:
-                return TryHandle3dReference(tokens, ref offset, expressions, context, ptg);
-        }
-    }
-
-    private static bool TryHandle3dReference(
-        ReadOnlySpan<byte> tokens,
-        ref int offset,
-        Stack<string> expressions,
-        XlsbFormulaContext? context,
-        int ptg)
-    {
-        (int Length, bool IsArea, bool IsError) properties = ptg switch
-        {
-            PtgRef3d => (9, false, false),
-            PtgArea3d => (15, true, false),
-            PtgRefErr3d => (7, false, true),
-            PtgAreaErr3d => (7, true, true),
-            _ => default,
+            PtgRef or PtgRefErr or PtgRefErr3d or PtgAreaErr3d => 7,
+            PtgArea or PtgAreaErr => 13,
+            PtgRef3d => 9,
+            PtgArea3d => 15,
+            _ => 0,
         };
-        if (properties.Length == 0 || tokens.Length - offset < properties.Length)
+        if (length == 0 || tokens.Length - offset < length)
         {
             return false;
         }
 
-        expressions.Push(Decode3dReference(
-            tokens.Slice(offset, properties.Length),
-            context,
-            properties.IsArea,
-            properties.IsError));
-        offset += properties.Length;
+        ReadOnlySpan<byte> token = tokens.Slice(offset, length);
+        if (referencesOnly &&
+            (ptg is not (PtgRef3d or PtgArea3d or PtgRefErr3d or PtgAreaErr3d) ||
+             context is null ||
+             !context.TryResolveSheet(BinaryPrimitives.ReadUInt16LittleEndian(token.Slice(1, 2)), out _, out _) ||
+             ptg == PtgRef3d && !IsAbsoluteAddress(token, 3) ||
+             ptg == PtgArea3d && (!IsAbsoluteAddress(token, 3, 8) || !IsAbsoluteAddress(token, 7, 6))))
+        {
+            return false;
+        }
+
+        string expression = ptg switch
+        {
+            PtgRef => DecodeCellReference(token[1..]),
+            PtgArea => DecodeAreaReference(token[1..]),
+            PtgRefErr or PtgAreaErr => "#REF!",
+            _ => Decode3dReference(token, context, ptg == PtgArea3d,
+                ptg is PtgRefErr3d or PtgAreaErr3d),
+        };
+        expressions.Push(expression);
+        offset += length;
         return true;
     }
 
@@ -334,38 +320,30 @@ internal static class XlsbFormulaDecoder
     private static int GetTokenLength(ReadOnlySpan<byte> tokens, int offset)
     {
         byte token = tokens[offset];
-        if (token is >= PtgAdd and <= PtgParen)
-        {
-            return 1;
-        }
-
+        int remaining = tokens.Length - offset;
         if (token == PtgStr)
         {
-            if (tokens.Length - offset < 5)
-            {
-                return -1;
-            }
+            if (remaining < 5) { return -1; }
 
             uint charCount = BinaryPrimitives.ReadUInt32LittleEndian(tokens.Slice(offset + 1, 4));
             long stringLength = 5L + (charCount * 2L);
-            return stringLength <= tokens.Length - offset ? (int)stringLength : -1;
+            return stringLength <= remaining ? (int)stringLength : -1;
         }
 
-        if (token is PtgErr or PtgBool) { return tokens.Length - offset >= 2 ? 2 : -1; }
-        if (token == PtgInt) { return tokens.Length - offset >= 3 ? 3 : -1; }
-        if (token == PtgNum) { return tokens.Length - offset >= 9 ? 9 : -1; }
-
         int ptg = token & OperandTokenMask;
-        int length = ptg switch
+        int length = token switch
         {
-            PtgRef or PtgRefErr => 7,
-            PtgArea or PtgAreaErr => 13,
-            PtgRef3d => 9,
-            PtgArea3d => 15,
-            PtgRefErr3d or PtgAreaErr3d => 7,
+            >= PtgAdd and <= PtgParen => 1,
+            PtgErr or PtgBool => 2,
+            PtgInt => 3,
+            PtgNum => 9,
+            _ when ptg is PtgRef or PtgRefErr or PtgRefErr3d or PtgAreaErr3d => 7,
+            _ when ptg is PtgArea or PtgAreaErr => 13,
+            _ when ptg == PtgRef3d => 9,
+            _ when ptg == PtgArea3d => 15,
             _ => -1,
         };
-        return length <= tokens.Length - offset ? length : -1;
+        return length <= remaining ? length : -1;
     }
 
     private static string DecodeCellReference(ReadOnlySpan<byte> loc)
@@ -403,39 +381,10 @@ internal static class XlsbFormulaDecoder
 
         string columnPrefix = (columnFlags & ColumnRelativeFlag) == 0 ? "$" : string.Empty;
         string rowPrefix = (columnFlags & RowRelativeFlag) == 0 ? "$" : string.Empty;
-        return $"{columnPrefix}{FormatColumnName(zeroBasedColumn)}{rowPrefix}{zeroBasedRow + 1}";
+        return $"{columnPrefix}{ExcelAddress.ColumnIndexToLetters(zeroBasedColumn + 1)}{rowPrefix}{zeroBasedRow + 1}";
     }
 
-    private static string FormatColumnName(int zeroBasedColumn)
-    {
-        Span<char> buffer = stackalloc char[3];
-        int position = buffer.Length;
-        int value = zeroBasedColumn + 1;
-        while (value > 0)
-        {
-            value--;
-            buffer[--position] = (char)('A' + (value % 26));
-            value /= 26;
-        }
-
-        return new string(buffer[position..]);
-    }
-
-    private static bool TryPopBinary(Stack<string> expressions, out string left, out string right)
-    {
-        if (expressions.Count < 2)
-        {
-            left = string.Empty;
-            right = string.Empty;
-            return false;
-        }
-
-        right = expressions.Pop();
-        left = expressions.Pop();
-        return true;
-    }
-
-    private static string GetErrorText(byte errorCode) => errorCode switch
+    internal static string GetErrorText(byte errorCode) => errorCode switch
     {
         0x00 => "#NULL!",
         0x07 => "#DIV/0!",

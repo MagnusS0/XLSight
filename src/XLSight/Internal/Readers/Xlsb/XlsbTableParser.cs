@@ -4,17 +4,37 @@ namespace XLSight.Internal.Readers.Xlsb;
 
 internal static class XlsbTableParser
 {
-    private const int BeginListStringOffset = 64;
-    private const int BeginListColStringOffset = 24;
-
     internal static TableInfo? Parse(Stream tableStream, string sheetName)
     {
-        ArgumentNullException.ThrowIfNull(tableStream);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
-
         try
         {
-            return ParseCore(tableStream, sheetName);
+            string? name = null;
+            ExcelRange? range = null;
+            var columnNames = new List<string>();
+            using var iterator = new XlsbRecordIterator(tableStream);
+            while (iterator.TryRead(out XlsbRecord record))
+            {
+                if (record.Type == XlsbRecordType.BrtBeginList)
+                {
+                    ReadTableProperties(record.Payload, ref name, ref range);
+                }
+                else if (record.Type == XlsbRecordType.BrtBeginListCol &&
+                    ReadColumnName(record.Payload) is { } columnName &&
+                    !string.IsNullOrWhiteSpace(columnName))
+                {
+                    columnNames.Add(columnName);
+                }
+            }
+
+            return string.IsNullOrWhiteSpace(name) || range is null
+                ? null
+                : new TableInfo
+                {
+                    Name = name,
+                    Sheet = sheetName,
+                    Range = range.Value,
+                    ColumnNames = columnNames,
+                };
         }
         catch (Exception ex) when (ex is MalformedWorkbookException or IOException or InvalidDataException or ArgumentException or ArithmeticException)
         {
@@ -22,56 +42,16 @@ internal static class XlsbTableParser
         }
     }
 
-    private static TableInfo? ParseCore(Stream tableStream, string sheetName)
-    {
-        string? name = null;
-        ExcelRange? range = null;
-        var columnNames = new List<string>();
-
-        using var iterator = new XlsbRecordIterator(tableStream);
-        while (iterator.TryRead(out XlsbRecord record))
-        {
-            switch (record.Type)
-            {
-                case XlsbRecordType.BrtBeginList:
-                    ReadTableProperties(record.Payload, ref name, ref range);
-                    break;
-
-                case XlsbRecordType.BrtBeginListCol:
-                    string? columnName = ReadColumnName(record.Payload);
-                    if (!string.IsNullOrWhiteSpace(columnName))
-                    {
-                        columnNames.Add(columnName);
-                    }
-
-                    break;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(name) || range is null)
-        {
-            return null;
-        }
-
-        return new TableInfo
-        {
-            Name = name,
-            Sheet = sheetName,
-            Range = range.Value,
-            ColumnNames = columnNames,
-        };
-    }
-
     private static void ReadTableProperties(ReadOnlySpan<byte> payload, ref string? name, ref ExcelRange? range)
     {
-        if (payload.Length < BeginListStringOffset)
+        if (payload.Length < 64)
         {
             return;
         }
 
         range = XlsbBinary.TryReadRfx(payload);
 
-        int offset = BeginListStringOffset;
+        int offset = 64;
         string tableName = XlsbBinary.ReadNullableWideString(payload, ref offset);
         string displayName = XlsbBinary.ReadNullableWideString(payload, ref offset);
 
@@ -82,12 +62,12 @@ internal static class XlsbTableParser
 
     private static string? ReadColumnName(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length < BeginListColStringOffset)
+        if (payload.Length < 24)
         {
             return null;
         }
 
-        int offset = BeginListColStringOffset;
+        int offset = 24;
         string name = XlsbBinary.ReadNullableWideString(payload, ref offset);
         string caption = XlsbBinary.ReadNullableWideString(payload, ref offset);
 
@@ -95,5 +75,4 @@ internal static class XlsbTableParser
             ? caption
             : name;
     }
-
 }

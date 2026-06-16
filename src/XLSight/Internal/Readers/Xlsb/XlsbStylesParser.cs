@@ -34,8 +34,16 @@ internal static class XlsbStylesParser
                     inCellXfs = false;
                     break;
 
-                case XlsbRecordType.BrtXF when inCellXfs:
-                    ReadCellXf(record.Payload, customFormats, classifications);
+                case XlsbRecordType.BrtXF when inCellXfs && classifications.Count < ExcelLimits.MaxStyleCount:
+                    if (record.Payload.Length < XfNumberFormatOffset + 2)
+                    {
+                        classifications.Add(FormatClass.General);
+                        break;
+                    }
+
+                    int formatId = XlsbBinary.ReadUInt16(record.Payload, XfNumberFormatOffset);
+                    customFormats.TryGetValue(formatId, out string? formatCode);
+                    classifications.Add(NumberFormatClassifier.Classify(formatId, formatCode));
                     break;
             }
         }
@@ -59,26 +67,5 @@ internal static class XlsbStylesParser
         {
             customFormats[formatId] = formatCode;
         }
-    }
-
-    private static void ReadCellXf(
-        ReadOnlySpan<byte> payload,
-        Dictionary<int, string> customFormats,
-        List<FormatClass> classifications)
-    {
-        if (classifications.Count >= ExcelLimits.MaxStyleCount)
-        {
-            return;
-        }
-
-        if (payload.Length < XfNumberFormatOffset + 2)
-        {
-            classifications.Add(FormatClass.General);
-            return;
-        }
-
-        int formatId = XlsbBinary.ReadUInt16(payload, XfNumberFormatOffset);
-        customFormats.TryGetValue(formatId, out string? formatCode);
-        classifications.Add(NumberFormatClassifier.Classify(formatId, formatCode));
     }
 }

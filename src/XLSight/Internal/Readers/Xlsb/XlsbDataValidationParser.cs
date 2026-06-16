@@ -38,11 +38,11 @@ internal static class XlsbDataValidationParser
             return new DataValidationInfo
             {
                 Type = type,
-                SequenceOfReferences = string.Join(' ', ranges.Select(FormatRange)),
+                SequenceOfReferences = string.Join(' ', ranges.Select(XlsbBinary.FormatRange)),
                 Ranges = ranges,
                 Formula1 = formula1,
                 Formula2 = formula2,
-                Operator = UsesOperator(type) ? ParseOperator(flags) : null,
+                Operator = UsesOperator(type) ? (DataValidationOperator)((flags >> 20) & 0x7u) : null,
                 AllowBlank = (flags & (1u << 8)) != 0,
                 ShowDropDown = (flags & (1u << 9)) != 0,
                 ShowInputMessage = (flags & (1u << 18)) != 0,
@@ -54,11 +54,7 @@ internal static class XlsbDataValidationParser
                 PromptMessage = NullIfEmpty(promptMessage),
             };
         }
-        catch (MalformedWorkbookException)
-        {
-            return null;
-        }
-        catch (OverflowException)
+        catch (Exception ex) when (ex is MalformedWorkbookException or OverflowException)
         {
             return null;
         }
@@ -128,14 +124,8 @@ internal static class XlsbDataValidationParser
         return ranges;
     }
 
-    private static DataValidationType ParseType(uint flags) => (flags & 0xFu) switch
-    {
-        <= 7 => (DataValidationType)(flags & 0xFu),
-        _ => DataValidationType.None,
-    };
-
-    private static DataValidationOperator ParseOperator(uint flags) =>
-        (DataValidationOperator)((flags >> 20) & 0x7u);
+    private static DataValidationType ParseType(uint flags) =>
+        (flags & 0xFu) <= 7 ? (DataValidationType)(flags & 0xFu) : DataValidationType.None;
 
     private static DataValidationErrorStyle ParseErrorStyle(uint flags) => ((flags >> 4) & 0x7u) switch
     {
@@ -145,15 +135,8 @@ internal static class XlsbDataValidationParser
     };
 
     private static bool UsesOperator(DataValidationType type) => type is
-        DataValidationType.Whole or
-        DataValidationType.Decimal or
-        DataValidationType.Date or
-        DataValidationType.Time or
-        DataValidationType.TextLength;
-
-    private static string FormatRange(ExcelRange range) => range.TopLeft == range.BottomRight
-        ? range.TopLeft.ToString()
-        : $"{range.TopLeft}:{range.BottomRight}";
+        DataValidationType.Whole or DataValidationType.Decimal or DataValidationType.Date or
+        DataValidationType.Time or DataValidationType.TextLength;
 
     private static string? NullIfEmpty(string value) => value.Length == 0 ? null : value;
 }
