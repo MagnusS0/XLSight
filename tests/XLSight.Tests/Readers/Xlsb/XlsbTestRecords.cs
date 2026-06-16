@@ -155,6 +155,14 @@ internal static class XlsbTestRecords
     internal static byte[] SharedString(int columnIndex, int index) =>
         Record(XlsbRecordType.BrtCellIsst, CellPayload(columnIndex, 0, Int32Payload(index)));
 
+    internal static byte[] BeginSst(int total, int unique)
+    {
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, (uint)total);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), (uint)unique);
+        return Record(XlsbRecordType.BrtBeginSst, payload);
+    }
+
     internal static byte[] SharedStringItem(string value) =>
         Record(XlsbRecordType.BrtSSTItem, RichString(value));
 
