@@ -315,7 +315,7 @@ internal static class XlsbTestRecords
         return payload;
     }
 
-    private static void WriteVarInt(Stream stream, int value)
+    internal static void WriteVarInt(Stream stream, int value)
     {
         uint remaining = (uint)value;
         do

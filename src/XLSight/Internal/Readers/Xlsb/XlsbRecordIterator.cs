@@ -9,6 +9,7 @@ internal sealed class XlsbRecordIterator : IDisposable
 {
     // 32 KB is far below the 85 KB LOH threshold, protecting peak RSS and LOH.
     internal const int DefaultInputBufferSize = 32 * 1024;
+    internal const int MaxRecordPayloadLength = 16 * 1024 * 1024;
 
     private readonly byte[] _input;
     private readonly Stream _stream;
@@ -60,6 +61,11 @@ internal sealed class XlsbRecordIterator : IDisposable
 
     private bool TryReadSlow(int type, int length, out XlsbRecord record)
     {
+        if (length > MaxRecordPayloadLength)
+        {
+            throw new MalformedWorkbookException("XLSB record payload length exceeds the supported maximum.");
+        }
+
         if (_oversize is null || _oversize.Length < length)
         {
             if (_oversize is not null)

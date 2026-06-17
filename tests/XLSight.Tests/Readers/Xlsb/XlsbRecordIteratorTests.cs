@@ -33,6 +33,19 @@ public sealed class XlsbRecordIteratorTests
         Assert.Throws<MalformedWorkbookException>(() => iterator.TryRead(out _));
     }
 
+    [Fact]
+    public void TryRead_OversizedPayloadLength_ThrowsMalformedWorkbookException()
+    {
+        using var stream = new MemoryStream();
+        XlsbTestRecords.WriteVarInt(stream, XlsbRecordType.BrtCellReal);
+        XlsbTestRecords.WriteVarInt(stream, XlsbRecordIterator.MaxRecordPayloadLength + 1);
+        stream.Position = 0;
+
+        using var iterator = new XlsbRecordIterator(stream);
+
+        Assert.Throws<MalformedWorkbookException>(() => iterator.TryRead(out _));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
