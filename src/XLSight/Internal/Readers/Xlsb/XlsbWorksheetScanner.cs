@@ -6,60 +6,15 @@ namespace XLSight.Internal.Readers.Xlsb;
 
 internal static class XlsbWorksheetScanner
 {
-    internal static XlsbSheetCursor OpenCursor(
-        Stream worksheetStream,
-        XlsbSharedStringTable sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range)
-        => OpenCursor(
-            worksheetStream,
-            new Lazy<XlsbSharedStringTable>(() => sharedStrings, LazyThreadSafetyMode.PublicationOnly),
-            styles,
-            isDate1904,
-            mode,
-            range,
-            formulaContext: null);
-
-    internal static XlsbSheetCursor OpenCursor(
+    internal static void ScanSheet<TSink>(
         Stream worksheetStream,
         Lazy<XlsbSharedStringTable> sharedStrings,
         StyleTable styles,
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
+        ref TSink sink,
         XlsbFormulaContext? formulaContext = null)
-        => new(worksheetStream, sharedStrings, styles, isDate1904, mode, range, formulaContext);
-
-    internal static void ScanSheet<TSink>(
-        Stream worksheetStream,
-        Lazy<XlsbSharedStringTable> sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range,
-        ref TSink sink)
-        where TSink : struct, IByteSheetSink
-        => ScanSheet(
-            worksheetStream,
-            sharedStrings,
-            styles,
-            isDate1904,
-            mode,
-            range,
-            formulaContext: null,
-            ref sink);
-
-    internal static void ScanSheet<TSink>(
-        Stream worksheetStream,
-        Lazy<XlsbSharedStringTable> sharedStrings,
-        StyleTable styles,
-        bool isDate1904,
-        ReadMode mode,
-        ExcelRange range,
-        XlsbFormulaContext? formulaContext,
-        ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
         using var iterator = new XlsbRecordIterator(worksheetStream);
@@ -68,6 +23,27 @@ internal static class XlsbWorksheetScanner
 
         while (iterator.TryRead(out XlsbRecord record))
         {
+            // Fast path: cell records (BrtCellBlank=1 through BrtFmlaError=11) never match
+            // TryHandleExactMetadata or TryHandleRowHeader, so skip both checks.
+            if ((uint)(record.Type - XlsbRecordType.BrtCellBlank) <=
+                (uint)(XlsbRecordType.BrtFmlaError - XlsbRecordType.BrtCellBlank))
+            {
+                if (!TryPushCell(
+                        record,
+                        currentRowIndex,
+                        sharedStrings,
+                        styles,
+                        isDate1904,
+                        mode,
+                        range,
+                        formulaContext,
+                        ref sink))
+                {
+                    break;
+                }
+                continue;
+            }
+
             if (record.Type == XlsbRecordType.BrtEndSheetData)
             {
                 if (!shouldScanExactMetadata)
@@ -87,21 +63,6 @@ internal static class XlsbWorksheetScanner
             if (TryHandleRowHeader(record, range, ref currentRowIndex, ref sink, out bool stop))
             {
                 if (stop) { break; }
-                continue;
-            }
-
-            if (!TryPushCell(
-                    record,
-                    currentRowIndex,
-                    sharedStrings,
-                    styles,
-                    isDate1904,
-                    mode,
-                    range,
-                    formulaContext,
-                    ref sink))
-            {
-                break;
             }
         }
 
@@ -118,26 +79,22 @@ internal static class XlsbWorksheetScanner
         switch (record.Type)
         {
             case XlsbRecordType.BrtWsDim:
-            {
-                if (TryReadRange(record.Payload, out int startRow, out int startColumn, out int endRow, out int endColumn))
+                if (XlsbBinary.TryReadRfx(record.Payload) is { } dimension)
                 {
-                    sink.OnDimension(new ExcelRange(
-                        new ExcelAddress(startColumn, startRow),
-                        new ExcelAddress(endColumn, endRow)));
+                    sink.OnDimension(dimension);
                 }
-
                 return true;
-            }
 
             case XlsbRecordType.BrtMergeCell when includePostSheetData:
-            {
-                if (TryReadRange(record.Payload, out int startRow, out int startColumn, out int endRow, out int endColumn))
+                if (XlsbBinary.TryReadRfx(record.Payload) is { } merged)
                 {
-                    sink.OnMergeCell(new MergedRegion(startRow, startColumn, endRow, endColumn));
+                    sink.OnMergeCell(new MergedRegion(
+                        merged.TopLeft.Row,
+                        merged.TopLeft.Column,
+                        merged.BottomRight.Row,
+                        merged.BottomRight.Column));
                 }
-
                 return true;
-            }
 
             case XlsbRecordType.BrtBeginConditionalFormatting when includePostSheetData:
             case XlsbRecordType.BrtBeginConditionalFormatting14 when includePostSheetData:
@@ -169,29 +126,23 @@ internal static class XlsbWorksheetScanner
         out bool stop)
         where TSink : struct, IByteSheetSink
     {
-        stop = false;
         if (record.Type != XlsbRecordType.BrtRowHdr)
         {
+            stop = false;
             return false;
         }
 
-        int nextRowIndex = XlsbBinary.ReadRowIndex(record.Payload);
-        if (nextRowIndex <= 0)
+        rowIndex = XlsbBinary.ReadRowIndex(record.Payload);
+        if (rowIndex <= 0)
         {
-            rowIndex = 0;
+            stop = false;
             return true;
         }
 
-        rowIndex = nextRowIndex;
-        if (!range.IsUnbounded && nextRowIndex > range.BottomRight.Row)
+        stop = !range.IsUnbounded && rowIndex > range.BottomRight.Row;
+        if (!stop && IsRowInRange(rowIndex, range))
         {
-            stop = true;
-            return true;
-        }
-
-        if (IsRowInRange(nextRowIndex, range))
-        {
-            sink.OnRowStart(nextRowIndex);
+            sink.OnRowStart(rowIndex);
         }
 
         return true;
@@ -209,7 +160,7 @@ internal static class XlsbWorksheetScanner
         ref TSink sink)
         where TSink : struct, IByteSheetSink
     {
-        if (rowIndex <= 0 || !IsRowInRange(rowIndex, range) || !IsSupportedCellRecord(record.Type))
+        if (rowIndex <= 0 || !IsRowInRange(rowIndex, range))
         {
             return true;
         }
@@ -249,56 +200,6 @@ internal static class XlsbWorksheetScanner
         }
 
         return sink.OnCell(columnIndex, kind, styleIndex, value, rawIndex);
-    }
-
-    private static bool IsSupportedCellRecord(int recordType) => recordType
-        is XlsbRecordType.BrtCellBlank
-        or XlsbRecordType.BrtCellRk
-        or XlsbRecordType.BrtCellError
-        or XlsbRecordType.BrtCellBool
-        or XlsbRecordType.BrtCellReal
-        or XlsbRecordType.BrtCellSt
-        or XlsbRecordType.BrtCellIsst
-        or XlsbRecordType.BrtFmlaString
-        or XlsbRecordType.BrtFmlaNum
-        or XlsbRecordType.BrtFmlaBool
-        or XlsbRecordType.BrtFmlaError;
-
-    private static bool TryReadRange(
-        ReadOnlySpan<byte> payload,
-        out int startRow,
-        out int startColumn,
-        out int endRow,
-        out int endColumn)
-    {
-        startRow = 0;
-        startColumn = 0;
-        endRow = 0;
-        endColumn = 0;
-
-        if (payload.Length < 16)
-        {
-            return false;
-        }
-
-        uint rowFirst = XlsbBinary.ReadUInt32(payload, 0);
-        uint rowLast = XlsbBinary.ReadUInt32(payload, 4);
-        uint columnFirst = XlsbBinary.ReadUInt32(payload, 8);
-        uint columnLast = XlsbBinary.ReadUInt32(payload, 12);
-
-        if (rowFirst > rowLast ||
-            columnFirst > columnLast ||
-            rowLast >= ExcelLimits.MaxRows ||
-            columnLast >= ExcelLimits.MaxColumns)
-        {
-            return false;
-        }
-
-        startRow = checked((int)rowFirst + 1);
-        endRow = checked((int)rowLast + 1);
-        startColumn = checked((int)columnFirst + 1);
-        endColumn = checked((int)columnLast + 1);
-        return true;
     }
 
     private static bool IsRowInRange(int rowIndex, ExcelRange range) =>

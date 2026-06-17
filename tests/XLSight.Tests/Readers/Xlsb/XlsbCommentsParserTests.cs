@@ -104,7 +104,7 @@ public sealed class XlsbCommentsParserTests : IDisposable
         WriteEntry(archive, "xl/workbook.bin", XlsbTestRecords.Stream(BundleSheet()));
         WriteEntry(archive, "xl/_rels/workbook.bin.rels", """
             <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-              <Relationship Id="rId1" Target="worksheets/sheet1.bin" />
+              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin" />
             </Relationships>
             """);
         WriteEntry(archive, "xl/worksheets/sheet1.bin", XlsbTestRecords.Stream(XlsbTestRecords.EndSheetData()));

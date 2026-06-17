@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using XLSight.Analysis;
+using XLSight.Internal.Analysis;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers;
@@ -252,9 +253,15 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         var relsEntry = package.GetEntry("xl/_rels/workbook.bin.rels")
             ?? throw new MalformedWorkbookException("XLSB workbook relationships entry 'xl/_rels/workbook.bin.rels' was not found.");
 
-        using Stream workbookStream = workbookEntry.OpenBuffered();
-        using Stream relsStream = relsEntry.OpenBuffered();
-        var relationshipPaths = XlsbRelationshipParser.Parse(relsStream);
+        // Both streams feed XlsbRecordIterator which pools its own 64 KB buffer,
+        // so OpenBuffered() would add a redundant heap allocation.
+        using Stream workbookStream = workbookEntry.Open();
+        using Stream relsStream = relsEntry.Open();
+        var rels = PackageRelationshipReader.Read(relsStream, "xl/workbook.bin");
+        var relationshipPaths = rels.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value.Target,
+            StringComparer.Ordinal);
         var metadata = XlsbWorkbookParser.Parse(workbookStream, relationshipPaths);
         return new ExcelWorkbook(new XlsbWorkbookReader(package, metadata));
     }

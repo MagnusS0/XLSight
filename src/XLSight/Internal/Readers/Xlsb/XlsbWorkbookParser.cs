@@ -4,17 +4,6 @@ internal static class XlsbWorkbookParser
 {
     private const uint WorkbookScope = uint.MaxValue;
     private const int BrtNameFixedSize = 9;
-    private const int PtgIsect = 0x0F;
-    private const int PtgUnion = 0x10;
-    private const int PtgRange = 0x11;
-    private const int PtgRef3d = 0x1A;
-    private const int PtgArea3d = 0x1B;
-    private const int PtgRefErr3d = 0x1C;
-    private const int PtgAreaErr3d = 0x1D;
-    private const int PtgCodeMask = 0x1F;
-    private const ushort ColumnMask = 0x3FFF;
-    private const ushort ColumnRelativeFlag = 0x4000;
-    private const ushort RowRelativeFlag = 0x8000;
 
     internal static XlsbMetadata Parse(Stream workbookStream, Dictionary<string, string> pathsByRelationshipId)
     {
@@ -109,7 +98,7 @@ internal static class XlsbWorkbookParser
 
     private static XlsbDefinedNameInfo? ParseDefinedName(
         ReadOnlySpan<byte> payload,
-        IReadOnlyList<XlsbSheetInfo> sheets,
+        List<XlsbSheetInfo> sheets,
         XlsbFormulaContext context)
     {
         if (payload.Length < BrtNameFixedSize)
@@ -137,10 +126,15 @@ internal static class XlsbWorkbookParser
         _ = XlsbBinary.ReadNullableWideString(payload, ref offset);
         if (isProcedure)
         {
-            SkipProcedureStrings(payload, ref offset);
+            for (int i = 0; i < 4; i++)
+            {
+                _ = XlsbBinary.ReadNullableWideString(payload, ref offset);
+            }
         }
 
-        string? scopeSheetName = ResolveScopeSheetName(sheetScope, sheets);
+        string? scopeSheetName = sheetScope == WorkbookScope || sheetScope >= sheets.Count
+            ? null
+            : sheets[(int)sheetScope].Name;
         return new XlsbDefinedNameInfo(name, reference, scopeSheetName);
     }
 
@@ -161,7 +155,7 @@ internal static class XlsbWorkbookParser
             throw new MalformedWorkbookException("XLSB defined name formula payload is truncated.");
         }
 
-        ReadOnlySpan<byte> formula = payload.Slice(offset, (int)formulaByteCount);
+        int formulaStart = offset - 4;
         offset += (int)formulaByteCount;
 
         if (payload.Length - offset < 4)
@@ -177,190 +171,7 @@ internal static class XlsbWorkbookParser
         }
 
         offset += (int)extraByteCount;
-        return DecodeReferenceFormula(formula, context);
-    }
-
-    private static string? DecodeReferenceFormula(ReadOnlySpan<byte> formula, XlsbFormulaContext context)
-    {
-        var references = new Stack<string>();
-        int offset = 0;
-        while (offset < formula.Length)
-        {
-            int ptg = formula[offset] & PtgCodeMask;
-            string? reference;
-            switch (ptg)
-            {
-                case PtgRef3d:
-                    if (formula.Length - offset < 9) { return null; }
-
-                    reference = DecodeCellReference(formula[offset..(offset + 9)], context);
-                    if (reference is null) { return null; }
-
-                    references.Push(reference);
-                    offset += 9;
-                    break;
-
-                case PtgArea3d:
-                    if (formula.Length - offset < 15) { return null; }
-
-                    reference = DecodeAreaReference(formula[offset..(offset + 15)], context);
-                    if (reference is null) { return null; }
-
-                    references.Push(reference);
-                    offset += 15;
-                    break;
-
-                case PtgRefErr3d:
-                case PtgAreaErr3d:
-                    if (formula.Length - offset < 7) { return null; }
-
-                    reference = DecodeErrorReference(formula[offset..(offset + 7)], context);
-                    if (reference is null) { return null; }
-
-                    references.Push(reference);
-                    offset += 7;
-                    break;
-
-                case PtgUnion:
-                case PtgIsect:
-                case PtgRange:
-                    if (!TryPopBinaryReferences(references, out string? left, out string? right))
-                    {
-                        return null;
-                    }
-
-                    references.Push(CombineReferences(left, right, ptg));
-                    offset++;
-                    break;
-
-                default:
-                    return null;
-            }
-        }
-
-        return references.Count == 1 ? references.Pop() : null;
-    }
-
-    private static string? DecodeCellReference(ReadOnlySpan<byte> formula, XlsbFormulaContext context)
-    {
-        string? sheetPrefix = ResolveReferenceSheetPrefix(formula, context);
-        if (sheetPrefix is null)
-        {
-            return null;
-        }
-
-        uint row = XlsbBinary.ReadUInt32(formula, 3);
-        ushort column = XlsbBinary.ReadUInt16(formula, 7);
-        string? address = FormatAddress(row, column);
-        return address is null ? null : $"{sheetPrefix}!{address}";
-    }
-
-    private static string? DecodeAreaReference(ReadOnlySpan<byte> formula, XlsbFormulaContext context)
-    {
-        string? sheetPrefix = ResolveReferenceSheetPrefix(formula, context);
-        if (sheetPrefix is null)
-        {
-            return null;
-        }
-
-        uint firstRow = XlsbBinary.ReadUInt32(formula, 3);
-        uint lastRow = XlsbBinary.ReadUInt32(formula, 7);
-        ushort firstColumn = XlsbBinary.ReadUInt16(formula, 11);
-        ushort lastColumn = XlsbBinary.ReadUInt16(formula, 13);
-        string? firstAddress = FormatAddress(firstRow, firstColumn);
-        string? lastAddress = FormatAddress(lastRow, lastColumn);
-        if (firstAddress is null || lastAddress is null)
-        {
-            return null;
-        }
-
-        return string.Equals(firstAddress, lastAddress, StringComparison.Ordinal)
-            ? $"{sheetPrefix}!{firstAddress}"
-            : $"{sheetPrefix}!{firstAddress}:{lastAddress}";
-    }
-
-    private static string? DecodeErrorReference(ReadOnlySpan<byte> formula, XlsbFormulaContext context)
-    {
-        string? sheetPrefix = ResolveReferenceSheetPrefix(formula, context);
-        return sheetPrefix is null ? null : $"{sheetPrefix}!#REF!";
-    }
-
-    private static bool TryPopBinaryReferences(Stack<string> references, out string left, out string right)
-    {
-        if (references.Count < 2)
-        {
-            left = string.Empty;
-            right = string.Empty;
-            return false;
-        }
-
-        right = references.Pop();
-        left = references.Pop();
-        return true;
-    }
-
-    private static string CombineReferences(string left, string right, int ptg) =>
-        ptg switch
-        {
-            PtgIsect => $"{left} {right}",
-            PtgUnion => $"{left},{right}",
-            PtgRange => $"{left}:{right}",
-            _ => throw new ArgumentOutOfRangeException(nameof(ptg), ptg, null)
-        };
-
-    private static string? ResolveReferenceSheetPrefix(ReadOnlySpan<byte> formula, XlsbFormulaContext context)
-    {
-        int externSheetIndex = XlsbBinary.ReadUInt16(formula, 1);
-        return context.TryResolveSheet(externSheetIndex, out _, out string prefix) ? prefix : null;
-    }
-
-    private static string? FormatAddress(uint zeroBasedRow, ushort columnFlags)
-    {
-        if ((columnFlags & (ColumnRelativeFlag | RowRelativeFlag)) != 0 || zeroBasedRow >= 1_048_576)
-        {
-            return null;
-        }
-
-        int zeroBasedColumn = columnFlags & ColumnMask;
-        if (zeroBasedColumn >= 16_384)
-        {
-            return null;
-        }
-
-        return $"${FormatColumnName(zeroBasedColumn)}${zeroBasedRow + 1}";
-    }
-
-    private static string FormatColumnName(int zeroBasedColumn)
-    {
-        Span<char> buffer = stackalloc char[3];
-        int position = buffer.Length;
-        int value = zeroBasedColumn + 1;
-        while (value > 0)
-        {
-            value--;
-            buffer[--position] = (char)('A' + (value % 26));
-            value /= 26;
-        }
-
-        return new string(buffer[position..]);
-    }
-
-
-    private static string? ResolveScopeSheetName(uint sheetScope, IReadOnlyList<XlsbSheetInfo> sheets)
-    {
-        if (sheetScope == WorkbookScope || sheetScope >= sheets.Count)
-        {
-            return null;
-        }
-
-        return sheets[(int)sheetScope].Name;
-    }
-
-    private static void SkipProcedureStrings(ReadOnlySpan<byte> payload, ref int offset)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            _ = XlsbBinary.ReadNullableWideString(payload, ref offset);
-        }
+        string reference = XlsbFormulaDecoder.DecodeDefinedName(payload[formulaStart..offset], context);
+        return reference.Length == 0 ? null : reference;
     }
 }

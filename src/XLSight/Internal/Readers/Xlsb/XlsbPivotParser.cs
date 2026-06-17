@@ -12,8 +12,6 @@ internal static class XlsbPivotParser
 
     internal static PivotTableMetadata ParsePivotTable(Stream pivotStream)
     {
-        ArgumentNullException.ThrowIfNull(pivotStream);
-
         string? name = null;
         uint? cacheId = null;
         ExcelRange? range = null;
@@ -38,8 +36,6 @@ internal static class XlsbPivotParser
 
     internal static Dictionary<uint, string> ParseWorkbookPivotCacheRelationships(Stream workbookStream)
     {
-        ArgumentNullException.ThrowIfNull(workbookStream);
-
         var relationshipsByCacheId = new Dictionary<uint, string>();
         using var iterator = new XlsbRecordIterator(workbookStream);
         while (iterator.TryRead(out XlsbRecord record))
@@ -63,8 +59,6 @@ internal static class XlsbPivotParser
 
     internal static string? ParsePivotCacheSource(Stream cacheDefinitionStream)
     {
-        ArgumentNullException.ThrowIfNull(cacheDefinitionStream);
-
         bool isWorksheetSource = false;
         string? sheet = null;
         string? reference = null;
@@ -128,7 +122,7 @@ internal static class XlsbPivotParser
         if (payload.Length - offset == 16)
         {
             ExcelRange? range = XlsbBinary.TryReadRfx(payload[offset..]);
-            reference = range is null ? null : FormatRange(range.Value);
+            reference = range is null ? null : XlsbBinary.FormatRange(range.Value);
         }
         else if (payload.Length - offset >= 4)
         {
@@ -136,18 +130,6 @@ internal static class XlsbPivotParser
         }
 
         return (sheet, reference);
-    }
-
-    private static string FormatRange(ExcelRange range)
-    {
-        if (range.IsUnbounded)
-        {
-            return string.Empty;
-        }
-
-        return range.TopLeft.Equals(range.BottomRight)
-            ? range.TopLeft.ToString()
-            : $"{range.TopLeft}:{range.BottomRight}";
     }
 
 }

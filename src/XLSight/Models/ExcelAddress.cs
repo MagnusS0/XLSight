@@ -82,7 +82,7 @@ public readonly record struct ExcelAddress
     /// Converts a 1-based column index to Excel column letters using bijective base-26.
     /// 1 → "A", 26 → "Z", 27 → "AA", 702 → "ZZ", 703 → "AAA", 16384 → "XFD".
     /// </summary>
-    private static string ColumnIndexToLetters(int column)
+    internal static string ColumnIndexToLetters(int column)
     {
         // Build digits right-to-left in a stack-allocated buffer (max 3 chars: XFD).
         // Bijective base-26: subtract 1 before each modulus to shift A=1..Z=26 → A=0..Z=25.
