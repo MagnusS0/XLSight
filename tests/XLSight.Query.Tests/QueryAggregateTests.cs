@@ -27,7 +27,7 @@ public sealed class QueryAggregateTests
 
         Assert.Equal(["Month", "Sum(Units)"], result.Columns);
         var actual = result.Rows.ToDictionary(
-            r => r.Values[0].AsText(), r => r.Values[1].AsNumber(), StringComparer.Ordinal);
+            r => r.Values.Span[0].AsText(), r => r.Values.Span[1].AsNumber(), StringComparer.Ordinal);
         Assert.Equal(expected, actual);
     }
 
@@ -45,11 +45,11 @@ public sealed class QueryAggregateTests
             .Execute();
 
         var row = Assert.Single(result.Rows);
-        Assert.Equal(units.Sum(), row.Values[0].AsNumber());
-        Assert.Equal(units.Length, row.Values[1].AsNumber());
-        Assert.Equal(units.Min(), row.Values[2].AsNumber());
-        Assert.Equal(units.Max(), row.Values[3].AsNumber());
-        Assert.Equal(units.Average(), row.Values[4].AsNumber());
+        Assert.Equal(units.Sum(), row.Values.Span[0].AsNumber());
+        Assert.Equal(units.Length, row.Values.Span[1].AsNumber());
+        Assert.Equal(units.Min(), row.Values.Span[2].AsNumber());
+        Assert.Equal(units.Max(), row.Values.Span[3].AsNumber());
+        Assert.Equal(units.Average(), row.Values.Span[4].AsNumber());
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class QueryAggregateTests
             .Aggregate(Agg.Avg("NetSales"))
             .Execute();
 
-        Assert.Equal(clean.Average(), result.Rows[0].Values[0].AsNumber());
+        Assert.Equal(clean.Average(), result.Rows[0].Values.Span[0].AsNumber());
     }
 
     [Fact]
@@ -80,8 +80,8 @@ public sealed class QueryAggregateTests
             .Execute();
 
         var row = Assert.Single(result.Rows);
-        Assert.Equal(SalesWorkbook.Data.Min(d => d.OrderDate), row.Values[0].AsDate());
-        Assert.Equal(SalesWorkbook.Data.Max(d => d.OrderDate), row.Values[1].AsDate());
+        Assert.Equal(SalesWorkbook.Data.Min(d => d.OrderDate), row.Values.Span[0].AsDate());
+        Assert.Equal(SalesWorkbook.Data.Max(d => d.OrderDate), row.Values.Span[1].AsDate());
     }
 
     [Fact]
@@ -98,8 +98,8 @@ public sealed class QueryAggregateTests
             .Aggregate(Agg.Sum("NetSales"))
             .Execute();
 
-        var marchRow = result.Rows.Single(r => r.Values[0].AsText() == "Mar");
-        Assert.True(marchRow.Values[1].IsEmpty);
+        var marchRow = result.Rows.Single(r => r.Values.Span[0].AsText() == "Mar");
+        Assert.True(marchRow.Values.Span[1].IsEmpty);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class QueryAggregateTests
         Assert.Equal(sync.RowsScanned, async.RowsScanned);
         Assert.Equal(sync.RowsMatched, async.RowsMatched);
         Assert.Equal(
-            sync.Rows.Select(r => string.Join("|", r.Values)),
-            async.Rows.Select(r => string.Join("|", r.Values)));
+            sync.Rows.Select(r => string.Join("|", r.Values.ToArray())),
+            async.Rows.Select(r => string.Join("|", r.Values.ToArray())));
     }
 }

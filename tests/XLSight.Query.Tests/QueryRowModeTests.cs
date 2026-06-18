@@ -25,7 +25,7 @@ public sealed class QueryRowModeTests
 
         Assert.Equal(SalesWorkbook.Headers, result.Columns);
         Assert.Equal(expectedRows, result.Rows.Select(r => r.SourceRowIndex!.Value));
-        Assert.All(result.Rows, r => Assert.Equal("APAC", r.Values[0].AsText()));
+        Assert.All(result.Rows, r => Assert.Equal("APAC", r.Values.Span[0].AsText()));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public sealed class QueryRowModeTests
             .Execute();
 
         Assert.Equal(2, result.Rows.Count);
-        Assert.Equal(["EMEA", "APAC"], result.Rows.Select(r => r.Values[0].AsText()));
+        Assert.Equal(["EMEA", "APAC"], result.Rows.Select(r => r.Values.Span[0].AsText()));
         // The full range is still scanned: later rows can update any group.
         Assert.Equal(SalesWorkbook.Data.Length, result.RowsScanned);
     }
@@ -93,7 +93,7 @@ public sealed class QueryRowModeTests
             .Aggregate(Agg.Count())
             .Execute();
 
-        Assert.Equal(SalesWorkbook.Data.Count(d => d.Region == "EMEA"), result.Rows[0].Values[0].AsNumber());
+        Assert.Equal(SalesWorkbook.Data.Count(d => d.Region == "EMEA"), result.Rows[0].Values.Span[0].AsNumber());
     }
 
     [Fact]

@@ -22,7 +22,7 @@ public sealed class QueryGuardrailTests
             .Aggregate(Agg.Sum("NetSales"))
             .Execute();
 
-        Assert.Equal(expected, result.Rows[0].Values[0].AsNumber());
+        Assert.Equal(expected, result.Rows[0].Values.Span[0].AsNumber());
         var dirty = Assert.Single(result.Unaggregatable);
         Assert.Equal("NetSales", dirty.Column);
         Assert.Equal(1, dirty.SkippedCount);
@@ -104,7 +104,7 @@ public sealed class QueryGuardrailTests
             .Execute();
 
         Assert.Equal(SalesWorkbook.Data.Length, result.RowsScanned);
-        Assert.Equal(SalesWorkbook.Data.Count(d => d.Units > 5), result.Rows[0].Values[0].AsNumber());
+        Assert.Equal(SalesWorkbook.Data.Count(d => d.Units > 5), result.Rows[0].Values.Span[0].AsNumber());
     }
 
     private static ColumnProfile UnitsProfile(double min, double max) => new()

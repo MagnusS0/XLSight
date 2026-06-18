@@ -14,7 +14,7 @@ public sealed class QueryFilterTests
         QueryResult result = configure(workbook.QueryRange(SalesWorkbook.SheetName, Range))
             .Aggregate(Agg.Count())
             .Execute();
-        return (int)result.Rows[0].Values[0].AsNumber();
+        return (int)result.Rows[0].Values.Span[0].AsNumber();
     }
 
     [Fact]
