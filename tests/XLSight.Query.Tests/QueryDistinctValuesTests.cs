@@ -31,7 +31,7 @@ public sealed class QueryDistinctValuesTests
 
         IReadOnlyList<DistinctValueCount> values = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Month", QueryOp.Equals, "Jan")
+            .Where("Month", QueryOperator.Equals, "Jan")
             .DistinctValues("Region");
 
         Assert.Equal([new("EMEA", 2), new("AMER", 1), new("APAC", 1)], values);

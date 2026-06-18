@@ -39,7 +39,7 @@ public sealed class SheetQuery
     /// <param name="column">The column name (from the header row).</param>
     /// <param name="op">The comparison operator.</param>
     /// <param name="value">The text literal. Only text cells can match.</param>
-    public SheetQuery Where(string column, QueryOp op, string value)
+    public SheetQuery Where(string column, QueryOperator op, string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         ArgumentNullException.ThrowIfNull(value);
@@ -51,7 +51,7 @@ public sealed class SheetQuery
     /// <param name="column">The column name (from the header row).</param>
     /// <param name="op">The comparison operator.</param>
     /// <param name="value">The numeric literal. Only numeric cells can match.</param>
-    public SheetQuery Where(string column, QueryOp op, double value)
+    public SheetQuery Where(string column, QueryOperator op, double value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromNumber(value)));
@@ -62,7 +62,7 @@ public sealed class SheetQuery
     /// <param name="column">The column name (from the header row).</param>
     /// <param name="op">The comparison operator.</param>
     /// <param name="value">The date literal. Only date cells can match.</param>
-    public SheetQuery Where(string column, QueryOp op, DateTime value)
+    public SheetQuery Where(string column, QueryOperator op, DateTime value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromDate(value)));
@@ -71,13 +71,13 @@ public sealed class SheetQuery
 
     /// <summary>Adds a boolean filter. Filters are AND-combined.</summary>
     /// <param name="column">The column name (from the header row).</param>
-    /// <param name="op">Either <see cref="QueryOp.Equals"/> or <see cref="QueryOp.NotEquals"/>.</param>
+    /// <param name="op">Either <see cref="QueryOperator.Equals"/> or <see cref="QueryOperator.NotEquals"/>.</param>
     /// <param name="value">The boolean literal. Only boolean cells can match.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="op"/> is an ordering operator.</exception>
-    public SheetQuery Where(string column, QueryOp op, bool value)
+    public SheetQuery Where(string column, QueryOperator op, bool value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        if (op is not (QueryOp.Equals or QueryOp.NotEquals))
+        if (op is not (QueryOperator.Equals or QueryOperator.NotEquals))
         {
             throw new ArgumentException("Boolean filters support Equals and NotEquals only.", nameof(op));
         }
@@ -103,9 +103,9 @@ public sealed class SheetQuery
         return this;
     }
 
-    /// <summary>Adds aggregates to compute, e.g. <c>Agg.Sum("NetSales"), Agg.Count()</c>.</summary>
-    /// <param name="aggregates">The aggregates to compute.</param>
-    public SheetQuery Aggregate(params AggregateSpec[] aggregates)
+    /// <summary>Selects aggregate projections to compute, e.g. <c>QueryAggregates.Sum("NetSales"), QueryAggregates.Count()</c>.</summary>
+    /// <param name="aggregates">The aggregate projections to compute.</param>
+    public SheetQuery Select(params AggregateSpec[] aggregates)
     {
         ArgumentNullException.ThrowIfNull(aggregates);
         if (aggregates.Length == 0)
@@ -123,7 +123,7 @@ public sealed class SheetQuery
     /// first <paramref name="count"/> groups in first-seen order are returned after a full scan.
     /// </summary>
     /// <param name="count">The maximum number of result rows.</param>
-    public SheetQuery Limit(int count)
+    public SheetQuery Take(int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         _limit = count;
@@ -307,7 +307,7 @@ public sealed class SheetQuery
         if (distinctColumn is null && _groupBy is not null && _aggregates.Count == 0)
         {
             throw new InvalidOperationException(
-                "GroupBy requires at least one Aggregate. Use DistinctValues(column) to enumerate a column's values.");
+                "GroupBy requires at least one Select aggregate. Use DistinctValues(column) to enumerate a column's values.");
         }
 
         return new QueryScan(

@@ -288,7 +288,7 @@ SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
 
 The optional [`XLSight.Query`](src/XLSight.Query/README.md) package answers
 *"sum of X by Y where Z"* in one streaming pass — no sheet materialization, no database.
-Filters, a single-column group-by, and Sum/Count/Min/Max/Avg aggregates are fused over
+Filters, a single-column group-by, and Sum/Count/Min/Max/Average aggregates are fused over
 borrowed rows, so memory scales with group cardinality rather than row count. Dirty cells
 never throw; they are skipped and reported per column with sample row indices.
 
@@ -298,12 +298,13 @@ dotnet add package XLSight.Query
 
 ```csharp
 using XLSight.Query;
+using static XLSight.Query.QueryAggregates;
 
 QueryResult result = workbook
     .QueryRange("Sheet1", "A6:F2410", headerRow: 6)
-    .Where("Region", QueryOp.Equals, "EMEA")
+    .Where("Region", QueryOperator.Equals, "EMEA")
     .GroupBy("Month")
-    .Aggregate(Agg.Sum("NetSales"), Agg.Count())
+    .Select(Sum("NetSales"), Count())
     .Execute();
 
 // Filter discovery beyond the analysis cap: value → count, frequency-ordered.

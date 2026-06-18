@@ -53,7 +53,7 @@ internal sealed class QueryScan
     private ScanMode _mode;
 
     [StructLayout(LayoutKind.Auto)]
-    private readonly record struct ResolvedFilter(int ColumnIndex, QueryOp Op, ExcelCellValue Literal);
+    private readonly record struct ResolvedFilter(int ColumnIndex, QueryOperator Op, ExcelCellValue Literal);
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct ResolvedAggregate(AggregateKind Kind, int ColumnIndex);
@@ -177,12 +177,12 @@ internal sealed class QueryScan
         double literal = filter.Literal.AsNumber();
         return filter.Op switch
         {
-            QueryOp.Equals => literal < min || literal > max,
-            QueryOp.NotEquals => min == max && min == literal,
-            QueryOp.LessThan => min >= literal,
-            QueryOp.LessThanOrEqual => min > literal,
-            QueryOp.GreaterThan => max <= literal,
-            QueryOp.GreaterThanOrEqual => max < literal,
+            QueryOperator.Equals => literal < min || literal > max,
+            QueryOperator.NotEquals => min == max && min == literal,
+            QueryOperator.LessThan => min >= literal,
+            QueryOperator.LessThanOrEqual => min > literal,
+            QueryOperator.GreaterThan => max <= literal,
+            QueryOperator.GreaterThanOrEqual => max < literal,
             _ => false,
         };
     }

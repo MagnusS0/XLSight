@@ -141,7 +141,7 @@ internal static class QueryDslParser
                 }
 
                 Expect(TokenKind.CloseParen, "Expected ')' after COUNT().");
-                return Agg.Count();
+                return QueryAggregates.Count();
             }
 
             AggregateKind kind = function.ToUpperInvariant() switch
@@ -163,10 +163,10 @@ internal static class QueryDslParser
 
             return kind switch
             {
-                AggregateKind.Sum => Agg.Sum(column),
-                AggregateKind.Average => Agg.Avg(column),
-                AggregateKind.Min => Agg.Min(column),
-                AggregateKind.Max => Agg.Max(column),
+                AggregateKind.Sum => QueryAggregates.Sum(column),
+                AggregateKind.Average => QueryAggregates.Average(column),
+                AggregateKind.Min => QueryAggregates.Min(column),
+                AggregateKind.Max => QueryAggregates.Max(column),
                 _ => throw Error($"Unknown aggregate '{function}'. Supported aggregates: {SupportedAggregates}."),
             };
         }
@@ -198,10 +198,10 @@ internal static class QueryDslParser
         private SheetQueryPredicate ParsePredicate()
         {
             string column = ParseIdentifierLike("predicate column");
-            QueryOp op = ParseOperator();
+            QueryOperator op = ParseOperator();
             ExcelCellValue literal = ParseLiteral();
 
-            if (literal.CellType == CellType.Boolean && op is not (QueryOp.Equals or QueryOp.NotEquals))
+            if (literal.CellType == CellType.Boolean && op is not (QueryOperator.Equals or QueryOperator.NotEquals))
             {
                 throw Error($"Boolean predicates support '=' and '!=' only. Column '{column}' used operator '{OperatorText(op)}'.");
             }
@@ -264,18 +264,18 @@ internal static class QueryDslParser
             throw Error("Expected a literal: text, number, DATE \"yyyy-MM-dd\", true, or false.");
         }
 
-        private QueryOp ParseOperator()
+        private QueryOperator ParseOperator()
         {
             Token token = _tokens.Current;
             _tokens.MoveNext();
             return token.Kind switch
             {
-                TokenKind.Equals => QueryOp.Equals,
-                TokenKind.NotEquals => QueryOp.NotEquals,
-                TokenKind.LessThan => QueryOp.LessThan,
-                TokenKind.LessThanOrEqual => QueryOp.LessThanOrEqual,
-                TokenKind.GreaterThan => QueryOp.GreaterThan,
-                TokenKind.GreaterThanOrEqual => QueryOp.GreaterThanOrEqual,
+                TokenKind.Equals => QueryOperator.Equals,
+                TokenKind.NotEquals => QueryOperator.NotEquals,
+                TokenKind.LessThan => QueryOperator.LessThan,
+                TokenKind.LessThanOrEqual => QueryOperator.LessThanOrEqual,
+                TokenKind.GreaterThan => QueryOperator.GreaterThan,
+                TokenKind.GreaterThanOrEqual => QueryOperator.GreaterThanOrEqual,
                 _ => throw Error("Expected predicate operator: =, !=, <, <=, >, or >=."),
             };
         }
@@ -562,14 +562,14 @@ internal static class QueryDslParser
     private static bool KeywordEquals(string value, string keyword) =>
         string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
 
-    private static string OperatorText(QueryOp op) => op switch
+    private static string OperatorText(QueryOperator op) => op switch
     {
-        QueryOp.Equals => "=",
-        QueryOp.NotEquals => "!=",
-        QueryOp.LessThan => "<",
-        QueryOp.LessThanOrEqual => "<=",
-        QueryOp.GreaterThan => ">",
-        QueryOp.GreaterThanOrEqual => ">=",
+        QueryOperator.Equals => "=",
+        QueryOperator.NotEquals => "!=",
+        QueryOperator.LessThan => "<",
+        QueryOperator.LessThanOrEqual => "<=",
+        QueryOperator.GreaterThan => ">",
+        QueryOperator.GreaterThanOrEqual => ">=",
         _ => op.ToString(),
     };
 

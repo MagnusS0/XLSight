@@ -1,6 +1,6 @@
 namespace XLSight.Query;
 
-/// <summary>The aggregate function kinds supported by <see cref="SheetQuery.Aggregate"/>.</summary>
+/// <summary>The aggregate function kinds supported by <see cref="SheetQuery.Select"/>.</summary>
 public enum AggregateKind
 {
     /// <summary>Sum of numeric cells.</summary>

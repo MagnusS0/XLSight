@@ -1,7 +1,7 @@
 namespace XLSight.Query;
 
-/// <summary>Factory methods for <see cref="AggregateSpec"/> values used with <see cref="SheetQuery.Aggregate"/>.</summary>
-public static class Agg
+/// <summary>Factory methods for aggregate projections used with <see cref="SheetQuery.Select"/>.</summary>
+public static class QueryAggregates
 {
     /// <summary>Sums the numeric cells of <paramref name="column"/>.</summary>
     /// <param name="column">The source column name.</param>
@@ -32,7 +32,7 @@ public static class Agg
 
     /// <summary>Averages the numeric cells of <paramref name="column"/>.</summary>
     /// <param name="column">The source column name.</param>
-    public static AggregateSpec Avg(string column)
+    public static AggregateSpec Average(string column)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         return new(AggregateKind.Average, column);

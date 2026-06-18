@@ -20,9 +20,9 @@ public sealed class QueryAggregateTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOp.Equals, "EMEA")
+            .Where("Region", QueryOperator.Equals, "EMEA")
             .GroupBy("Month")
-            .Aggregate(Agg.Sum("Units"))
+            .Select(QueryAggregates.Sum("Units"))
             .Execute();
 
         Assert.Equal(["Month", "Sum(Units)"], result.Columns);
@@ -41,7 +41,7 @@ public sealed class QueryAggregateTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Aggregate(Agg.Sum("Units"), Agg.Count(), Agg.Min("Units"), Agg.Max("Units"), Agg.Avg("Units"))
+            .Select(QueryAggregates.Sum("Units"), QueryAggregates.Count(), QueryAggregates.Min("Units"), QueryAggregates.Max("Units"), QueryAggregates.Average("Units"))
             .Execute();
 
         var row = Assert.Single(result.Rows);
@@ -62,7 +62,7 @@ public sealed class QueryAggregateTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Aggregate(Agg.Avg("NetSales"))
+            .Select(QueryAggregates.Average("NetSales"))
             .Execute();
 
         Assert.Equal(clean.Average(), result.Rows[0].Values.Span[0].AsNumber());
@@ -76,7 +76,7 @@ public sealed class QueryAggregateTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Aggregate(Agg.Min("OrderDate"), Agg.Max("OrderDate"))
+            .Select(QueryAggregates.Min("OrderDate"), QueryAggregates.Max("OrderDate"))
             .Execute();
 
         var row = Assert.Single(result.Rows);
@@ -93,9 +93,9 @@ public sealed class QueryAggregateTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOp.Equals, "EMEA")
+            .Where("Region", QueryOperator.Equals, "EMEA")
             .GroupBy("Month")
-            .Aggregate(Agg.Sum("NetSales"))
+            .Select(QueryAggregates.Sum("NetSales"))
             .Execute();
 
         var marchRow = result.Rows.Single(r => r.Values.Span[0].AsText() == "Mar");
@@ -111,13 +111,13 @@ public sealed class QueryAggregateTests
         QueryResult sync = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
             .GroupBy("Region")
-            .Aggregate(Agg.Sum("Units"), Agg.Count())
+            .Select(QueryAggregates.Sum("Units"), QueryAggregates.Count())
             .Execute();
 
         QueryResult async = await workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
             .GroupBy("Region")
-            .Aggregate(Agg.Sum("Units"), Agg.Count())
+            .Select(QueryAggregates.Sum("Units"), QueryAggregates.Count())
             .ExecuteAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(sync.Columns, async.Columns);

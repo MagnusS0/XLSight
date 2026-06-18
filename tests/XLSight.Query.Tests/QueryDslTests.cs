@@ -86,11 +86,11 @@ public sealed class QueryDslTests
 
         QueryResult expected = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOp.Equals, "EMEA")
-            .Where("Units", QueryOp.GreaterThan, 1)
+            .Where("Region", QueryOperator.Equals, "EMEA")
+            .Where("Units", QueryOperator.GreaterThan, 1)
             .GroupBy("Month")
-            .Aggregate(Agg.Sum("Units"), Agg.Count())
-            .Limit(2)
+            .Select(QueryAggregates.Sum("Units"), QueryAggregates.Count())
+            .Take(2)
             .Execute();
 
         QueryResult actual = workbook.ExecuteQuery("""

@@ -19,7 +19,7 @@ public sealed class QueryGuardrailTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Aggregate(Agg.Sum("NetSales"))
+            .Select(QueryAggregates.Sum("NetSales"))
             .Execute();
 
         Assert.Equal(expected, result.Rows[0].Values.Span[0].AsNumber());
@@ -38,7 +38,7 @@ public sealed class QueryGuardrailTests
         var query = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
             .GroupBy("Region")
-            .Aggregate(Agg.Count())
+            .Select(QueryAggregates.Count())
             .WithGroupLimit(2);
 
         var ex = Assert.Throws<TooManyGroupsException>(() => query.Execute());
@@ -53,8 +53,8 @@ public sealed class QueryGuardrailTests
 
         var query = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Regin", QueryOp.Equals, "EMEA")
-            .Aggregate(Agg.Count());
+            .Where("Regin", QueryOperator.Equals, "EMEA")
+            .Select(QueryAggregates.Count());
 
         var ex = Assert.Throws<InvalidOperationException>(() => query.Execute());
         Assert.Contains("Regin", ex.Message, StringComparison.Ordinal);
@@ -81,8 +81,8 @@ public sealed class QueryGuardrailTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Units", QueryOp.GreaterThan, 10)
-            .Aggregate(Agg.Count())
+            .Where("Units", QueryOperator.GreaterThan, 10)
+            .Select(QueryAggregates.Count())
             .WithStats([UnitsProfile(min: 1, max: 10)])
             .Execute();
 
@@ -98,8 +98,8 @@ public sealed class QueryGuardrailTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Units", QueryOp.GreaterThan, 5)
-            .Aggregate(Agg.Count())
+            .Where("Units", QueryOperator.GreaterThan, 5)
+            .Select(QueryAggregates.Count())
             .WithStats([UnitsProfile(min: 1, max: 10)])
             .Execute();
 

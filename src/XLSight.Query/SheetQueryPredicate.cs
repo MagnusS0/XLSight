@@ -7,7 +7,7 @@ public readonly record struct SheetQueryPredicate
     /// <param name="column">The column name from the header row.</param>
     /// <param name="op">The comparison operator.</param>
     /// <param name="literal">The typed literal value.</param>
-    public SheetQueryPredicate(string column, QueryOp op, ExcelCellValue literal)
+    public SheetQueryPredicate(string column, QueryOperator op, ExcelCellValue literal)
     {
         Column = column;
         Op = op;
@@ -18,7 +18,7 @@ public readonly record struct SheetQueryPredicate
     public string Column { get; }
 
     /// <summary>Gets the comparison operator.</summary>
-    public QueryOp Op { get; }
+    public QueryOperator Op { get; }
 
     /// <summary>Gets the typed literal value.</summary>
     public ExcelCellValue Literal { get; }

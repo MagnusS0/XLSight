@@ -12,7 +12,7 @@ public sealed class QueryFilterTests
         using var ms = SalesWorkbook.Build();
         using var workbook = ExcelWorkbook.Open(ms);
         QueryResult result = configure(workbook.QueryRange(SalesWorkbook.SheetName, Range))
-            .Aggregate(Agg.Count())
+            .Select(QueryAggregates.Count())
             .Execute();
         return (int)result.Rows[0].Values.Span[0].AsNumber();
     }
@@ -21,14 +21,14 @@ public sealed class QueryFilterTests
     public void Where_TextEquals_MatchesLinqReference()
     {
         int expected = SalesWorkbook.Data.Count(d => d.Region == "EMEA");
-        Assert.Equal(expected, CountWhere(q => q.Where("Region", QueryOp.Equals, "EMEA")));
+        Assert.Equal(expected, CountWhere(q => q.Where("Region", QueryOperator.Equals, "EMEA")));
     }
 
     [Fact]
     public void Where_TextNotEquals_MatchesLinqReference()
     {
         int expected = SalesWorkbook.Data.Count(d => d.Region != "EMEA");
-        Assert.Equal(expected, CountWhere(q => q.Where("Region", QueryOp.NotEquals, "EMEA")));
+        Assert.Equal(expected, CountWhere(q => q.Where("Region", QueryOperator.NotEquals, "EMEA")));
     }
 
     [Fact]
@@ -36,16 +36,16 @@ public sealed class QueryFilterTests
     {
         Assert.Equal(
             SalesWorkbook.Data.Count(d => d.Units > 5),
-            CountWhere(q => q.Where("Units", QueryOp.GreaterThan, 5)));
+            CountWhere(q => q.Where("Units", QueryOperator.GreaterThan, 5)));
         Assert.Equal(
             SalesWorkbook.Data.Count(d => d.Units <= 3),
-            CountWhere(q => q.Where("Units", QueryOp.LessThanOrEqual, 3)));
+            CountWhere(q => q.Where("Units", QueryOperator.LessThanOrEqual, 3)));
         Assert.Equal(
             SalesWorkbook.Data.Count(d => d.Units >= 7),
-            CountWhere(q => q.Where("Units", QueryOp.GreaterThanOrEqual, 7)));
+            CountWhere(q => q.Where("Units", QueryOperator.GreaterThanOrEqual, 7)));
         Assert.Equal(
             SalesWorkbook.Data.Count(d => d.Units < 2),
-            CountWhere(q => q.Where("Units", QueryOp.LessThan, 2)));
+            CountWhere(q => q.Where("Units", QueryOperator.LessThan, 2)));
     }
 
     [Fact]
@@ -53,14 +53,14 @@ public sealed class QueryFilterTests
     {
         var cutoff = new DateTime(2024, 3, 1);
         int expected = SalesWorkbook.Data.Count(d => d.OrderDate >= cutoff);
-        Assert.Equal(expected, CountWhere(q => q.Where("OrderDate", QueryOp.GreaterThanOrEqual, cutoff)));
+        Assert.Equal(expected, CountWhere(q => q.Where("OrderDate", QueryOperator.GreaterThanOrEqual, cutoff)));
     }
 
     [Fact]
     public void Where_BooleanEquals_MatchesLinqReference()
     {
         int expected = SalesWorkbook.Data.Count(d => d.OnPromo);
-        Assert.Equal(expected, CountWhere(q => q.Where("OnPromo", QueryOp.Equals, true)));
+        Assert.Equal(expected, CountWhere(q => q.Where("OnPromo", QueryOperator.Equals, true)));
     }
 
     [Fact]
@@ -68,8 +68,8 @@ public sealed class QueryFilterTests
     {
         int expected = SalesWorkbook.Data.Count(d => d.Region == "EMEA" && d.Units > 1);
         Assert.Equal(expected, CountWhere(q => q
-            .Where("Region", QueryOp.Equals, "EMEA")
-            .Where("Units", QueryOp.GreaterThan, 1)));
+            .Where("Region", QueryOperator.Equals, "EMEA")
+            .Where("Units", QueryOperator.GreaterThan, 1)));
     }
 
     [Fact]
@@ -77,14 +77,14 @@ public sealed class QueryFilterTests
     {
         // The dirty "n/a" cell in NetSales must not match any numeric predicate, including NotEquals.
         int expected = SalesWorkbook.Data.Count(d => d.NetSales is { } v && v != 50);
-        Assert.Equal(expected, CountWhere(q => q.Where("NetSales", QueryOp.NotEquals, 50)));
+        Assert.Equal(expected, CountWhere(q => q.Where("NetSales", QueryOperator.NotEquals, 50)));
     }
 
     [Fact]
     public void Where_ColumnLookup_FallsBackToCaseInsensitive()
     {
         int expected = SalesWorkbook.Data.Count(d => d.Region == "EMEA");
-        Assert.Equal(expected, CountWhere(q => q.Where("region", QueryOp.Equals, "EMEA")));
+        Assert.Equal(expected, CountWhere(q => q.Where("region", QueryOperator.Equals, "EMEA")));
     }
 
     [Fact]
@@ -94,6 +94,6 @@ public sealed class QueryFilterTests
         using var workbook = ExcelWorkbook.Open(ms);
         var query = workbook.QueryRange(SalesWorkbook.SheetName, Range);
 
-        Assert.Throws<ArgumentException>(() => query.Where("OnPromo", QueryOp.LessThan, true));
+        Assert.Throws<ArgumentException>(() => query.Where("OnPromo", QueryOperator.LessThan, true));
     }
 }

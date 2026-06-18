@@ -7,7 +7,7 @@ internal static class FilterEvaluator
     /// (a text cell never matches a numeric literal, not even for NotEquals), and empty
     /// cells never match. Text ordering is ordinal.
     /// </summary>
-    public static bool Matches(in ExcelCellValue cell, QueryOp op, in ExcelCellValue literal)
+    public static bool Matches(in ExcelCellValue cell, QueryOperator op, in ExcelCellValue literal)
     {
         switch (literal.CellType)
         {
@@ -22,20 +22,20 @@ internal static class FilterEvaluator
                     && Satisfies(string.CompareOrdinal(text, literal.AsText()), op);
             case CellType.Boolean:
                 return cell.TryGetBoolean(out bool flag)
-                    && (op == QueryOp.Equals ? flag == literal.AsBoolean() : flag != literal.AsBoolean());
+                    && (op == QueryOperator.Equals ? flag == literal.AsBoolean() : flag != literal.AsBoolean());
             default:
                 return false;
         }
     }
 
-    private static bool Satisfies(int comparison, QueryOp op) => op switch
+    private static bool Satisfies(int comparison, QueryOperator op) => op switch
     {
-        QueryOp.Equals => comparison == 0,
-        QueryOp.NotEquals => comparison != 0,
-        QueryOp.LessThan => comparison < 0,
-        QueryOp.LessThanOrEqual => comparison <= 0,
-        QueryOp.GreaterThan => comparison > 0,
-        QueryOp.GreaterThanOrEqual => comparison >= 0,
+        QueryOperator.Equals => comparison == 0,
+        QueryOperator.NotEquals => comparison != 0,
+        QueryOperator.LessThan => comparison < 0,
+        QueryOperator.LessThanOrEqual => comparison <= 0,
+        QueryOperator.GreaterThan => comparison > 0,
+        QueryOperator.GreaterThanOrEqual => comparison >= 0,
         _ => false,
     };
 }

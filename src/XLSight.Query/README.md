@@ -7,14 +7,15 @@ sheet, without a database, and without adding any dependency beyond the core rea
 ```csharp
 using XLSight;
 using XLSight.Query;
+using static XLSight.Query.QueryAggregates;
 
 using var workbook = ExcelWorkbook.Open("sales.xlsx");
 
 QueryResult result = workbook
     .QueryRange("Sheet1", "A6:F2410", headerRow: 6)    // headers from row 6
-    .Where("Region", QueryOp.Equals, "EMEA")           // AND-combined filters
+    .Where("Region", QueryOperator.Equals, "EMEA")     // AND-combined filters
     .GroupBy("Month")
-    .Aggregate(Agg.Sum("NetSales"), Agg.Count())
+    .Select(Sum("NetSales"), Count())
     .Execute();
 
 foreach (QueryResultRow row in result.Rows)
@@ -41,10 +42,10 @@ QueryResult result = workbook.ExecuteQuery("""
   scan over borrowed rows; memory scales with group cardinality, never row count.
 - **Operators:** `Where` (`Equals`/`NotEquals`/`LessThan`/`LessThanOrEqual`/`GreaterThan`/
   `GreaterThanOrEqual` over text, number, date, boolean literals), `GroupBy` (one column),
-  `Aggregate` (`Sum`/`Count`/`Min`/`Max`/`Avg`), `Limit`, and a `DistinctValues(column, top)`
+  `Select` (`Sum`/`Count`/`Min`/`Max`/`Average`), `Take`, and a `DistinctValues(column, top)`
   terminal returning frequency-ordered value counts for filter discovery.
 - **Row queries.** Without aggregates, `Execute()` returns the matching rows; with a
-  `Limit`, the scan stops as soon as enough rows matched.
+  `Take`, the scan stops as soon as enough rows matched.
 - **Dirty data never throws.** Cells that don't coerce to an aggregate's input type are
   skipped and reported per column in `QueryResult.Unaggregatable`, with sample row indices.
 - **Stats pruning.** Pass `AnalyzeSheet` column profiles via `WithStats(...)`: a numeric
@@ -110,6 +111,6 @@ single column except `COUNT()`. Anything richer should escalate to `ReadRange`/
 2. `ReadRange` — peek at a region when unsure.
 3. `QueryRange(...).DistinctValues("Region")` — discover filter values beyond the
    analysis cap.
-4. `QueryRange(...).Where(...).GroupBy(...).Aggregate(...)` — compute the answer in one pass.
+4. `QueryRange(...).Where(...).GroupBy(...).Select(...)` — compute the answer in one pass.
 5. `ExecuteQuery(...)` — run the same query shape from DSL text when C# is not the
    right transport.

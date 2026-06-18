@@ -34,7 +34,7 @@ public class QueryBenchmarks
         using var wb = ExcelWorkbook.Open(_mediumPath);
         return wb.QueryRange("Data", "A1:J1001")
             .GroupBy("Category")
-            .Aggregate(Agg.Sum("Value1"))
+            .Select(QueryAggregates.Sum("Value1"))
             .Execute();
     }
 
@@ -73,8 +73,8 @@ public class QueryBenchmarks
     {
         using var wb = ExcelWorkbook.Open(_largePath);
         return wb.QueryRange("Numbers", "A1:E100001")
-            .Where("A", QueryOp.GreaterThan, 0.5)
-            .Aggregate(Agg.Sum("C"), Agg.Count())
+            .Where("A", QueryOperator.GreaterThan, 0.5)
+            .Select(QueryAggregates.Sum("C"), QueryAggregates.Count())
             .Execute();
     }
 

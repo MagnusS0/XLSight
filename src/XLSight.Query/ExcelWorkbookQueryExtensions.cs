@@ -134,12 +134,12 @@ public static class ExcelWorkbookQueryExtensions
 
         if (spec.Aggregates.Count > 0)
         {
-            query.Aggregate([.. spec.Aggregates]);
+            query.Select([.. spec.Aggregates]);
         }
 
         if (spec.Limit is { } limit)
         {
-            query.Limit(limit);
+            query.Take(limit);
         }
 
         return query;

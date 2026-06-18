@@ -1,7 +1,7 @@
 namespace XLSight.Query;
 
 /// <summary>Comparison operators for query filters.</summary>
-public enum QueryOp
+public enum QueryOperator
 {
     /// <summary>The cell value equals the literal.</summary>
     Equals,

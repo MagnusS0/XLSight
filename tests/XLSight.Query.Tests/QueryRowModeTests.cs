@@ -20,7 +20,7 @@ public sealed class QueryRowModeTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOp.Equals, "APAC")
+            .Where("Region", QueryOperator.Equals, "APAC")
             .Execute();
 
         Assert.Equal(SalesWorkbook.Headers, result.Columns);
@@ -36,7 +36,7 @@ public sealed class QueryRowModeTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Limit(3)
+            .Take(3)
             .Execute();
 
         Assert.Equal(3, result.Rows.Count);
@@ -51,8 +51,8 @@ public sealed class QueryRowModeTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOp.Equals, "EMEA")
-            .Limit(2)
+            .Where("Region", QueryOperator.Equals, "EMEA")
+            .Take(2)
             .Execute();
 
         // The first two EMEA records are the first two data rows, so the scan
@@ -71,8 +71,8 @@ public sealed class QueryRowModeTests
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
             .GroupBy("Region")
-            .Aggregate(Agg.Count())
-            .Limit(2)
+            .Select(QueryAggregates.Count())
+            .Take(2)
             .Execute();
 
         Assert.Equal(2, result.Rows.Count);
@@ -89,8 +89,8 @@ public sealed class QueryRowModeTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, "A1:F12", headerRow: 2)
-            .Where("Region", QueryOp.Equals, "EMEA")
-            .Aggregate(Agg.Count())
+            .Where("Region", QueryOperator.Equals, "EMEA")
+            .Select(QueryAggregates.Count())
             .Execute();
 
         Assert.Equal(SalesWorkbook.Data.Count(d => d.Region == "EMEA"), result.Rows[0].Values.Span[0].AsNumber());
@@ -106,7 +106,7 @@ public sealed class QueryRowModeTests
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, "A2:F12")
             .GroupBy("Region")
-            .Aggregate(Agg.Count())
+            .Select(QueryAggregates.Count())
             .Execute();
 
         Assert.Equal(3, result.Rows.Count);
