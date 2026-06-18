@@ -13,6 +13,11 @@ public class QueryBenchmarks
 {
     private string _mediumPath = null!;
     private string _largePath = null!;
+    private const string MediumGroupBySumQuery = """
+        FROM Data!A1:J1001 HEADER AUTO
+        SELECT SUM(Value1)
+        GROUP BY Category
+        """;
 
     [GlobalSetup]
     public void Setup()
@@ -31,6 +36,13 @@ public class QueryBenchmarks
             .GroupBy("Category")
             .Aggregate(Agg.Sum("Value1"))
             .Execute();
+    }
+
+    [Benchmark]
+    public QueryResult QueryDsl_GroupBySum_Medium()
+    {
+        using var wb = ExcelWorkbook.Open(_mediumPath);
+        return wb.ExecuteQuery(MediumGroupBySumQuery);
     }
 
     [Benchmark]

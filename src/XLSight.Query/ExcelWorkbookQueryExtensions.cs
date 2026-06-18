@@ -54,4 +54,115 @@ public static class ExcelWorkbookQueryExtensions
 
         return new SheetQuery(workbook, sheet, range, headerRow);
     }
+
+    /// <summary>Parses and executes an XLSight Query DSL statement.</summary>
+    /// <param name="workbook">The open workbook.</param>
+    /// <param name="queryText">The Query DSL text.</param>
+    /// <returns>The materialized query result.</returns>
+    /// <exception cref="QueryDslException">Thrown when the query text is invalid or unsupported.</exception>
+    /// <exception cref="NotSupportedException">Thrown when the query uses reserved syntax that the engine cannot execute.</exception>
+    public static QueryResult ExecuteQuery(this ExcelWorkbook workbook, string queryText)
+    {
+        ArgumentNullException.ThrowIfNull(queryText);
+        return ExecuteQuery(workbook, SheetQuerySpec.Parse(queryText));
+    }
+
+    /// <summary>Executes a parsed XLSight Query DSL specification.</summary>
+    /// <param name="workbook">The open workbook.</param>
+    /// <param name="spec">The parsed query specification.</param>
+    /// <returns>The materialized query result.</returns>
+    /// <exception cref="NotSupportedException">Thrown when the query uses reserved syntax that the engine cannot execute.</exception>
+    public static QueryResult ExecuteQuery(this ExcelWorkbook workbook, SheetQuerySpec spec)
+    {
+        SheetQuery query = BuildSheetQuery(workbook, spec);
+        return query.Execute();
+    }
+
+    /// <summary>Parses and executes an XLSight Query DSL statement asynchronously.</summary>
+    /// <param name="workbook">The open workbook.</param>
+    /// <param name="queryText">The Query DSL text.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns the materialized query result.</returns>
+    /// <exception cref="QueryDslException">Thrown when the query text is invalid or unsupported.</exception>
+    /// <exception cref="NotSupportedException">Thrown when the query uses reserved syntax that the engine cannot execute.</exception>
+    public static Task<QueryResult> ExecuteQueryAsync(
+        this ExcelWorkbook workbook,
+        string queryText,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(queryText);
+        return ExecuteQueryAsync(workbook, SheetQuerySpec.Parse(queryText), ct);
+    }
+
+    /// <summary>Executes a parsed XLSight Query DSL specification asynchronously.</summary>
+    /// <param name="workbook">The open workbook.</param>
+    /// <param name="spec">The parsed query specification.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>A task that returns the materialized query result.</returns>
+    /// <exception cref="NotSupportedException">Thrown when the query uses reserved syntax that the engine cannot execute.</exception>
+    public static Task<QueryResult> ExecuteQueryAsync(
+        this ExcelWorkbook workbook,
+        SheetQuerySpec spec,
+        CancellationToken ct = default)
+    {
+        SheetQuery query = BuildSheetQuery(workbook, spec);
+        return query.ExecuteAsync(ct);
+    }
+
+    private static SheetQuery BuildSheetQuery(ExcelWorkbook workbook, SheetQuerySpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(workbook);
+        ArgumentNullException.ThrowIfNull(spec);
+
+        if (spec.Header.Kind == SheetQueryHeaderKind.Column)
+        {
+            throw new NotSupportedException("HEADER COLUMN is reserved for transposed tables and is not supported by the row-oriented query engine.");
+        }
+
+        int headerRow = spec.Header.Kind == SheetQueryHeaderKind.Row ? spec.Header.Row : 0;
+        SheetQuery query = workbook.QueryRange(spec.Sheet, spec.Range, headerRow);
+
+        foreach (SheetQueryPredicate predicate in spec.Predicates)
+        {
+            AddPredicate(query, predicate);
+        }
+
+        if (spec.GroupBy is { } groupBy)
+        {
+            query.GroupBy(groupBy);
+        }
+
+        if (spec.Aggregates.Count > 0)
+        {
+            query.Aggregate([.. spec.Aggregates]);
+        }
+
+        if (spec.Limit is { } limit)
+        {
+            query.Limit(limit);
+        }
+
+        return query;
+    }
+
+    private static void AddPredicate(SheetQuery query, SheetQueryPredicate predicate)
+    {
+        switch (predicate.Literal.CellType)
+        {
+            case CellType.Text:
+                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsText());
+                break;
+            case CellType.Number:
+                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsNumber());
+                break;
+            case CellType.Date:
+                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsDate());
+                break;
+            case CellType.Boolean:
+                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsBoolean());
+                break;
+            default:
+                throw new QueryDslException($"Unsupported predicate literal type '{predicate.Literal.CellType}'.");
+        }
+    }
 }
