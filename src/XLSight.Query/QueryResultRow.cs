@@ -7,5 +7,7 @@ public sealed class QueryResultRow
     public int? SourceRowIndex { get; init; }
 
     /// <summary>Gets the cell values, aligned with <see cref="QueryResult.Columns"/>.</summary>
-    public required IReadOnlyList<ExcelCellValue> Values { get; init; }
+    public ReadOnlyMemory<ExcelCellValue> Values { get; init; }
+
+    internal int ValuesStart { get; init; }
 }

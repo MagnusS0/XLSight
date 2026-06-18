@@ -38,6 +38,8 @@ internal sealed class QueryScan
     private int _rowsMatched;
     private bool _pruned;
     private readonly List<QueryResultRow> _rows = [];
+    private readonly List<ExcelCellValue> _rowBuffer = [];
+    private int _rowWidth;
     private AggregateAccumulator[]? _globalAggregates;
     private ExcelCellValue _lastGroupKey;
     private AggregateAccumulator[]? _lastGroupAccumulators;
@@ -46,6 +48,9 @@ internal sealed class QueryScan
     private readonly Dictionary<ExcelCellValue, int> _distinctCounts = [];
     private readonly Dictionary<string, DirtyColumn> _dirtyColumns = new(StringComparer.Ordinal);
     private readonly List<string> _dirtyOrder = [];
+
+    private enum ScanMode { Row, GlobalAggregate, GroupedAggregate, Distinct }
+    private ScanMode _mode;
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct ResolvedFilter(int ColumnIndex, QueryOp Op, ExcelCellValue Literal);
@@ -211,25 +216,20 @@ internal sealed class QueryScan
 
         _rowsMatched++;
 
-        if (_distinctColumn is not null)
+        switch (_mode)
         {
-            AccumulateDistinct(row);
-            return true;
+            case ScanMode.Distinct:
+                AccumulateDistinct(row);
+                return true;
+            case ScanMode.Row:
+                return CollectRow(row);
+            case ScanMode.GroupedAggregate:
+                AccumulateGroup(row);
+                return true;
+            default: // GlobalAggregate
+                UpdateAggregates(_globalAggregates ??= new AggregateAccumulator[_aggregateSpecs.Length], row);
+                return true;
         }
-
-        if (_aggregateSpecs.Length == 0)
-        {
-            return CollectRow(row);
-        }
-
-        if (_groupByColumn is not null)
-        {
-            AccumulateGroup(row);
-            return true;
-        }
-
-        UpdateAggregates(_globalAggregates ??= new AggregateAccumulator[_aggregateSpecs.Length], row);
-        return true;
     }
 
     private bool MatchesFilters(in ExcelRow row)
@@ -247,13 +247,13 @@ internal sealed class QueryScan
 
     private bool CollectRow(in ExcelRow row)
     {
-        var values = new ExcelCellValue[_columnIndices.Length];
-        for (int i = 0; i < values.Length; i++)
+        int start = _rowBuffer.Count;
+        for (int i = 0; i < _columnIndices.Length; i++)
         {
-            values[i] = row.GetCell(_columnIndices[i]);
+            _rowBuffer.Add(row.GetCell(_columnIndices[i]));
         }
 
-        _rows.Add(new QueryResultRow { SourceRowIndex = row.RowIndex, Values = values });
+        _rows.Add(new QueryResultRow { SourceRowIndex = row.RowIndex, ValuesStart = start });
         return _limit < 0 || _rows.Count < _limit;
     }
 
@@ -288,7 +288,8 @@ internal sealed class QueryScan
 
     private void UpdateAggregates(AggregateAccumulator[] accumulators, in ExcelRow row)
     {
-        for (int i = 0; i < accumulators.Length; i++)
+        int length = accumulators.Length; // both arrays are always the same length
+        for (int i = 0; i < length; i++)
         {
             ResolvedAggregate aggregate = _resolvedAggregates[i];
             if (aggregate.Kind == AggregateKind.Count)
@@ -373,6 +374,7 @@ internal sealed class QueryScan
             _columnNames[i] = name.Length > 0 ? name : ColumnLabel(column);
         }
 
+        _rowWidth = _columnIndices.Length;
         _filters = new ResolvedFilter[_filterSpecs.Length];
         for (int i = 0; i < _filterSpecs.Length; i++)
         {
@@ -402,24 +404,35 @@ internal sealed class QueryScan
 
         _boundHeaderRow = row.RowIndex;
         _headerBound = true;
+        _mode = ResolveMode();
     }
+
+    private ScanMode ResolveMode() =>
+        _distinctColumn is not null ? ScanMode.Distinct
+        : _aggregateSpecs.Length == 0 ? ScanMode.Row
+        : _groupByColumn is not null ? ScanMode.GroupedAggregate
+        : ScanMode.GlobalAggregate;
 
     private int ResolveColumn(string name)
     {
+        int caseInsensitiveMatch = -1;
         for (int i = 0; i < _columnNames.Length; i++)
         {
             if (string.Equals(_columnNames[i], name, StringComparison.Ordinal))
             {
                 return _columnIndices[i];
             }
+
+            if (caseInsensitiveMatch < 0
+                && string.Equals(_columnNames[i], name, StringComparison.OrdinalIgnoreCase))
+            {
+                caseInsensitiveMatch = _columnIndices[i];
+            }
         }
 
-        for (int i = 0; i < _columnNames.Length; i++)
+        if (caseInsensitiveMatch >= 0)
         {
-            if (string.Equals(_columnNames[i], name, StringComparison.OrdinalIgnoreCase))
-            {
-                return _columnIndices[i];
-            }
+            return caseInsensitiveMatch;
         }
 
         throw new InvalidOperationException(
@@ -442,10 +455,31 @@ internal sealed class QueryScan
 
         if (_aggregateSpecs.Length == 0)
         {
-            return NewResult(_columnNames, _rows);
+            return NewResult(_columnNames, ResolveRowValues());
         }
 
         return _groupByColumn is null ? BuildGlobalResult() : BuildGroupedResult();
+    }
+
+    private List<QueryResultRow> ResolveRowValues()
+    {
+        if (_rowBuffer.Count == 0)
+        {
+            return _rows;
+        }
+
+        ExcelCellValue[] flat = [.. _rowBuffer];
+        var resolved = new List<QueryResultRow>(_rows.Count);
+        foreach (QueryResultRow r in _rows)
+        {
+            resolved.Add(new QueryResultRow
+            {
+                SourceRowIndex = r.SourceRowIndex,
+                Values = flat.AsMemory(r.ValuesStart, _rowWidth),
+            });
+        }
+
+        return resolved;
     }
 
     private QueryResult BuildGlobalResult()
@@ -459,7 +493,7 @@ internal sealed class QueryScan
             values[i] = accumulators[i].Result(_aggregateSpecs[i].Kind);
         }
 
-        return NewResult(columns, [new QueryResultRow { Values = values }]);
+        return NewResult(columns, [new QueryResultRow { Values = values.AsMemory() }]);
     }
 
     private QueryResult BuildGroupedResult()
@@ -484,7 +518,7 @@ internal sealed class QueryScan
                 values[i + 1] = accumulators[i].Result(_aggregateSpecs[i].Kind);
             }
 
-            rows.Add(new QueryResultRow { Values = values });
+            rows.Add(new QueryResultRow { Values = values.AsMemory() });
         }
 
         return NewResult(columns, rows);
@@ -534,10 +568,22 @@ internal sealed class QueryScan
             merged[value] = merged.GetValueOrDefault(value) + count;
         }
 
-        return [.. merged
-            .OrderByDescending(static pair => pair.Value)
-            .ThenBy(static pair => pair.Key, StringComparer.Ordinal)
-            .Take(top)
-            .Select(static pair => new DistinctValueCount(pair.Key, pair.Value))];
+        var sorted = new DistinctValueCount[merged.Count];
+        int idx = 0;
+        foreach ((string value, int count) in merged)
+        {
+            sorted[idx++] = new DistinctValueCount(value, count);
+        }
+
+        Array.Sort(sorted, static (a, b) =>
+        {
+            int byCount = b.Count.CompareTo(a.Count);
+            return byCount != 0 ? byCount : string.CompareOrdinal(a.Value, b.Value);
+        });
+
+        int take = Math.Min(top, sorted.Length);
+        var result = new DistinctValueCount[take];
+        Array.Copy(sorted, result, take);
+        return result;
     }
 }
