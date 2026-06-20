@@ -21,8 +21,8 @@ public sealed class SheetQuerySpec
         Range = range;
         Header = header;
         SelectAll = selectAll;
-        Aggregates = aggregates;
-        Predicates = predicates;
+        Aggregates = aggregates.ToArray();
+        Predicates = predicates.ToArray();
         GroupBy = groupBy;
         Limit = limit;
     }

@@ -60,15 +60,23 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
         RowProjection? projection = null)
     {
         var sheetStream = OpenSheetStream(sheet.Path);
-        var cursor = XlsxSheetScanner.OpenCursor(
-            sheetStream,
-            SharedStrings,
-            _styles.Value,
-            _metadata.UsesDate1904,
-            mode,
-            range,
-            projection: projection);
-        return new OwnedRowCursor(sheetStream, cursor);
+        try
+        {
+            var cursor = XlsxSheetScanner.OpenCursor(
+                sheetStream,
+                SharedStrings,
+                _styles.Value,
+                _metadata.UsesDate1904,
+                mode,
+                range,
+                projection: projection);
+            return new OwnedRowCursor(sheetStream, cursor);
+        }
+        catch
+        {
+            sheetStream.Dispose();
+            throw;
+        }
     }
 
     protected override SheetInfo AnalyzeSheetCore(
