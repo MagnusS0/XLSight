@@ -139,7 +139,7 @@ internal static class SalesWorkbook
         sb.Append(CultureInfo.InvariantCulture, $"""<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="{sst.Count}">""");
         foreach (string value in sst)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"<si><t>{value}</t></si>");
+            sb.Append(CultureInfo.InvariantCulture, $"<si><t>{System.Security.SecurityElement.Escape(value)}</t></si>");
         }
 
         sb.Append("</sst>");

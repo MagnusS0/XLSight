@@ -221,7 +221,7 @@ internal static class QueryDslParser
             if (token.Kind is TokenKind.Number)
             {
                 _tokens.MoveNext();
-                if (!double.TryParse(token.Text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double value))
+                if (!double.TryParse(token.Text, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value))
                 {
                     throw Error($"Invalid numeric literal '{token.Text}'. Numbers must use invariant culture without thousands separators.");
                 }
@@ -406,7 +406,7 @@ internal static class QueryDslParser
                 return ReadIdentifier();
             }
 
-            if (char.IsDigit(c))
+            if (char.IsDigit(c) || ((c is '+' or '-') && _position + 1 < _text.Length && char.IsDigit(_text[_position + 1])))
             {
                 return ReadNumberOrIdentifier();
             }
@@ -450,6 +450,8 @@ internal static class QueryDslParser
         private Token ReadNumberOrIdentifier()
         {
             int start = _position;
+            if (_position < _text.Length && _text[_position] is '+' or '-')
+                _position++;
             while (_position < _text.Length && char.IsDigit(_text[_position]))
             {
                 _position++;
