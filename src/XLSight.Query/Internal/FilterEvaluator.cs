@@ -21,6 +21,8 @@ internal static class FilterEvaluator
                 return cell.TryGetText(out string? text)
                     && Satisfies(string.CompareOrdinal(text, literal.AsText()), op);
             case CellType.Boolean:
+                if (op is not (QueryOperator.Equals or QueryOperator.NotEquals))
+                    return false;
                 return cell.TryGetBoolean(out bool flag)
                     && (op == QueryOperator.Equals ? flag == literal.AsBoolean() : flag != literal.AsBoolean());
             default:

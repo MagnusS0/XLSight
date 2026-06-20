@@ -19,7 +19,7 @@ XLSight bypasses `XmlReader` on the hot path. It scans raw UTF-8 byte streams wi
 
 ## Installation
 
-```
+```bash
 dotnet add package XLSight
 ```
 
@@ -292,7 +292,7 @@ Filters, a single-column group-by, and Sum/Count/Min/Max/Average aggregates are 
 borrowed rows, so memory scales with group cardinality rather than row count. Dirty cells
 never throw; they are skipped and reported per column with sample row indices.
 
-```
+```bash
 dotnet add package XLSight.Query
 ```
 
