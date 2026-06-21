@@ -38,7 +38,7 @@ internal static class QueryDslParser
                 : [];
 
             string? groupBy = null;
-            if (_tokens.Current.IsKeyword("GROUP") && _tokens.Peek().IsKeyword("BY"))
+            if (_tokens.CurrentIsKeyword("GROUP") && _tokens.PeekIsKeyword("BY"))
             {
                 _tokens.MoveNext(); // consume GROUP
                 _tokens.MoveNext(); // consume BY
@@ -53,7 +53,7 @@ internal static class QueryDslParser
 
             if (!_tokens.Current.IsEnd)
             {
-                throw Error($"Unexpected token '{_tokens.Current.Display}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, LIMIT.");
+                throw Error($"Unexpected token '{_tokens.CurrentDisplay}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, LIMIT.");
             }
 
             if (groupBy is not null && selectAll)
@@ -134,7 +134,7 @@ internal static class QueryDslParser
 
             Expect(TokenKind.OpenParen, $"Expected '(' after aggregate '{function}'.");
 
-            if (KeywordEquals(function, "COUNT"))
+            if (string.Equals(function, "COUNT", StringComparison.OrdinalIgnoreCase))
             {
                 if (!_tokens.Current.Is(TokenKind.CloseParen))
                 {
@@ -185,7 +185,7 @@ internal static class QueryDslParser
                     continue;
                 }
 
-                if (_tokens.Current.IsKeyword("OR"))
+                if (_tokens.CurrentIsKeyword("OR"))
                 {
                     throw Error("OR is not supported. Predicates must be combined with AND.");
                 }
@@ -216,15 +216,15 @@ internal static class QueryDslParser
             if (token.Kind is TokenKind.QuotedText)
             {
                 _tokens.MoveNext();
-                return ExcelCellValue.FromText(token.Text);
+                return ExcelCellValue.FromText(_tokens.GetText(token));
             }
 
             if (token.Kind is TokenKind.Integer or TokenKind.Number)
             {
                 _tokens.MoveNext();
-                if (!double.TryParse(token.Text, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value))
+                if (!double.TryParse(_tokens.GetSpan(token), NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value))
                 {
-                    throw Error($"Invalid numeric literal '{token.Text}'. Numbers must use invariant culture without thousands separators.");
+                    throw Error($"Invalid numeric literal '{_tokens.GetText(token)}'. Numbers must use invariant culture without thousands separators.");
                 }
 
                 return ExcelCellValue.FromNumber(value);
@@ -239,9 +239,9 @@ internal static class QueryDslParser
                 }
 
                 _tokens.MoveNext();
-                if (!DateTime.TryParseExact(date.Text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime value))
+                if (!DateTime.TryParseExact(_tokens.GetSpan(date), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime value))
                 {
-                    throw Error($"Invalid DATE literal '{date.Text}'. Dates must use ISO format yyyy-MM-dd.");
+                    throw Error($"Invalid DATE literal '{_tokens.GetText(date)}'. Dates must use ISO format yyyy-MM-dd.");
                 }
 
                 return ExcelCellValue.FromDate(value);
@@ -249,13 +249,13 @@ internal static class QueryDslParser
 
             if (token.IsIdentifier)
             {
-                if (token.IsKeyword("TRUE"))
+                if (_tokens.IsKeyword(token, "TRUE"))
                 {
                     _tokens.MoveNext();
                     return ExcelCellValue.FromBoolean(true);
                 }
 
-                if (token.IsKeyword("FALSE"))
+                if (_tokens.IsKeyword(token, "FALSE"))
                 {
                     _tokens.MoveNext();
                     return ExcelCellValue.FromBoolean(false);
@@ -300,7 +300,7 @@ internal static class QueryDslParser
         {
             Token token = _tokens.Current;
             if (token.Kind is not TokenKind.Integer ||
-                !int.TryParse(token.Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int value) ||
+                !int.TryParse(_tokens.GetSpan(token), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int value) ||
                 value <= 0)
             {
                 throw Error($"{context} must be a positive integer.");
@@ -319,7 +319,7 @@ internal static class QueryDslParser
             }
 
             _tokens.MoveNext();
-            return token.Text;
+            return _tokens.GetText(token);
         }
 
         private string ParseBareToken(string context)
@@ -331,7 +331,7 @@ internal static class QueryDslParser
             }
 
             _tokens.MoveNext();
-            return token.Text;
+            return _tokens.GetText(token);
         }
 
         private void ExpectKeyword(string keyword)
@@ -344,7 +344,7 @@ internal static class QueryDslParser
 
         private bool TryConsumeKeyword(string keyword)
         {
-            if (!_tokens.Current.IsKeyword(keyword))
+            if (!_tokens.CurrentIsKeyword(keyword))
             {
                 return false;
             }
@@ -397,12 +397,28 @@ internal static class QueryDslParser
             _peeked = null;
         }
 
+        public ReadOnlySpan<char> GetSpan(Token t)
+            => t.HasOverride ? t.TextOverride.AsSpan() : _text.AsSpan(t.Offset, t.Length);
+
+        public string GetText(Token t)
+            => t.HasOverride ? t.TextOverride : _text[t.Offset..(t.Offset + t.Length)];
+
+        public bool IsKeyword(Token t, string kw)
+            => t.Kind is TokenKind.Identifier
+               && MemoryExtensions.Equals(GetSpan(t), kw, StringComparison.OrdinalIgnoreCase);
+
+        public bool CurrentIsKeyword(string kw) => IsKeyword(Current, kw);
+
+        public bool PeekIsKeyword(string kw) => IsKeyword(Peek(), kw);
+
+        public string CurrentDisplay => Current.IsEnd ? "<end>" : GetText(Current);
+
         private Token ReadNext()
         {
             SkipWhitespace();
             if (_position >= _text.Length)
             {
-                return new Token(TokenKind.End, string.Empty, _position);
+                return new Token(TokenKind.End, _position, 0, _position);
             }
 
             char c = _text[_position];
@@ -425,18 +441,18 @@ internal static class QueryDslParser
             _position++;
             return c switch
             {
-                '!' when TryConsume('=') => new Token(TokenKind.NotEquals, "!=", start),
-                '!' => new Token(TokenKind.Bang, "!", start),
-                ':' => new Token(TokenKind.Colon, ":", start),
-                ',' => new Token(TokenKind.Comma, ",", start),
-                '(' => new Token(TokenKind.OpenParen, "(", start),
-                ')' => new Token(TokenKind.CloseParen, ")", start),
-                '*' => new Token(TokenKind.Star, "*", start),
-                '=' => new Token(TokenKind.Equals, "=", start),
-                '<' when TryConsume('=') => new Token(TokenKind.LessThanOrEqual, "<=", start),
-                '<' => new Token(TokenKind.LessThan, "<", start),
-                '>' when TryConsume('=') => new Token(TokenKind.GreaterThanOrEqual, ">=", start),
-                '>' => new Token(TokenKind.GreaterThan, ">", start),
+                '!' when TryConsume('=') => new Token(TokenKind.NotEquals, start, 2, start),
+                '!' => new Token(TokenKind.Bang, start, 1, start),
+                ':' => new Token(TokenKind.Colon, start, 1, start),
+                ',' => new Token(TokenKind.Comma, start, 1, start),
+                '(' => new Token(TokenKind.OpenParen, start, 1, start),
+                ')' => new Token(TokenKind.CloseParen, start, 1, start),
+                '*' => new Token(TokenKind.Star, start, 1, start),
+                '=' => new Token(TokenKind.Equals, start, 1, start),
+                '<' when TryConsume('=') => new Token(TokenKind.LessThanOrEqual, start, 2, start),
+                '<' => new Token(TokenKind.LessThan, start, 1, start),
+                '>' when TryConsume('=') => new Token(TokenKind.GreaterThanOrEqual, start, 2, start),
+                '>' => new Token(TokenKind.GreaterThan, start, 1, start),
                 _ => throw new QueryDslException($"Unexpected character '{c}'."),
             };
         }
@@ -450,7 +466,7 @@ internal static class QueryDslParser
                 _position++;
             }
 
-            return new Token(TokenKind.Identifier, _text[start.._position], start);
+            return new Token(TokenKind.Identifier, start, _position - start, start);
         }
 
         private Token ReadNumberOrIdentifier()
@@ -471,7 +487,7 @@ internal static class QueryDslParser
                     _position++;
                 }
 
-                return new Token(TokenKind.Identifier, _text[start.._position], start);
+                return new Token(TokenKind.Identifier, start, _position - start, start);
             }
 
             bool isDecimal = false;
@@ -485,20 +501,21 @@ internal static class QueryDslParser
                 }
             }
 
-            return new Token(isDecimal ? TokenKind.Number : TokenKind.Integer, _text[start.._position], start);
+            return new Token(isDecimal ? TokenKind.Number : TokenKind.Integer, start, _position - start, start);
         }
 
         private Token ReadQuotedText()
         {
-            int start = _position; // opening quote index (caller hasn't incremented yet)
+            int start = _position; // opening quote index
             _position++;           // skip the opening quote
             // Fast path: no "" escapes
             int closing = _text.IndexOf('"', _position);
             if (closing >= 0 && (closing + 1 >= _text.Length || _text[closing + 1] != '"'))
             {
-                string text = _text[_position..closing];
+                int contentStart = _position;
+                int contentLength = closing - _position;
                 _position = closing + 1;
-                return new Token(TokenKind.QuotedText, text, start);
+                return new Token(TokenKind.QuotedText, contentStart, contentLength, start);
             }
             // Slow path: handle "" escapes with StringBuilder
             var value = new StringBuilder();
@@ -514,7 +531,7 @@ internal static class QueryDslParser
                         continue;
                     }
 
-                    return new Token(TokenKind.QuotedText, value.ToString(), start);
+                    return Token.Escaped(value.ToString(), start);
                 }
 
                 value.Append(c);
@@ -543,20 +560,28 @@ internal static class QueryDslParser
         }
     }
 
-    private readonly record struct Token(TokenKind Kind, string Text, int Position)
+    private readonly record struct Token(TokenKind Kind, int Offset, int Length, int Position)
     {
+        // For tokens whose text can't be represented as a source span (escaped quoted strings)
+        private readonly string? _textOverride;
+
+        private Token(TokenKind kind, string text, int position)
+            : this(kind, 0, 0, position)
+        {
+            _textOverride = text;
+        }
+
+        internal static Token Escaped(string text, int position)
+            => new(TokenKind.QuotedText, text, position);
+
+        internal bool HasOverride => _textOverride is not null;
+        internal string TextOverride => _textOverride!;
+
         public bool IsEnd => Kind is TokenKind.End;
 
         public bool IsIdentifier => Kind is TokenKind.Identifier;
 
-        public string Display => IsEnd ? "<end>" : Text;
-
         public bool Is(TokenKind kind) => Kind == kind;
-
-        public bool IsKeyword(string keyword) =>
-            Kind is TokenKind.Identifier && KeywordEquals(Text, keyword);
-
-        public bool IsIntegerNumber => Kind is TokenKind.Integer;
     }
 
     private enum TokenKind
@@ -579,9 +604,6 @@ internal static class QueryDslParser
         GreaterThan,
         GreaterThanOrEqual,
     }
-
-    private static bool KeywordEquals(string value, string keyword) =>
-        string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
 
     private static string OperatorText(QueryOperator op) => op switch
     {
