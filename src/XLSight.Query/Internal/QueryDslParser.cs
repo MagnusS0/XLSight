@@ -162,8 +162,14 @@ internal static class QueryDslParser
             string column = ParseIdentifierLike($"{function} column");
             Expect(TokenKind.CloseParen, $"Expected ')' after aggregate '{function}'.");
 
-            ArgumentException.ThrowIfNullOrWhiteSpace(column);
-            return new AggregateSpec(kind, column);
+            return kind switch
+            {
+                AggregateKind.Sum => QueryAggregates.Sum(column),
+                AggregateKind.Average => QueryAggregates.Average(column),
+                AggregateKind.Min => QueryAggregates.Min(column),
+                AggregateKind.Max => QueryAggregates.Max(column),
+                _ => throw Error($"Unknown aggregate '{function}'. Supported aggregates: {SupportedAggregates}."),
+            };
         }
 
         private List<SheetQueryPredicate> ParseWhere()
