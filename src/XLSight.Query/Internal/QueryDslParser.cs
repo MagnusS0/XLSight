@@ -162,35 +162,22 @@ internal static class QueryDslParser
             string column = ParseIdentifierLike($"{function} column");
             Expect(TokenKind.CloseParen, $"Expected ')' after aggregate '{function}'.");
 
-            return kind switch
-            {
-                AggregateKind.Sum => QueryAggregates.Sum(column),
-                AggregateKind.Average => QueryAggregates.Average(column),
-                AggregateKind.Min => QueryAggregates.Min(column),
-                AggregateKind.Max => QueryAggregates.Max(column),
-                _ => throw Error($"Unknown aggregate '{function}'. Supported aggregates: {SupportedAggregates}."),
-            };
+            ArgumentException.ThrowIfNullOrWhiteSpace(column);
+            return new AggregateSpec(kind, column);
         }
 
         private List<SheetQueryPredicate> ParseWhere()
         {
             var predicates = new List<SheetQueryPredicate>();
-
-            while (true)
+            do
             {
                 predicates.Add(ParsePredicate());
+            }
+            while (TryConsumeKeyword("AND"));
 
-                if (TryConsumeKeyword("AND"))
-                {
-                    continue;
-                }
-
-                if (_tokens.CurrentIsKeyword("OR"))
-                {
-                    throw Error("OR is not supported. Predicates must be combined with AND.");
-                }
-
-                break;
+            if (_tokens.CurrentIsKeyword("OR"))
+            {
+                throw Error("OR is not supported. Predicates must be combined with AND.");
             }
 
             return predicates;
@@ -288,7 +275,9 @@ internal static class QueryDslParser
             string end = ParseBareToken("range end");
             string rangeAddress = $"{start}:{end}".ToUpperInvariant();
 
-            if (!ExcelRange.TryParse(rangeAddress, out ExcelRange range))
+            if (!ExcelAddress.TryParse(start, out _) ||
+                !ExcelAddress.TryParse(end, out _) ||
+                !ExcelRange.TryParse(rangeAddress, out ExcelRange range))
             {
                 throw Error("FROM range must be a bounded A1 range such as A1:F100.");
             }
@@ -473,7 +462,10 @@ internal static class QueryDslParser
         {
             int start = _position;
             if (_position < _text.Length && _text[_position] is '+' or '-')
+            {
                 _position++;
+            }
+
             while (_position < _text.Length && char.IsDigit(_text[_position]))
             {
                 _position++;

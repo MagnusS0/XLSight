@@ -407,11 +407,20 @@ internal sealed class QueryScan
         _mode = ResolveMode();
     }
 
-    private ScanMode ResolveMode() =>
-        _distinctColumn is not null ? ScanMode.Distinct
-        : _aggregateSpecs.Length == 0 ? ScanMode.Row
-        : _groupByColumn is not null ? ScanMode.GroupedAggregate
-        : ScanMode.GlobalAggregate;
+    private ScanMode ResolveMode()
+    {
+        if (_distinctColumn is not null)
+        {
+            return ScanMode.Distinct;
+        }
+
+        if (_aggregateSpecs.Length == 0)
+        {
+            return ScanMode.Row;
+        }
+
+        return _groupByColumn is null ? ScanMode.GlobalAggregate : ScanMode.GroupedAggregate;
+    }
 
     private int ResolveColumn(string name)
     {

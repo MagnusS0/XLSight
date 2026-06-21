@@ -2,7 +2,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 
-namespace XLSight.Query.Tests.Infrastructure;
+namespace XLSight.Query.Tests;
 
 /// <summary>One logical data row of the sales fixture. A null <see cref="NetSales"/> with a
 /// non-null <see cref="NetSalesText"/> models a dirty text cell in the numeric column;

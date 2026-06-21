@@ -43,8 +43,7 @@ public sealed class SheetQuery
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         ArgumentNullException.ThrowIfNull(value);
-        _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromText(value)));
-        return this;
+        return AddFilter(column, op, ExcelCellValue.FromText(value));
     }
 
     /// <summary>Adds a numeric filter. Filters are AND-combined.</summary>
@@ -52,22 +51,14 @@ public sealed class SheetQuery
     /// <param name="op">The comparison operator.</param>
     /// <param name="value">The numeric literal. Only numeric cells can match.</param>
     public SheetQuery Where(string column, QueryOperator op, double value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromNumber(value)));
-        return this;
-    }
+        => AddFilter(column, op, ExcelCellValue.FromNumber(value));
 
     /// <summary>Adds a date filter. Filters are AND-combined.</summary>
     /// <param name="column">The column name (from the header row).</param>
     /// <param name="op">The comparison operator.</param>
     /// <param name="value">The date literal. Only date cells can match.</param>
     public SheetQuery Where(string column, QueryOperator op, DateTime value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromDate(value)));
-        return this;
-    }
+        => AddFilter(column, op, ExcelCellValue.FromDate(value));
 
     /// <summary>Adds a boolean filter. Filters are AND-combined.</summary>
     /// <param name="column">The column name (from the header row).</param>
@@ -82,8 +73,7 @@ public sealed class SheetQuery
             throw new ArgumentException("Boolean filters support Equals and NotEquals only.", nameof(op));
         }
 
-        _filters.Add(new FilterSpec(column, op, ExcelCellValue.FromBoolean(value)));
-        return this;
+        return AddFilter(column, op, ExcelCellValue.FromBoolean(value));
     }
 
     // ── Shaping ───────────────────────────────────────────────────────────────
@@ -319,5 +309,12 @@ public sealed class SheetQuery
             distinctColumn,
             _limit,
             _maxGroups);
+    }
+
+    private SheetQuery AddFilter(string column, QueryOperator op, ExcelCellValue value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(column);
+        _filters.Add(new FilterSpec(column, op, value));
+        return this;
     }
 }

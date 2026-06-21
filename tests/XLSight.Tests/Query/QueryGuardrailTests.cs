@@ -1,5 +1,4 @@
 using XLSight.Analysis;
-using XLSight.Query.Tests.Infrastructure;
 using Xunit;
 
 namespace XLSight.Query.Tests;

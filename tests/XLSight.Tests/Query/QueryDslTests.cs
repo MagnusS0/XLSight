@@ -1,5 +1,3 @@
-using System.Globalization;
-using XLSight.Query.Tests.Infrastructure;
 using Xunit;
 
 namespace XLSight.Query.Tests;
@@ -180,63 +178,20 @@ public sealed class QueryDslTests
     }
 
     [Theory]
-    [InlineData("SELECT Region", "Projected row columns are not supported")]
-    [InlineData("SELECT TOTAL(Units)", "Unknown aggregate 'TOTAL'")]
-    public void Parse_UnsupportedSelectSyntax_ThrowsRepairableDiagnostic(string selectClause, string expectedMessage)
+    [InlineData("A1:F11", "SELECT Region", "Projected row columns are not supported")]
+    [InlineData("A1:F11", "SELECT TOTAL(Units)", "Unknown aggregate 'TOTAL'")]
+    [InlineData("A1:F11", "SELECT * GROUP BY Region", "GROUP BY is not valid with SELECT *")]
+    [InlineData("A1:F11", "SELECT COUNT() WHERE Region = \"EMEA\" OR Region = \"APAC\"", "OR is not supported")]
+    [InlineData("A1:F11", "SELECT COUNT() WHERE OnPromo > true", "Boolean predicates support '=' and '!=' only")]
+    [InlineData("A:F", "SELECT COUNT()", "FROM range must be a bounded A1 range")]
+    public void Parse_UnsupportedSyntax_ThrowsRepairableDiagnostic(
+        string range,
+        string clauses,
+        string expectedMessage)
     {
-        string query = string.Create(CultureInfo.InvariantCulture, $"""
-            FROM Sales!A1:F11 HEADER AUTO
-            {selectClause}
-            """);
+        string query = $"FROM Sales!{range} HEADER AUTO\n{clauses}";
 
         var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse(query));
         Assert.Contains(expectedMessage, ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Parse_GroupByWithSelectAll_ThrowsRepairableDiagnostic()
-    {
-        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse("""
-            FROM Sales!A1:F11 HEADER AUTO
-            SELECT *
-            GROUP BY Region
-            """));
-
-        Assert.Contains("GROUP BY is not valid with SELECT *", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Parse_OrPredicate_ThrowsRepairableDiagnostic()
-    {
-        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse("""
-            FROM Sales!A1:F11 HEADER AUTO
-            SELECT COUNT()
-            WHERE Region = "EMEA" OR Region = "APAC"
-            """));
-
-        Assert.Contains("OR is not supported", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Parse_BooleanOrderingPredicate_ThrowsRepairableDiagnostic()
-    {
-        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse("""
-            FROM Sales!A1:F11 HEADER AUTO
-            SELECT COUNT()
-            WHERE OnPromo > true
-            """));
-
-        Assert.Contains("Boolean predicates support '=' and '!=' only", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Parse_UnboundedRange_ThrowsRepairableDiagnostic()
-    {
-        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse("""
-            FROM Sales!A:F HEADER AUTO
-            SELECT COUNT()
-            """));
-
-        Assert.Contains("FROM range must be a bounded A1 range", ex.Message, StringComparison.Ordinal);
     }
 }
