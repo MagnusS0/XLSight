@@ -379,6 +379,7 @@ internal static class QueryDslParser
     {
         private readonly string _text;
         private int _position;
+        private Token? _peeked;
 
         public TokenReader(string text)
         {
@@ -388,14 +389,20 @@ internal static class QueryDslParser
 
         public Token Current { get; private set; }
 
-        public void MoveNext() => Current = ReadNext();
+        public Token Peek() => _peeked ??= ReadNext();
+
+        public void MoveNext()
+        {
+            Current = _peeked ?? ReadNext();
+            _peeked = null;
+        }
 
         private Token ReadNext()
         {
             SkipWhitespace();
             if (_position >= _text.Length)
             {
-                return new Token(TokenKind.End, string.Empty);
+                return new Token(TokenKind.End, string.Empty, _position);
             }
 
             char c = _text[_position];
@@ -414,21 +421,22 @@ internal static class QueryDslParser
                 return ReadQuotedText();
             }
 
+            int start = _position;
             _position++;
             return c switch
             {
-                '!' when TryConsume('=') => new Token(TokenKind.NotEquals, "!="),
-                '!' => new Token(TokenKind.Bang, "!"),
-                ':' => new Token(TokenKind.Colon, ":"),
-                ',' => new Token(TokenKind.Comma, ","),
-                '(' => new Token(TokenKind.OpenParen, "("),
-                ')' => new Token(TokenKind.CloseParen, ")"),
-                '*' => new Token(TokenKind.Star, "*"),
-                '=' => new Token(TokenKind.Equals, "="),
-                '<' when TryConsume('=') => new Token(TokenKind.LessThanOrEqual, "<="),
-                '<' => new Token(TokenKind.LessThan, "<"),
-                '>' when TryConsume('=') => new Token(TokenKind.GreaterThanOrEqual, ">="),
-                '>' => new Token(TokenKind.GreaterThan, ">"),
+                '!' when TryConsume('=') => new Token(TokenKind.NotEquals, "!=", start),
+                '!' => new Token(TokenKind.Bang, "!", start),
+                ':' => new Token(TokenKind.Colon, ":", start),
+                ',' => new Token(TokenKind.Comma, ",", start),
+                '(' => new Token(TokenKind.OpenParen, "(", start),
+                ')' => new Token(TokenKind.CloseParen, ")", start),
+                '*' => new Token(TokenKind.Star, "*", start),
+                '=' => new Token(TokenKind.Equals, "=", start),
+                '<' when TryConsume('=') => new Token(TokenKind.LessThanOrEqual, "<=", start),
+                '<' => new Token(TokenKind.LessThan, "<", start),
+                '>' when TryConsume('=') => new Token(TokenKind.GreaterThanOrEqual, ">=", start),
+                '>' => new Token(TokenKind.GreaterThan, ">", start),
                 _ => throw new QueryDslException($"Unexpected character '{c}'."),
             };
         }
@@ -442,7 +450,7 @@ internal static class QueryDslParser
                 _position++;
             }
 
-            return new Token(TokenKind.Identifier, _text[start.._position]);
+            return new Token(TokenKind.Identifier, _text[start.._position], start);
         }
 
         private Token ReadNumberOrIdentifier()
@@ -463,11 +471,13 @@ internal static class QueryDslParser
                     _position++;
                 }
 
-                return new Token(TokenKind.Identifier, _text[start.._position]);
+                return new Token(TokenKind.Identifier, _text[start.._position], start);
             }
 
+            bool isDecimal = false;
             if (_position < _text.Length && _text[_position] == '.')
             {
+                isDecimal = true;
                 _position++;
                 while (_position < _text.Length && char.IsDigit(_text[_position]))
                 {
@@ -475,12 +485,22 @@ internal static class QueryDslParser
                 }
             }
 
-            return new Token(TokenKind.Number, _text[start.._position]);
+            return new Token(isDecimal ? TokenKind.Number : TokenKind.Integer, _text[start.._position], start);
         }
 
         private Token ReadQuotedText()
         {
-            _position++;
+            int start = _position; // opening quote index (caller hasn't incremented yet)
+            _position++;           // skip the opening quote
+            // Fast path: no "" escapes
+            int closing = _text.IndexOf('"', _position);
+            if (closing >= 0 && (closing + 1 >= _text.Length || _text[closing + 1] != '"'))
+            {
+                string text = _text[_position..closing];
+                _position = closing + 1;
+                return new Token(TokenKind.QuotedText, text, start);
+            }
+            // Slow path: handle "" escapes with StringBuilder
             var value = new StringBuilder();
             while (_position < _text.Length)
             {
@@ -494,7 +514,7 @@ internal static class QueryDslParser
                         continue;
                     }
 
-                    return new Token(TokenKind.QuotedText, value.ToString());
+                    return new Token(TokenKind.QuotedText, value.ToString(), start);
                 }
 
                 value.Append(c);
@@ -523,7 +543,7 @@ internal static class QueryDslParser
         }
     }
 
-    private readonly record struct Token(TokenKind Kind, string Text)
+    private readonly record struct Token(TokenKind Kind, string Text, int Position)
     {
         public bool IsEnd => Kind is TokenKind.End;
 
@@ -536,7 +556,7 @@ internal static class QueryDslParser
         public bool IsKeyword(string keyword) =>
             Kind is TokenKind.Identifier && KeywordEquals(Text, keyword);
 
-        public bool IsIntegerNumber => Kind is TokenKind.Number && !Text.Contains('.', StringComparison.Ordinal);
+        public bool IsIntegerNumber => Kind is TokenKind.Integer;
     }
 
     private enum TokenKind
@@ -545,6 +565,7 @@ internal static class QueryDslParser
         Identifier,
         QuotedText,
         Number,
+        Integer,
         Bang,
         Colon,
         Comma,
