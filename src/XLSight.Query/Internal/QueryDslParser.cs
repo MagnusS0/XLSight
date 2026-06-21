@@ -38,9 +38,10 @@ internal static class QueryDslParser
                 : [];
 
             string? groupBy = null;
-            if (TryConsumeKeyword("GROUP"))
+            if (_tokens.Current.IsKeyword("GROUP") && _tokens.Peek().IsKeyword("BY"))
             {
-                ExpectKeyword("BY");
+                _tokens.MoveNext(); // consume GROUP
+                _tokens.MoveNext(); // consume BY
                 groupBy = ParseIdentifierLike("GROUP BY column");
             }
 
@@ -218,7 +219,7 @@ internal static class QueryDslParser
                 return ExcelCellValue.FromText(token.Text);
             }
 
-            if (token.Kind is TokenKind.Number)
+            if (token.Kind is TokenKind.Integer or TokenKind.Number)
             {
                 _tokens.MoveNext();
                 if (!double.TryParse(token.Text, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value))
@@ -285,11 +286,9 @@ internal static class QueryDslParser
             string start = ParseBareToken("range start");
             Expect(TokenKind.Colon, "FROM range must be a bounded A1 range such as A1:F100.");
             string end = ParseBareToken("range end");
-            string rangeAddress = string.Create(CultureInfo.InvariantCulture, $"{start}:{end}").ToUpperInvariant();
+            string rangeAddress = $"{start}:{end}".ToUpperInvariant();
 
-            if (!ExcelAddress.TryParse(start, out _) ||
-                !ExcelAddress.TryParse(end, out _) ||
-                !ExcelRange.TryParse(rangeAddress, out ExcelRange range))
+            if (!ExcelRange.TryParse(rangeAddress, out ExcelRange range))
             {
                 throw Error("FROM range must be a bounded A1 range such as A1:F100.");
             }
@@ -300,9 +299,8 @@ internal static class QueryDslParser
         private int ParsePositiveInteger(string context)
         {
             Token token = _tokens.Current;
-            if (token.Kind is not TokenKind.Number ||
-                token.Text.Contains('.', StringComparison.Ordinal) ||
-                !int.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int value) ||
+            if (token.Kind is not TokenKind.Integer ||
+                !int.TryParse(token.Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int value) ||
                 value <= 0)
             {
                 throw Error($"{context} must be a positive integer.");
@@ -315,7 +313,7 @@ internal static class QueryDslParser
         private string ParseIdentifierLike(string context)
         {
             Token token = _tokens.Current;
-            if (token.Kind is not (TokenKind.Identifier or TokenKind.QuotedText) && !token.IsIntegerNumber)
+            if (token.Kind is not (TokenKind.Identifier or TokenKind.QuotedText or TokenKind.Integer))
             {
                 throw Error($"Expected {context}.");
             }
@@ -374,7 +372,7 @@ internal static class QueryDslParser
             return true;
         }
 
-        private static QueryDslException Error(string message) => new(message);
+        private QueryDslException Error(string message) => new(message, _tokens.Current.Position);
     }
 
     private sealed class TokenReader
