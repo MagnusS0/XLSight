@@ -7,6 +7,14 @@ public sealed class QueryDslTests
     private const string Range = "A1:F11";
 
     [Fact]
+    public void Constructor_WithInnerException_UsesUnknownPosition()
+    {
+        var exception = new QueryDslException("message", new InvalidOperationException());
+
+        Assert.Equal(-1, exception.Position);
+    }
+
+    [Fact]
     public void Parse_ValidAggregateQuery_ReturnsStructuredSpec()
     {
         SheetQuerySpec spec = SheetQuerySpec.Parse("""

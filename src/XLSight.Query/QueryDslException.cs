@@ -21,5 +21,6 @@ public sealed class QueryDslException : Exception
     public QueryDslException(string message, Exception innerException)
         : base(message, innerException)
     {
+        Position = -1;
     }
 }
