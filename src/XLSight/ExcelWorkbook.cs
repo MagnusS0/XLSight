@@ -953,6 +953,17 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     internal ExcelSheetReader GetRangeReader(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection)
         => GetRangeReaderCore(sheet, range, mode, projection);
 
+    internal ValueTask<ExcelSheetReader> GetRangeReaderAsync(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode,
+        RowProjection? projection,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(GetRangeReader(sheet, range, mode, projection));
+    }
+
     private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null)
     {
         ThrowIfDisposed();

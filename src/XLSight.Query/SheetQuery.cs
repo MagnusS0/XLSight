@@ -272,7 +272,9 @@ public sealed class SheetQuery
                 return;
             }
 
-            var reader = _workbook.GetRangeReader(_sheet, dataRange, ReadMode.Values, scan.BuildProjection());
+            var reader = await _workbook
+                .GetRangeReaderAsync(_sheet, dataRange, ReadMode.Values, scan.BuildProjection(), ct)
+                .ConfigureAwait(false);
             await using (reader.ConfigureAwait(false))
             {
                 while (await reader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(reader.Current))
