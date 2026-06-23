@@ -41,19 +41,42 @@ internal static class CellAttributeParser
             && attrBytes[^2] == (byte)'/'
             && attrBytes[^1] == (byte)'>';
 
-        if (TryGetAttributeValue(attrBytes, RAttr, out var rValue))
-        {
-            _ = ColumnRefDecoder.TryParse(rValue, out column, out row);
-        }
+        // Single-pass forward tokenizer: one scan instead of three IndexOf passes.
+        int pos = 0;
+        int len = attrBytes.Length;
 
-        if (TryGetAttributeValue(attrBytes, TAttr, out var tValue))
+        while (pos < len)
         {
-            kind = ParseKind(tValue);
-        }
+            byte ch = attrBytes[pos];
+            if (ch is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') { pos++; continue; }
+            if (ch is (byte)'>' or (byte)'/') { break; }
 
-        if (TryGetAttributeValue(attrBytes, SAttr, out var sValue))
-        {
-            _ = Utf8Parser.TryParse(sValue, out styleIndex, out _);
+            int eq = attrBytes[pos..].IndexOf((byte)'=');
+            if (eq < 0) { break; }
+
+            // Only dispatch on single-char attr names (r, t, s); skip others (cm, ph, …).
+            bool known = eq == 1 && (ch is (byte)'r' or (byte)'t' or (byte)'s');
+            pos += eq + 1;
+            if (pos >= len) { break; }
+
+            byte quote = attrBytes[pos++];
+            if (quote is not ((byte)'"' or (byte)'\'')) { break; }
+
+            int closeQuote = attrBytes[pos..].IndexOf(quote);
+            if (closeQuote < 0) { break; }
+
+            if (known)
+            {
+                var value = attrBytes.Slice(pos, closeQuote);
+                switch (ch)
+                {
+                    case (byte)'r': _ = ColumnRefDecoder.TryParse(value, out column, out row); break;
+                    case (byte)'t': kind = ParseKind(value); break;
+                    case (byte)'s': _ = Utf8Parser.TryParse(value, out styleIndex, out _); break;
+                }
+            }
+
+            pos += closeQuote + 1;
         }
     }
 

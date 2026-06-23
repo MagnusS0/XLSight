@@ -44,15 +44,17 @@ internal static partial class XlsxSheetScanner
             var fStatus = TryFindStartTag(searchSpan, TagFormula, out var fMatch, out int fPartial);
             var vStatus = TryFindStartTag(searchSpan, TagValue, out var vMatch, out int vPartial);
 
-            if (fStatus == TagSearchResult.NeedMoreData || vStatus == TagSearchResult.NeedMoreData)
+            bool fFound = fStatus == TagSearchResult.Found;
+            bool vFound = vStatus == TagSearchResult.Found;
+
+            // With <-first scanning a trailing '<' returns NeedMoreData even if we already
+            // found a complete <f> tag.  Only block when we genuinely lack enough data.
+            if (fStatus == TagSearchResult.NeedMoreData || (vStatus == TagSearchResult.NeedMoreData && !fFound))
             {
                 if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
                 if (!RefillKeepingTagStart(buf, span, MaxPartial(MaxPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
                 continue;
             }
-
-            bool fFound = fStatus == TagSearchResult.Found;
-            bool vFound = vStatus == TagSearchResult.Found;
 
             if (!fFound && !vFound)
             {
@@ -304,9 +306,10 @@ internal static partial class XlsxSheetScanner
             bool fFound = fStatus == TagSearchResult.Found;
             bool vFound = vStatus == TagSearchResult.Found;
 
-            // Both branches require the same refill-or-bail logic: consolidate them.
+            // With <-first scanning a trailing '<' returns NeedMoreData; don't block
+            // on vStatus alone when we already hold a complete <f> match.
             bool needRefill = fStatus == TagSearchResult.NeedMoreData
-                || vStatus == TagSearchResult.NeedMoreData
+                || (vStatus == TagSearchResult.NeedMoreData && !fFound)
                 || (!fFound && !vFound);
             if (needRefill)
             {

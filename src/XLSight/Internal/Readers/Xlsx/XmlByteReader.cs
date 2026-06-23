@@ -15,16 +15,23 @@ internal static class XmlByteReader
 
     internal static ReadOnlySpan<byte> ExtractUntilClose(ScanBuffer buf, ReadOnlySpan<byte> tagName)
     {
+        int searchFrom = 0;
         while (true)
         {
             var span = buf.Span;
-            var status = TryFindEndTag(span, tagName, out int closeIdx, out int closeLen, out _);
+            var status = TryFindEndTag(span[searchFrom..], tagName, out int closeIdx, out int closeLen, out _);
             if (status == TagSearchResult.Found)
             {
-                var value = span[..closeIdx];
-                buf.Advance(closeIdx + closeLen);
-                return value;
+                int absClose = searchFrom + closeIdx;
+                buf.Advance(absClose + closeLen);
+                return span[..absClose];
             }
+
+            // NeedMoreData: partial '<' at searchFrom+closeIdx — resume from there.
+            // NotFound: no '<' at all — resume from end (only scan fresh bytes after refill).
+            searchFrom = status == TagSearchResult.NeedMoreData
+                ? searchFrom + closeIdx
+                : span.Length;
 
             if (!buf.CanReadMore || !buf.Refill())
             {
@@ -108,26 +115,23 @@ internal static class XmlByteReader
 
         while (true)
         {
-            int nameIdx = span[search..].IndexOf(localName);
-            if (nameIdx < 0) { return TagSearchResult.NotFound; }
-            nameIdx += search;
+            int lt = span[search..].IndexOf((byte)'<');
+            if (lt < 0) { return TagSearchResult.NotFound; }
+            lt += search;
 
-            if (!TryGetOpenTagStart(span, nameIdx, out int tagStart))
+            var result = TryMatchStartTagAt(span[lt..], localName, out int afterName, out int endExcl, out bool selfClose);
+            if (result == TagSearchResult.Found)
             {
-                search = nameIdx + 1;
-                continue;
+                match = new StartTagMatch(lt, lt + afterName, lt + endExcl, selfClose);
+                return TagSearchResult.Found;
             }
-
-            int nameEnd = nameIdx + localName.Length;
-            if (nameEnd >= span.Length) { partialIndex = tagStart; match = new StartTagMatch(tagStart, 0, 0, false); return TagSearchResult.NeedMoreData; }
-            if (!IsTagNameBoundary(span[nameEnd])) { search = nameIdx + 1; continue; }
-
-            int gt = span[nameEnd..].IndexOf((byte)'>');
-            if (gt < 0) { partialIndex = tagStart; match = new StartTagMatch(tagStart, 0, 0, false); return TagSearchResult.NeedMoreData; }
-
-            int endExclusive = nameEnd + gt + 1;
-            match = new StartTagMatch(tagStart, nameEnd, endExclusive, IsSelfClosing(span, nameEnd, endExclusive - 1));
-            return TagSearchResult.Found;
+            if (result == TagSearchResult.NeedMoreData)
+            {
+                partialIndex = lt;
+                match = new StartTagMatch(lt, 0, 0, false);
+                return TagSearchResult.NeedMoreData;
+            }
+            search = lt + 1;
         }
     }
 
@@ -145,26 +149,24 @@ internal static class XmlByteReader
 
         while (true)
         {
-            int nameIdx = span[search..].IndexOf(localName);
-            if (nameIdx < 0) { return TagSearchResult.NotFound; }
-            nameIdx += search;
+            int lt = span[search..].IndexOf((byte)'<');
+            if (lt < 0) { return TagSearchResult.NotFound; }
+            lt += search;
 
-            if (!TryGetCloseTagStart(span, nameIdx, out int ts))
+            var result = TryMatchEndTagAt(span[lt..], localName, out int len);
+            if (result == TagSearchResult.Found)
             {
-                search = nameIdx + 1;
-                continue;
+                tagStart = lt;
+                tagLength = len;
+                return TagSearchResult.Found;
             }
-
-            int nameEnd = nameIdx + localName.Length;
-            if (nameEnd >= span.Length) { partialIndex = ts; return TagSearchResult.NeedMoreData; }
-
-            int closeGt = FindCloseAngleBracket(span, nameEnd);
-            if (closeGt == -1) { partialIndex = ts; return TagSearchResult.NeedMoreData; }
-            if (closeGt == -2) { search = nameIdx + 1; continue; }
-
-            tagStart = ts;
-            tagLength = closeGt - ts + 1;
-            return TagSearchResult.Found;
+            if (result == TagSearchResult.NeedMoreData)
+            {
+                tagStart = lt;
+                partialIndex = lt;
+                return TagSearchResult.NeedMoreData;
+            }
+            search = lt + 1;
         }
     }
 
@@ -180,93 +182,6 @@ internal static class XmlByteReader
         }
 
         return slice[idx] == (byte)'>' ? cursor + idx : -2;
-    }
-
-    private static bool TryGetOpenTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
-    {
-        // A candidate whose '<' would lie before span[0] can never match: the span's left
-        // edge is pinned (Advance only moves forward, refills append on the right), so
-        // waiting for more data cannot resolve it. Treat as a definitive non-match —
-        // returning NeedMoreData here deadlocks the caller's refill loop.
-        tagStart = -2;
-        if (nameIdx == 0)
-        {
-            return false;
-        }
-
-        byte before = span[nameIdx - 1];
-        if (before == (byte)'<')
-        {
-            tagStart = nameIdx - 1;
-            return true;
-        }
-
-        if (before == (byte)':')
-        {
-            int i = nameIdx - 2;
-            while (i >= 0 && IsValidPrefixChar(span[i]))
-            {
-                i--;
-            }
-
-            if (i < 0)
-            {
-                return false;
-            }
-
-            if (span[i] == (byte)'<')
-            {
-                tagStart = i;
-                return true;
-            }
-        }
-
-        tagStart = -2;
-        return false;
-    }
-
-    private static bool TryGetCloseTagStart(ReadOnlySpan<byte> span, int nameIdx, out int tagStart)
-    {
-        // A candidate whose "</" would lie before span[0] can never match: the span's left
-        // edge is pinned (Advance only moves forward, refills append on the right), so
-        // waiting for more data cannot resolve it. Treat as a definitive non-match —
-        // returning NeedMoreData here deadlocks the caller's refill loop (e.g. inline
-        // string text whose second byte equals the tag name, like "Item" vs </t>).
-        tagStart = -2;
-        if (nameIdx < 2)
-        {
-            return false;
-        }
-
-        byte before = span[nameIdx - 1];
-        if (before == (byte)'/' && span[nameIdx - 2] == (byte)'<')
-        {
-            tagStart = nameIdx - 2;
-            return true;
-        }
-
-        if (before == (byte)':')
-        {
-            int i = nameIdx - 2;
-            while (i >= 0 && IsValidPrefixChar(span[i]))
-            {
-                i--;
-            }
-
-            if (i < 1)
-            {
-                return false;
-            }
-
-            if (span[i] == (byte)'/' && span[i - 1] == (byte)'<')
-            {
-                tagStart = i - 1;
-                return true;
-            }
-        }
-
-        tagStart = -2;
-        return false;
     }
 
     private static bool IsSelfClosing(ReadOnlySpan<byte> span, int attrStart, int gtIndex)
