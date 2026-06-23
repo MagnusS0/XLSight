@@ -96,21 +96,102 @@ QueryResult result = workbook.ExecuteQuery(spec);
 `HEADER COLUMN` is reserved for transposed tables. The parser recognizes it, but
 execution rejects it until the engine has a dedicated transposed scan strategy.
 
-## What it deliberately does not do
+## Using with AI agents
 
-No joins, subqueries, `OR`, `ORDER BY`, projected row columns, expressions, computed
-columns, aliases, window functions, formulas as expressions, user-defined functions,
-multiple ranges, or writes. Filters are `column op literal`; aggregates take a
-single column except `COUNT()`. Anything richer should escalate to `ReadRange`/
-`StreamRange` or an external engine such as DuckDB.
+The Query DSL is designed to be the interface between an agent and an Excel file.
+The agent receives a bounded, read-only query grammar, no arbitrary code, no writes,
+no file system access beyond the single file, which makes it safe to expose as a tool
+without a code sandbox. The host validates and executes the DSL; the agent never touches
+the file directly.
 
-## Agent recipe
+A minimal tool set covers three operations: workbook discovery, sheet profiling, and
+querying. Wire them up with `AIFunctionFactory.Create` and register them with your agent:
 
-1. `Analyze()` / `AnalyzeSheet()` — discover regions, headers, types, and (for
-   low-cardinality columns) exact distinct values.
-2. `ReadRange` — peek at a region when unsure.
-3. `QueryRange(...).DistinctValues("Region")` — discover filter values beyond the
-   analysis cap.
-4. `QueryRange(...).Where(...).GroupBy(...).Select(...)` — compute the answer in one pass.
-5. `ExecuteQuery(...)` — run the same query shape from DSL text when C# is not the
-   right transport.
+```csharp
+using System.ComponentModel;
+using XLSight;
+using XLSight.Query;
+
+// ── 1. workbook overview ───────────────────────────────────────────────────
+[Description("List sheets and workbook-level metadata for an Excel file.")]
+static string GetWorkbook(
+    [Description("Absolute path to the .xlsx, .xlsm, or .xlsb file.")] string path)
+{
+    using var wb = ExcelWorkbook.Open(path);
+    WorkbookInfo info = wb.Analyze(AnalysisLevel.Fast);
+    // Reccomended: Don't naivly serialize the WorkbookInfo object to JSON
+    // format it into something like a consise markdown with just what is needed
+    // {Your own formatting function here}
+    return FormatWorkbookInfo(info);
+}
+
+// ── 2. sheet profile ────────────────────────────────────────────────────────
+[Description(
+    "Profile one sheet: column names, dominant types, value ranges, and (for low-cardinality " +
+    "columns) the exact distinct values. Call this before querying to discover column names " +
+    "and filter values.")]
+static string GetSheetOverview(
+    [Description("Absolute path to the file.")] string path,
+    [Description("Exact sheet name.")] string sheet)
+{
+    using var wb = ExcelWorkbook.Open(path);
+    SheetInfo info = wb.AnalyzeSheet(sheet, AnalysisLevel.Full);
+    // {Your own formatting function here}
+    return FormatSheetInfo(info);
+}
+
+// ── 3. query ────────────────────────────────────────────────────────────────
+[Description(
+    "Run a read-only query against one sheet using the XLSight Query DSL. " +
+    "Returns aggregate or row results. Requires column names — call GetSheetOverview first.")]
+static string QuerySheet(
+    [Description("Absolute path to the file.")] string path,
+    [Description(
+        "XLSight Query DSL. Examples:\n" +
+        "  FROM Sales!A1:F500 HEADER AUTO SELECT SUM(Revenue), COUNT() WHERE Region = \"EMEA\" GROUP BY Month\n" +
+        "  FROM Sheet1!A1:D200 HEADER ROW 1 SELECT * WHERE Status = \"Open\" LIMIT 50")]
+    string query)
+{
+    using var wb = ExcelWorkbook.Open(path);
+    QueryResult result = wb.ExecuteQuery(query);
+    // convert result.Rows / result.Unaggregatable to a string the model can read
+    // {Your own formatting function here}
+    return FormatQueryResult(result);
+}
+```
+
+Register the tools and run the agent loop with your chosen provider:
+
+```csharp
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+
+IList<AITool> tools =
+[
+    AIFunctionFactory.Create(GetWorkbook),
+    AIFunctionFactory.Create(GetSheetOverview),
+    AIFunctionFactory.Create(QuerySheet),
+];
+
+// pass tools to your IChatClient / AIAgent as usual
+```
+
+**Stats pruning (optional optimisation).**  If `GetSheetOverview` has already been
+called, pass the column profiles into the query via `WithStats(...)` on the fluent API.
+A numeric filter that no value in the profiled min/max range can satisfy returns an empty
+result without opening the sheet at all:
+
+```csharp
+SheetInfo info = wb.AnalyzeSheet(sheet, AnalysisLevel.Full);
+
+QueryResult result = wb
+    .QueryRange(sheet, "A1:F500")
+    .Where("Units", QueryOperator.GreaterThan, 1000)
+    .Select(Sum("Revenue"))
+    .WithStats(info.Columns!)   // skips the scan when no column value can match
+    .Execute();
+```
+
+For filter discovery beyond what `GetSheetOverview` returns, add a fourth tool that
+calls `QueryRange(...).DistinctValues("ColumnName")` and returns the top-N values with
+their frequencies.
