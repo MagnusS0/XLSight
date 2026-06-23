@@ -39,7 +39,9 @@ jobs:
         run: dotnet test XLSight.slnx --no-build -c Release
 
       - name: Pack
-        run: dotnet pack src/XLSight/XLSight.csproj --no-build -c Release -o ./nupkg
+        run: |
+          dotnet pack src/XLSight/XLSight.csproj --no-build -c Release -o ./nupkg
+          dotnet pack src/XLSight.Query/XLSight.Query.csproj --no-build -c Release -o ./nupkg
 
       - name: NuGet login (OIDC)
         id: login
