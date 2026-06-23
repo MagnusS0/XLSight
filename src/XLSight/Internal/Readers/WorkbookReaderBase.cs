@@ -28,13 +28,25 @@ internal abstract class WorkbookReaderBase<
 
     public bool IsFileBacked => package.IsFileBacked;
 
-    public WorkbookFormat Format => GetValue(format);
+    public WorkbookFormat Format
+    {
+        get { ThrowIfDisposed(); return format; }
+    }
 
-    public IReadOnlyList<string> SheetNames => GetValue(() => _sheetNames.Value);
+    public IReadOnlyList<string> SheetNames
+    {
+        get { ThrowIfDisposed(); return _sheetNames.Value; }
+    }
 
-    public bool IsDate1904 => GetValue(isDate1904);
+    public bool IsDate1904
+    {
+        get { ThrowIfDisposed(); return isDate1904; }
+    }
 
-    public bool HasMacros => GetValue(HasMacrosCore);
+    public bool HasMacros
+    {
+        get { ThrowIfDisposed(); return HasMacrosCore(); }
+    }
 
     protected void Initialize()
     {
@@ -256,18 +268,6 @@ internal abstract class WorkbookReaderBase<
         AnalysisLevel level,
         AnalysisOptions? options);
 
-    private T GetValue<T>(T value)
-    {
-        ThrowIfDisposed();
-        return value;
-    }
-
-    private T GetValue<T>(Func<T> factory)
-    {
-        ThrowIfDisposed();
-        return factory();
-    }
-
     private List<SheetInfo> AnalyzeParallel(
         AnalyzerMetadata metadata,
         AnalysisLevel level,
@@ -378,11 +378,5 @@ internal abstract class WorkbookReaderBase<
         }
     }
 
-    private void ThrowIfDisposed()
-    {
-        if (_disposed)
-        {
-            ThrowHelpers.ThrowObjectDisposed(GetType().Name);
-        }
-    }
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, GetType());
 }

@@ -124,7 +124,7 @@ public static class ExcelWorkbookQueryExtensions
 
         foreach (SheetQueryPredicate predicate in spec.Predicates)
         {
-            AddPredicate(query, predicate);
+            query.WhereCell(predicate.Column, predicate.Op, predicate.Literal);
         }
 
         if (spec.GroupBy is { } groupBy)
@@ -145,24 +145,4 @@ public static class ExcelWorkbookQueryExtensions
         return query;
     }
 
-    private static void AddPredicate(SheetQuery query, SheetQueryPredicate predicate)
-    {
-        switch (predicate.Literal.CellType)
-        {
-            case CellType.Text:
-                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsText());
-                break;
-            case CellType.Number:
-                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsNumber());
-                break;
-            case CellType.Date:
-                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsDate());
-                break;
-            case CellType.Boolean:
-                query.Where(predicate.Column, predicate.Op, predicate.Literal.AsBoolean());
-                break;
-            default:
-                throw new QueryDslException($"Unsupported predicate literal type '{predicate.Literal.CellType}'.");
-        }
-    }
 }

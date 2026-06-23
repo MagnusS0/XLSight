@@ -143,7 +143,7 @@ public class CompetitorStreamBenchmarks
             rows++;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     [Benchmark(Description = "ExcelDataReader First10 (100K)")]
@@ -164,7 +164,7 @@ public class CompetitorStreamBenchmarks
             rows++;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     // ── ~1M-row file (run explicitly when xl_large.xlsx is present) ─────────
@@ -230,7 +230,7 @@ public class CompetitorStreamBenchmarks
             rows++;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     [Benchmark(Description = "ExcelDataReader First10 (1M)")]
@@ -258,7 +258,7 @@ public class CompetitorStreamBenchmarks
             rows++;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private string RequireXlLargePath() => BenchmarkFixture.RequireOptionalLargeFixture(_xlLargePath);
@@ -287,7 +287,7 @@ public class CompetitorStreamBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeXlsightReader(string path, string sheet, int maxRows = int.MaxValue)
@@ -302,7 +302,7 @@ public class CompetitorStreamBenchmarks
             cells += reader.Current.Cells.Length;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeXlsightRange(string path, string sheet, ExcelRange range)
@@ -316,7 +316,7 @@ public class CompetitorStreamBenchmarks
             cells++;
         }
 
-        return CombineCounts(result.Height, cells);
+        return BenchmarkFixture.CombineCounts(result.Height, cells);
     }
 
     private static int ConsumeMiniExcel(string path, string? sheetName = null, int maxRows = int.MaxValue)
@@ -342,7 +342,7 @@ public class CompetitorStreamBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeMiniExcelRange(
@@ -381,7 +381,7 @@ public class CompetitorStreamBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeExcelDataReaderRange(string path, string sheetName, ExcelRange range)
@@ -414,7 +414,7 @@ public class CompetitorStreamBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static string[] CreateColumnKeys(int startColumn, int endColumn)
@@ -428,8 +428,4 @@ public class CompetitorStreamBenchmarks
         return columns;
     }
 
-    private static int CombineCounts(int rows, int cells)
-    {
-        return unchecked((rows * 397) ^ cells);
-    }
 }

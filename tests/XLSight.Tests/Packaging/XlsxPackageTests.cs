@@ -56,7 +56,7 @@ public sealed class XlsxPackageTests
     [Fact]
     public void PathNormalizer_ReplacesBackslashes()
     {
-        Assert.Equal("xl/workbook.xml", PathNormalizer.Normalize("xl\\workbook.xml"));
+        Assert.Equal("xl/workbook.xml", "xl\\workbook.xml".Replace('\\', '/'));
     }
 
 

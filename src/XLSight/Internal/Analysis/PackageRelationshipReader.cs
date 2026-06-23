@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using XLSight.Internal.Packaging;
 using XLSight.Internal.Readers.Xlsx;
 
 namespace XLSight.Internal.Analysis;
@@ -78,7 +77,7 @@ internal static class PackageRelationshipReader
 
     internal static string ResolveRelativePath(string ownerPath, string target)
     {
-        string normalizedTarget = PathNormalizer.Normalize(target);
+        string normalizedTarget = target.Replace('\\', '/');
         if (normalizedTarget.StartsWith('/'))
         {
             return normalizedTarget.TrimStart('/');
@@ -87,7 +86,7 @@ internal static class PackageRelationshipReader
         int slash = ownerPath.LastIndexOf('/');
         string directory = slash >= 0 ? ownerPath[..slash] : string.Empty;
         string combined = string.IsNullOrEmpty(directory) ? normalizedTarget : $"{directory}/{normalizedTarget}";
-        string[] segments = PathNormalizer.Normalize(combined)
+        string[] segments = combined.Replace('\\', '/')
             .Split('/', StringSplitOptions.RemoveEmptyEntries);
 
         var resolved = new List<string>(segments.Length);

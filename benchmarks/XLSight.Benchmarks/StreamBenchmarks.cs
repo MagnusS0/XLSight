@@ -76,7 +76,7 @@ public class StreamBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeReader(string path, string sheet, int maxRows = int.MaxValue)
@@ -91,11 +91,7 @@ public class StreamBenchmarks
             cells += reader.Current.Cells.Length;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
-    private static int CombineCounts(int rows, int cells)
-    {
-        return unchecked((rows * 397) ^ cells);
-    }
 }

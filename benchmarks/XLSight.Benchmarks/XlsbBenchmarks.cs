@@ -101,7 +101,7 @@ public class XlsbBenchmarks
     {
         using var workbook = ExcelWorkbook.Open(path);
         RangeResult result = workbook.ReadRange(sheet, range);
-        return CombineCounts(result.Height, result.Cells.Length);
+        return BenchmarkFixture.CombineCounts(result.Height, result.Cells.Length);
     }
 
     private static int ConsumeSafe(string path, string sheet, int maxRows = int.MaxValue)
@@ -119,7 +119,7 @@ public class XlsbBenchmarks
             }
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
     private static int ConsumeReader(string path, string sheet, int maxRows = int.MaxValue)
@@ -134,11 +134,7 @@ public class XlsbBenchmarks
             cells += reader.Current.Cells.Length;
         }
 
-        return CombineCounts(rows, cells);
+        return BenchmarkFixture.CombineCounts(rows, cells);
     }
 
-    private static int CombineCounts(int rows, int cells)
-    {
-        return unchecked((rows * 397) ^ cells);
-    }
 }

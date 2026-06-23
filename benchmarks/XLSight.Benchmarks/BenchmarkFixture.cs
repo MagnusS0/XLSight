@@ -14,4 +14,7 @@ internal static class BenchmarkFixture
 
         return path;
     }
+
+    internal static int CombineCounts(int rows, int cells) =>
+        unchecked((rows * 397) ^ cells);
 }

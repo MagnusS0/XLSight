@@ -80,7 +80,7 @@ internal static class RelationshipsParser
 
     private static string ResolveWorkbookRelativePath(string target)
     {
-        string normalizedTarget = PathNormalizer.Normalize(target);
+        string normalizedTarget = target.Replace('\\', '/');
         if (normalizedTarget.StartsWith('/'))
         {
             return normalizedTarget.TrimStart('/');
@@ -94,7 +94,7 @@ internal static class RelationshipsParser
 
     private static string NormalizeSegments(string path)
     {
-        string normalizedPath = PathNormalizer.Normalize(path);
+        string normalizedPath = path.Replace('\\', '/');
         string[] segments = normalizedPath.Split("/", StringSplitOptions.RemoveEmptyEntries);
         var resolvedSegments = new List<string>(segments.Length);
 

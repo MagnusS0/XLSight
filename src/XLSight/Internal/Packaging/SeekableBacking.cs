@@ -31,8 +31,8 @@ internal sealed class SeekableBacking : IDisposable, IAsyncDisposable
             return new SeekableBacking(input, ownsStream: takeOwnership);
         }
 
-        ThrowHelpers.ThrowNonSeekableStreamRequiresAsync();
-        return null!; // unreachable
+        throw new InvalidOperationException(
+            "Non-seekable streams require OpenAsync. Use ExcelWorkbook.OpenAsync() instead.");
     }
 
     public static async ValueTask<SeekableBacking> CreateAsync(

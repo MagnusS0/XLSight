@@ -313,10 +313,13 @@ public sealed class SheetQuery
             _maxGroups);
     }
 
-    private SheetQuery AddFilter(string column, QueryOperator op, ExcelCellValue value)
+    internal SheetQuery WhereCell(string column, QueryOperator op, ExcelCellValue literal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        _filters.Add(new FilterSpec(column, op, value));
+        _filters.Add(new FilterSpec(column, op, literal));
         return this;
     }
+
+    private SheetQuery AddFilter(string column, QueryOperator op, ExcelCellValue value)
+        => WhereCell(column, op, value);
 }

@@ -142,12 +142,12 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
 
     private static ZipArchiveEntry? FindEntry(ZipArchive archive, string path)
     {
-        string normalizedPath = PathNormalizer.Normalize(path);
+        string normalizedPath = path.Replace('\\', '/');
         return archive.GetEntry(normalizedPath)
             ?? archive.GetEntry(path)
             ?? archive.Entries.FirstOrDefault(entry =>
                 string.Equals(
-                    PathNormalizer.Normalize(entry.FullName),
+                    entry.FullName.Replace('\\', '/'),
                     normalizedPath,
                     StringComparison.OrdinalIgnoreCase));
     }
@@ -176,11 +176,5 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
         _disposed = true;
     }
 
-    private void ThrowIfDisposed()
-    {
-        if (_disposed)
-        {
-            ThrowHelpers.ThrowObjectDisposed(nameof(XlsxPackage));
-        }
-    }
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 }
