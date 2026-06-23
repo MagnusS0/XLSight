@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/XLSight/XLSight.csproj" />
+    <Project Path="src/XLSight.Query/XLSight.Query.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/XLSight.Tests/XLSight.Tests.csproj" />

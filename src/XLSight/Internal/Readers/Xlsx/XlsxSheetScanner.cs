@@ -34,8 +34,9 @@ internal static partial class XlsxSheetScanner
         bool isDate1904,
         ReadMode mode,
         ExcelRange range,
-        long seekHint = -1)
-        => new(entryStream, sharedStrings, styles, isDate1904, mode, range, seekHint);
+        long seekHint = -1,
+        RowProjection? projection = null)
+        => new(entryStream, sharedStrings, styles, isDate1904, mode, range, seekHint, projection);
 
     /// <summary>
     /// Push-based sheet scanner. Drives <paramref name="sink"/> for every decoded cell.
@@ -269,7 +270,7 @@ internal static partial class XlsxSheetScanner
     internal static bool FillRowCells(
         ScanBuffer buf, int rowIndex, SharedStringTable sharedStrings, StyleTable styles,
         bool isDate1904, ReadMode mode, ExcelRange range, ExcelCellValue[] cellBuf,
-        out int startCol, out int width)
+        out int startCol, out int width, RowProjection? projection = null)
     {
         startCol = 0;
         width = 0;
@@ -293,9 +294,14 @@ internal static partial class XlsxSheetScanner
                 if (currentCol < range.TopLeft.Column) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
             }
 
+            // Projected-out cells keep their position (window and row presence are
+            // unchanged) but the value is never materialized.
+            bool skipValue = projection is not null && !projection.IncludesColumn(currentCol);
+            if (skipValue && !isEmpty) { SkipToEndTag(buf, TagCell); }
+
             if (firstCol == 0) { firstCol = currentCol; }
 
-            cellBuf[currentCol - firstCol] = isEmpty
+            cellBuf[currentCol - firstCol] = isEmpty || skipValue
                 ? ExcelCellValue.Empty
                 : mode == ReadMode.Formulas
                     ? ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904)

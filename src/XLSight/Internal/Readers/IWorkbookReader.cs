@@ -24,5 +24,5 @@ internal interface IWorkbookReader : IDisposable, IAsyncDisposable
     public Task<WorkbookInfo> AnalyzeAsync(AnalysisLevel level, int maxDegreeOfParallelism = -1, AnalysisOptions? options = null, CancellationToken ct = default);
     public Task<SheetInfo> AnalyzeSheetAsync(string sheetName, AnalysisLevel level, AnalysisOptions? options, CancellationToken ct);
 
-    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode);
+    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode, RowProjection? projection = null);
 }

@@ -115,10 +115,10 @@ internal abstract class WorkbookReaderBase<
         return ReadRangeAsyncCore(sheetName, range, mode, ct);
     }
 
-    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode)
+    public IRowCursor OpenCursor(string sheetName, ExcelRange range, ReadMode mode, RowProjection? projection = null)
     {
         ThrowIfDisposed();
-        return OpenCursorCore(FindSheet(sheetName).Sheet, range, mode);
+        return OpenCursorCore(FindSheet(sheetName).Sheet, range, mode, projection);
     }
 
     public WorkbookInfo Analyze(
@@ -248,7 +248,7 @@ internal abstract class WorkbookReaderBase<
     protected abstract bool HasMacrosCore();
     protected abstract TSharedStrings LoadSharedStrings();
     protected abstract AnalyzerMetadata BuildAnalyzerMetadata();
-    protected abstract IRowCursor OpenCursorCore(TSheet sheet, ExcelRange range, ReadMode mode);
+    protected abstract IRowCursor OpenCursorCore(TSheet sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null);
     protected abstract SheetInfo AnalyzeSheetCore(
         TSheet sheet,
         int sheetIndex,

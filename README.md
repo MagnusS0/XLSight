@@ -19,7 +19,7 @@ XLSight bypasses `XmlReader` on the hot path. It scans raw UTF-8 byte streams wi
 
 ## Installation
 
-```
+```bash
 dotnet add package XLSight
 ```
 
@@ -251,6 +251,11 @@ an estimated distinct-value count, the exact distinct values for low-cardinality
 and the numeric min/max — everything an agent or pipeline needs to understand a sheet's
 schema without reading the data itself.
 
+Low-cardinality columns additionally surface their exact distinct values (capped by
+`AnalysisOptions.DistinctValuesCap`, default 32), so a consumer can pick filter values without
+an exploratory scan. High-cardinality columns report `DistinctValues == null` — itself a signal
+that the column is an ID or free-text column not worth enumerating.
+
 ```csharp
 SheetInfo sheet = workbook.AnalyzeSheet("Data");
 
@@ -277,6 +282,33 @@ if (sheet.Columns is { } columns)
 ```csharp
 var options = new AnalysisOptions { DistinctValuesCap = 50 };
 SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
+```
+
+### Query a range (XLSight.Query)
+
+The optional [`XLSight.Query`](src/XLSight.Query/README.md) package answers
+*"sum of X by Y where Z"* in one streaming pass — no sheet materialization, no database.
+Filters, a single-column group-by, and Sum/Count/Min/Max/Average aggregates are fused over
+borrowed rows, so memory scales with group cardinality rather than row count. Dirty cells
+never throw; they are skipped and reported per column with sample row indices.
+
+```bash
+dotnet add package XLSight.Query
+```
+
+```csharp
+using XLSight.Query;
+using static XLSight.Query.QueryAggregates;
+
+QueryResult result = workbook
+    .QueryRange("Sheet1", "A6:F2410", headerRow: 6)
+    .Where("Region", QueryOperator.Equals, "EMEA")
+    .GroupBy("Month")
+    .Select(Sum("NetSales"), Count())
+    .Execute();
+
+// Filter discovery beyond the analysis cap: value → count, frequency-ordered.
+var months = workbook.QueryRange("Sheet1", "A6:F2410").DistinctValues("Month");
 ```
 
 ### Data validations

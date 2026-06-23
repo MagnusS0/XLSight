@@ -10,7 +10,8 @@ internal sealed class XlsbSheetCursor(
     bool isDate1904,
     ReadMode mode,
     ExcelRange range,
-    XlsbFormulaContext? formulaContext = null) : IRowCursor
+    XlsbFormulaContext? formulaContext = null,
+    RowProjection? projection = null) : IRowCursor
 {
     private const int UnboundedInputBufferSize = 1024 * 1024;
 
@@ -61,6 +62,17 @@ internal sealed class XlsbSheetCursor(
             {
                 if (record.Type == XlsbRecordType.BrtCellBlank || rowIndex == 0)
                 {
+                    continue;
+                }
+
+                if (projection is not null &&
+                    XlsbCellDecoder.TryReadCellLocation(record.Payload, out int projCol) &&
+                    !projection.IncludesColumn(projCol))
+                {
+                    _cellPool[projCol - 1] = ExcelCellValue.Empty;
+                    startColumn = Math.Min(startColumn, projCol);
+                    endColumn = Math.Max(endColumn, projCol);
+                    hasValue = true;
                     continue;
                 }
 
@@ -236,6 +248,12 @@ internal sealed class XlsbSheetCursor(
             _done = true;
             yielded = hasValue && YieldRow(rowIndex, startColumn, endColumn);
             return true;
+        }
+
+        if (projection is not null && !projection.IncludesColumn(encodedColumn))
+        {
+            StoreDecodedCell(encodedColumn, ExcelCellValue.Empty, ref startColumn, ref endColumn, ref hasValue);
+            return false;
         }
 
         if (!XlsbCellDecoder.TryDecode(record, sharedStrings, styles, isDate1904, mode, formulaContext,
