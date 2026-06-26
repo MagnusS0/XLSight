@@ -225,7 +225,7 @@ internal partial struct AnalysisSink
         if (width <= 3 && block.TextCells > 0 && block.NumericCells > 0) { evidenceFlags |= 8; }
 
         IReadOnlyList<int> headerRows = kind is RegionKind.DataTable or RegionKind.TitleRow
-            or RegionKind.Crosstab or RegionKind.Transposed
+            or RegionKind.Crosstab
             ? [block.StartRow]
             : [];
 
@@ -272,11 +272,6 @@ internal partial struct AnalysisSink
         if (rowCHigh)
         {
             return (RegionKind.DataTable, 0, bodyNumericRatio);
-        }
-
-        if (colCRatio >= 0.5)
-        {
-            return (RegionKind.Transposed, block.StartCol, colCRatio);
         }
 
         if (width >= 2 && height >= 2 && bodyNumericRatio > 0.5)

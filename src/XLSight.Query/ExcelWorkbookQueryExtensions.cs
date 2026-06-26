@@ -187,7 +187,7 @@ public static class ExcelWorkbookQueryExtensions
 
         foreach (RegionInfo region in inferred.Regions)
         {
-            if (region.Kind is not (RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
+            if (region.Kind is not (RegionKind.DataTable or RegionKind.Crosstab)
                 || region.HeaderRows.Count == 0)
             {
                 continue;
