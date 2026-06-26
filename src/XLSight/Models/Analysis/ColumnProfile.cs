@@ -15,6 +15,18 @@ public sealed class ColumnProfile
     /// <summary>Gets the count of non-empty cells in this column.</summary>
     public required int NonEmptyCount { get; init; }
 
+    /// <summary>Gets the count of text cells in this column.</summary>
+    public required int TextCount { get; init; }
+
+    /// <summary>Gets the count of numeric cells in this column.</summary>
+    public required int NumberCount { get; init; }
+
+    /// <summary>Gets the count of date cells in this column.</summary>
+    public required int DateCount { get; init; }
+
+    /// <summary>Gets the count of boolean cells in this column.</summary>
+    public required int BooleanCount { get; init; }
+
     /// <summary>Gets an estimate of the number of distinct values in this column.</summary>
     public required int DistinctValueEstimate { get; init; }
 
