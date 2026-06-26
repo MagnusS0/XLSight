@@ -361,6 +361,21 @@ public sealed class QueryDslTests
         Assert.Equal(400, result.Rows[0].Values.Span[0].AsNumber());
     }
 
+    [Fact]
+    public void HeaderAuto_RegionHeaderAboveSubRange_FallsBackWithoutThrowing()
+    {
+        using var ms = BuildMinimalWorkbook("Data", TwoTableSheetXml, TwoTableSstXml);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        // A8:B10 covers table 2's data rows only; its header (row 7) sits above the range.
+        // HEADER AUTO must not return that out-of-range header (QueryRange would throw) — it
+        // falls back to first-non-empty-row binding within the range instead.
+        Exception? ex = Record.Exception(() =>
+            workbook.ExecuteQuery("FROM Data!A8:B10 HEADER AUTO SELECT *"));
+
+        Assert.Null(ex);
+    }
+
     private static MemoryStream BuildMinimalWorkbook(string sheetName, string sheetXml, string sstXml)
     {
         string workbookXml = $"""
