@@ -26,4 +26,17 @@ public sealed class RegionInfo
 
     /// <summary>Gets compact evidence strings supporting the inference.</summary>
     public required IReadOnlyList<string> Evidence { get; init; }
+
+    /// <summary>
+    /// Gets the 1-based column index of the key/label column for <see cref="RegionKind.ParameterBlock"/>,
+    /// <see cref="RegionKind.Crosstab"/>, and <see cref="RegionKind.Transposed"/> regions.
+    /// 0 when not applicable.
+    /// </summary>
+    public required int KeyColumnIndex { get; init; }
+
+    /// <summary>
+    /// Gets the dominant signal ratio that drove the classification, clamped to [0, 1].
+    /// Higher values indicate stronger evidence for the assigned <see cref="Kind"/>.
+    /// </summary>
+    public required double Confidence { get; init; }
 }

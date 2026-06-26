@@ -29,12 +29,14 @@ internal partial struct AnalysisSink
 
     private void AddRowCell(int column, ExcelCellValue value, bool isFormula)
     {
+        // ponytail: per-cell in Full only; restrict to candidate header rows if profiled hot
         if (_pendingRowSpans.Count == 0 || column > _pendingRowSpans[^1].EndCol + 1)
         {
             _pendingRowSpans.Add(new RowSpanState
             {
                 StartCol = column,
                 EndCol = column,
+                FirstCellType = value.CellType == CellType.Text ? 1 : 2,
             });
         }
         else
@@ -49,7 +51,34 @@ internal partial struct AnalysisSink
         if (isFormula) { current.FormulaCount++; }
         if (value.CellType == CellType.Text) { current.TextCount++; }
         if (value.CellType is CellType.Number or CellType.Date or CellType.Boolean) { current.NumericCount++; }
+        if (IsValueLike(value)) { current.ValueLikeCount++; }
         _pendingRowSpans[^1] = current;
+    }
+
+    private static bool IsValueLike(in ExcelCellValue v)
+    {
+        if (v.CellType is CellType.Number or CellType.Date) { return true; }
+        if (v.CellType != CellType.Text) { return false; }
+        ReadOnlySpan<char> s = v.AsText().AsSpan().Trim();
+        if (s.IsEmpty) { return false; }
+        if (double.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out _)) { return true; }
+        if (ContainsYearPattern(s)) { return true; }   // 19xx / 20xx year anywhere in text
+        return (s[0] is 'Q' or 'q' or 'H' or 'h' or 'W' or 'w') && s.Length > 1 && char.IsAsciiDigit(s[1]);   // Q1/H2/W3
+    }
+
+    private static bool ContainsYearPattern(ReadOnlySpan<char> s)
+    {
+        for (int i = 0; i + 4 <= s.Length; i++)
+        {
+            bool is19 = s[i] == '1' && s[i + 1] == '9';
+            bool is20 = s[i] == '2' && s[i + 1] == '0';
+            if ((is19 || is20) && char.IsAsciiDigit(s[i + 2]) && char.IsAsciiDigit(s[i + 3]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void FinalizeCurrentRow()
@@ -61,32 +90,60 @@ internal partial struct AnalysisSink
 
         foreach (var span in _pendingRowSpans)
         {
-            int bestIndex = FindMatchingBlock(span);
-            if (bestIndex < 0)
-            {
-                _activeBlocks.Add(new ActiveBlockState
-                {
-                    StartRow = _currentRow, EndRow = _currentRow,
-                    StartCol = span.StartCol, EndCol = span.EndCol,
-                    TotalCells = span.CellCount, TextCells = span.TextCount,
-                    NumericCells = span.NumericCount, TouchedThisRow = true, GapRows = 0,
-                });
-                continue;
-            }
-
-            var block = _activeBlocks[bestIndex];
-            block.EndRow = _currentRow;
-            block.StartCol = Math.Min(block.StartCol, span.StartCol);
-            block.EndCol = Math.Max(block.EndCol, span.EndCol);
-            block.TotalCells += span.CellCount;
-            block.TextCells += span.TextCount;
-            block.NumericCells += span.NumericCount;
-            block.FormulaCells += span.FormulaCount;
-            block.TouchedThisRow = true;
-            block.GapRows = 0;
-            _activeBlocks[bestIndex] = block;
+            MergeSpanIntoBlock(span);
         }
 
+        SealExpiredBlocks();
+
+        _pendingRowSpans.Clear();
+        _hasPendingRow = false;
+    }
+
+    private void MergeSpanIntoBlock(RowSpanState span)
+    {
+        int bestIndex = FindMatchingBlock(span);
+        if (bestIndex < 0)
+        {
+            // New block: snapshot this span's counts as the top-row state.
+            _activeBlocks.Add(new ActiveBlockState
+            {
+                StartRow = _currentRow, EndRow = _currentRow,
+                StartCol = span.StartCol, EndCol = span.EndCol,
+                TotalCells = span.CellCount, TextCells = span.TextCount,
+                NumericCells = span.NumericCount, TouchedThisRow = true, GapRows = 0,
+                TopRowText = span.TextCount,
+                TopRowNumeric = span.NumericCount,
+                TopRowCells = span.CellCount,
+                TopRowValueLike = span.ValueLikeCount,
+            });
+            return;
+        }
+
+        var block = _activeBlocks[bestIndex];
+        block.EndRow = _currentRow;
+        block.StartCol = Math.Min(block.StartCol, span.StartCol);
+        block.EndCol = Math.Max(block.EndCol, span.EndCol);
+        block.TotalCells += span.CellCount;
+        block.TextCells += span.TextCount;
+        block.NumericCells += span.NumericCount;
+        block.FormulaCells += span.FormulaCount;
+        block.TouchedThisRow = true;
+        block.GapRows = 0;
+
+        // Detect left-label rows: leftmost cell is text, and the REST of the span
+        // (excluding that label) is numeric-dominant. Excluding the label cell is
+        // what lets a 1-label + 1-value parameter row qualify (numeric >= text).
+        if (span.StartCol == block.StartCol && span.FirstCellType == 1
+            && span.NumericCount > 0 && span.NumericCount >= span.TextCount)
+        {
+            block.LeftLabelRows++;
+        }
+
+        _activeBlocks[bestIndex] = block;
+    }
+
+    private void SealExpiredBlocks()
+    {
         for (int i = _activeBlocks.Count - 1; i >= 0; i--)
         {
             var block = _activeBlocks[i];
@@ -102,9 +159,6 @@ internal partial struct AnalysisSink
 
             _activeBlocks[i] = block;
         }
-
-        _pendingRowSpans.Clear();
-        _hasPendingRow = false;
     }
 
     private int FindMatchingBlock(RowSpanState span)
@@ -149,39 +203,87 @@ internal partial struct AnalysisSink
             new ExcelAddress(block.StartCol, block.StartRow),
             new ExcelAddress(block.EndCol, block.EndRow));
 
-        RegionKind kind = InferRegionKind(block);
+        int width = range.Width;
+        int height = range.Height;
+
+        // Compute the three orientation signals.
+        double topRowTextRatio = block.TopRowCells == 0 ? 0.0 : (double)block.TopRowText / block.TopRowCells;
+        int bodyNumericCells = block.NumericCells - block.TopRowNumeric;
+        int bodyTotalCells = Math.Max(1, block.TotalCells - block.TopRowCells);
+        double bodyNumericRatio = (double)bodyNumericCells / bodyTotalCells;
+        double colCRatio = height <= 1 ? 0.0 : (double)block.LeftLabelRows / height;
+        double topVL = block.TopRowCells == 0 ? 0.0 : (double)block.TopRowValueLike / block.TopRowCells;
+
+        (RegionKind kind, int keyCol, double confidence) = InferRegionKind(
+            block, width, height, topRowTextRatio, bodyNumericRatio, colCRatio, topVL);
 
         int evidenceFlags = 0;
         if (block.TextCells > 0) { evidenceFlags |= 1; }
         if (block.NumericCells > 0) { evidenceFlags |= 2; }
-        if (range.Width >= 3 && range.Height >= 3) { evidenceFlags |= 4; }
-        if (range.Width <= 3 && block.TextCells > 0 && block.NumericCells > 0) { evidenceFlags |= 8; }
+        if (width >= 3 && height >= 3) { evidenceFlags |= 4; }
+        if (width <= 3 && block.TextCells > 0 && block.NumericCells > 0) { evidenceFlags |= 8; }
+
+        IReadOnlyList<int> headerRows = kind is RegionKind.DataTable or RegionKind.TitleRow
+            or RegionKind.Crosstab or RegionKind.Transposed
+            ? [block.StartRow]
+            : [];
 
         _sealedRegions.Add(new RegionInfo
         {
             Kind = kind,
             Range = range,
             CellCount = block.TotalCells,
-            RowCount = range.Height,
-            ColumnCount = range.Width,
+            RowCount = height,
+            ColumnCount = width,
             FormulaCount = block.FormulaCells,
-            HeaderRows = kind is RegionKind.DataTable or RegionKind.HeaderBand ? [block.StartRow] : [],
+            HeaderRows = headerRows,
             Evidence = s_evidenceByFlags[evidenceFlags],
+            KeyColumnIndex = keyCol,
+            Confidence = Math.Clamp(confidence, 0.0, 1.0),
         });
     }
 
-    private static RegionKind InferRegionKind(ActiveBlockState block)
+    private static (RegionKind Kind, int KeyCol, double Confidence) InferRegionKind(
+        ActiveBlockState block,
+        int width,
+        int height,
+        double topRowTextRatio,
+        double bodyNumericRatio,
+        double colCRatio,
+        double topVL)
     {
-        int width = block.EndCol - block.StartCol + 1;
-        int height = block.EndRow - block.StartRow + 1;
-        double textRatio = block.TotalCells == 0 ? 0 : (double)block.TextCells / block.TotalCells;
-        double numericRatio = block.TotalCells == 0 ? 0 : (double)block.NumericCells / block.TotalCells;
+        if (height == 1 && topRowTextRatio >= 0.6)
+        {
+            return (RegionKind.TitleRow, 0, topRowTextRatio);
+        }
 
-        if (height == 1 && textRatio >= 0.6) { return RegionKind.HeaderBand; }
-        if (width >= 3 && height >= 3 && (textRatio > 0.15 || numericRatio > 0.3)) { return RegionKind.DataTable; }
-        if (width <= 3 && height >= 2 && block.TextCells > 0 && block.NumericCells > 0) { return RegionKind.ParameterBlock; }
-        if (width >= 2 && height >= 2 && numericRatio > 0.5) { return RegionKind.SummaryBlock; }
-        return RegionKind.Unknown;
+        if (width <= 3 && colCRatio >= 0.4 && topRowTextRatio < 0.6)
+        {
+            return (RegionKind.ParameterBlock, block.StartCol, colCRatio);
+        }
+
+        if (colCRatio >= 0.5 && topVL >= 0.6)
+        {
+            return (RegionKind.Crosstab, block.StartCol, colCRatio);
+        }
+
+        bool rowCHigh = topRowTextRatio >= 0.6 && bodyNumericRatio >= 0.5;
+        if (rowCHigh)
+        {
+            return (RegionKind.DataTable, 0, bodyNumericRatio);
+        }
+
+        if (colCRatio >= 0.5)
+        {
+            return (RegionKind.Transposed, block.StartCol, colCRatio);
+        }
+
+        if (width >= 2 && height >= 2 && bodyNumericRatio > 0.5)
+        {
+            return (RegionKind.SummaryBlock, 0, bodyNumericRatio);
+        }
+
+        return (RegionKind.Unknown, 0, 0.0);
     }
 
     private static int Overlap(int start1, int end1, int start2, int end2)
@@ -196,6 +298,10 @@ internal partial struct AnalysisSink
         public int TextCount;
         public int NumericCount;
         public int FormulaCount;
+        /// <summary>0 = none, 1 = text, 2 = numeric. Set for the FIRST cell added to the span.</summary>
+        public int FirstCellType;
+        /// <summary>Count of value-like cells in this span (Number, Date, or period-pattern text).</summary>
+        public int ValueLikeCount;
     }
 
     [StructLayout(LayoutKind.Auto)]
@@ -211,5 +317,12 @@ internal partial struct AnalysisSink
         public int FormulaCells;
         public bool TouchedThisRow;
         public int GapRows;
+        // Orientation-signal accumulators (snapshotted from first span at block creation).
+        public int TopRowText;
+        public int TopRowNumeric;
+        public int TopRowCells;
+        public int TopRowValueLike;
+        // Count of rows whose leftmost cell (at StartCol) is text and the rest of the row is numeric-dominant.
+        public int LeftLabelRows;
     }
 }
