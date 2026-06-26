@@ -391,15 +391,30 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     private SheetAnalysisInferred BuildInferred(SheetAnalysisExact exact, SheetAnalysisObserved observed, int headerRow)
     {
+        // The first DataTable, Crosstab, or Transposed region's StartRow is the canonical
+        // header row; prefer it over the first-row heuristic so header bands and
+        // HeaderRowIndex agree.
+        int headerRowFromRegion = 0;
+        foreach (var region in _sealedRegions)
+        {
+            if (region.Kind is RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
+            {
+                headerRowFromRegion = region.Range.TopLeft.Row;
+                break;
+            }
+        }
+
+        int effectiveHeaderRow = headerRowFromRegion != 0 ? headerRowFromRegion : headerRow;
+
         var headerBands = new List<HeaderBandInfo>();
-        if (headerRow > 0 && observed.ValueUsedRange is { } usedRange)
+        if (effectiveHeaderRow > 0 && observed.ValueUsedRange is { } usedRange)
         {
             headerBands.Add(new HeaderBandInfo
             {
                 Range = new ExcelRange(
-                    new ExcelAddress(usedRange.TopLeft.Column, headerRow),
-                    new ExcelAddress(usedRange.BottomRight.Column, headerRow)),
-                Rows = [headerRow],
+                    new ExcelAddress(usedRange.TopLeft.Column, effectiveHeaderRow),
+                    new ExcelAddress(usedRange.BottomRight.Column, effectiveHeaderRow)),
+                Rows = [effectiveHeaderRow],
             });
         }
 
@@ -413,23 +428,11 @@ internal partial struct AnalysisSink : IByteSheetSink
             });
         }
 
-        // Derive HeaderRowIndex from the primary data region rather than the first-row heuristic.
-        // The first DataTable, Crosstab, or Transposed region's StartRow is the canonical header row.
-        int headerRowFromRegion = 0;
-        foreach (var region in _sealedRegions)
-        {
-            if (region.Kind is RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
-            {
-                headerRowFromRegion = region.Range.TopLeft.Row;
-                break;
-            }
-        }
-
         return new SheetAnalysisInferred
         {
             Regions = _sealedRegions,
             HeaderBands = headerBands,
-            HeaderRowIndex = headerRowFromRegion != 0 ? headerRowFromRegion : headerRow,
+            HeaderRowIndex = effectiveHeaderRow,
             Warnings = warnings,
         };
     }
