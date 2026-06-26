@@ -391,13 +391,13 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     private SheetAnalysisInferred BuildInferred(SheetAnalysisExact exact, SheetAnalysisObserved observed, int headerRow)
     {
-        // The first DataTable, Crosstab, or Transposed region's StartRow is the canonical
+        // The first DataTable or Crosstab region's StartRow is the canonical
         // header row; prefer it over the first-row heuristic so header bands and
         // HeaderRowIndex agree.
         int headerRowFromRegion = 0;
         foreach (var region in _sealedRegions)
         {
-            if (region.Kind is RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
+            if (region.Kind is RegionKind.DataTable or RegionKind.Crosstab)
             {
                 headerRowFromRegion = region.Range.TopLeft.Row;
                 break;
