@@ -10,7 +10,7 @@
 
   <PropertyGroup>
     <PackageId>XLSight</PackageId>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Authors>Magnus</Authors>
     <Description>High-performance streaming Excel (.xlsx, .xlsm, .xlsb) reader and analyzer for .NET 10. Zero dependencies, AOT-compatible, ZipArchive + XmlReader based.</Description>
     <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;openxml;dotnet;streaming;analysis;vba</PackageTags>

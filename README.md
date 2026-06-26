@@ -1,6 +1,6 @@
 # XLSight
 
-[![NuGet](https://img.shields.io/badge/nuget-v0.5.0-blue)](https://www.nuget.org/packages/XLSight/)
+[![NuGet](https://img.shields.io/badge/nuget-v0.7.0-blue)](https://www.nuget.org/packages/XLSight/)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -178,7 +178,7 @@ Use `AnalysisLevel` to control how much work is performed:
 |---|---|
 | `Exact` | Metadata parsed from package XML: named ranges, tables, pivot tables, charts, merged regions, data validations, external workbook links, macros |
 | `Observed` | Everything in `Exact` plus a streaming scan: used range, row/column counts, per-column type profiles, formula dependency aggregation |
-| `Full` (default) | Everything in `Observed` plus inferred regions and header row index |
+| `Full` (default) | Everything in `Observed` plus inferred regions (orientation, key column, and confidence per region) and header row index |
 
 ```csharp
 using XLSight;
