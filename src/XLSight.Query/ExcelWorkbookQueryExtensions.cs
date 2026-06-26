@@ -200,7 +200,12 @@ public static class ExcelWorkbookQueryExtensions
 
             if (rowsOverlap && colsOverlap)
             {
-                return region.HeaderRows[0];
+                int headerRow = region.HeaderRows[0];
+
+                // The region's header can sit above a sub-range that deliberately excludes it.
+                // Returning an out-of-range header would make QueryRange throw, so fall back to
+                // first-non-empty-row binding instead.
+                return headerRow >= queryTop && headerRow <= queryBottom ? headerRow : 0;
             }
         }
 
