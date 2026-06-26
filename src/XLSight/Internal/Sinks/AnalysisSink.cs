@@ -94,13 +94,13 @@ internal partial struct AnalysisSink : IByteSheetSink
     {
         if (_level == AnalysisLevel.Exact) { return; }
 
-        if (_hasPendingRow)
+        if (_level >= AnalysisLevel.Full && _hasPendingRow)
         {
             FinalizeCurrentRow();
         }
 
         _currentRow = rowIndex;
-        _hasPendingRow = true;
+        if (_level >= AnalysisLevel.Full) { _hasPendingRow = true; }
 
         if (_firstRowIndex == 0)
         {
@@ -219,7 +219,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
         bool isFormula = _nextCellIsFormula;
         _nextCellIsFormula = false;
-        AddRowCell(column, value, isFormula);
+        if (_level >= AnalysisLevel.Full) { AddRowCell(column, value, isFormula); }
         return true;
     }
 
@@ -229,8 +229,11 @@ internal partial struct AnalysisSink : IByteSheetSink
     {
         FinalizeSharedFormulaDefinition();
         if (_level == AnalysisLevel.Exact) { return; }
-        if (_hasPendingRow) { FinalizeCurrentRow(); }
-        SealRemainingBlocks();
+        if (_level >= AnalysisLevel.Full)
+        {
+            if (_hasPendingRow) { FinalizeCurrentRow(); }
+            SealRemainingBlocks();
+        }
     }
 
     internal SheetInfo Build(
