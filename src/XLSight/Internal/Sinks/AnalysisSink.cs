@@ -413,11 +413,23 @@ internal partial struct AnalysisSink : IByteSheetSink
             });
         }
 
+        // Derive HeaderRowIndex from the primary data region rather than the first-row heuristic.
+        // The first DataTable, Crosstab, or Transposed region's StartRow is the canonical header row.
+        int headerRowFromRegion = 0;
+        foreach (var region in _sealedRegions)
+        {
+            if (region.Kind is RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
+            {
+                headerRowFromRegion = region.Range.TopLeft.Row;
+                break;
+            }
+        }
+
         return new SheetAnalysisInferred
         {
             Regions = _sealedRegions,
             HeaderBands = headerBands,
-            HeaderRowIndex = headerRow,
+            HeaderRowIndex = headerRowFromRegion != 0 ? headerRowFromRegion : headerRow,
             Warnings = warnings,
         };
     }

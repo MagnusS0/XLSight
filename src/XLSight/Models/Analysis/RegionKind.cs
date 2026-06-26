@@ -8,4 +8,7 @@ public enum RegionKind : byte
     DataTable = 2,
     ParameterBlock = 3,
     SummaryBlock = 4,
+    Crosstab = 5,
+    Transposed = 6,
+    TitleRow = 7,
 }
