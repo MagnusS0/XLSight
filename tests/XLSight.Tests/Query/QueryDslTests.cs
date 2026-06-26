@@ -40,6 +40,40 @@ public sealed class QueryDslTests
         </sst>
         """;
 
+    // ── Two stacked tables for HeaderAuto sub-table targeting ─────────────────
+    // Table 1 (rows 1-4): header "Region | Units" at row 1, data rows 2-4.
+    // Gap: rows 5-6 blank (seals table 1).
+    // Table 2 (rows 7-10): header "Product | Revenue" at row 7, data rows 8-10.
+    // Observed: two DataTable regions with HeaderRows=[1] and HeaderRows=[7].
+    // SST: 0=Region, 1=Units, 2=EMEA, 3=APAC, 4=Product, 5=Revenue, 6=Widget, 7=Gadget
+    private const string TwoTableSheetXml = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+            <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>10</v></c></row>
+            <row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>20</v></c></row>
+            <row r="4"><c r="A4" t="s"><v>2</v></c><c r="B4"><v>30</v></c></row>
+            <row r="7"><c r="A7" t="s"><v>4</v></c><c r="B7" t="s"><v>5</v></c></row>
+            <row r="8"><c r="A8" t="s"><v>6</v></c><c r="B8"><v>100</v></c></row>
+            <row r="9"><c r="A9" t="s"><v>7</v></c><c r="B9"><v>200</v></c></row>
+            <row r="10"><c r="A10" t="s"><v>6</v></c><c r="B10"><v>300</v></c></row>
+          </sheetData>
+        </worksheet>
+        """;
+
+    private const string TwoTableSstXml = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
+          <si><t>Region</t></si>
+          <si><t>Units</t></si>
+          <si><t>EMEA</t></si>
+          <si><t>APAC</t></si>
+          <si><t>Product</t></si>
+          <si><t>Revenue</t></si>
+          <si><t>Widget</t></si>
+          <si><t>Gadget</t></si>
+        </sst>
+        """;
+
     // ── FootnoteMarker test fixtures ──────────────────────────────────────────
     // Row 1: header Region | Units* (asterisk marker). Rows 2-4: data.
     // SST: 0=Region, 1=Units*, 2=EMEA, 3=APAC
@@ -302,6 +336,29 @@ public sealed class QueryDslTests
 
         // EMEA rows: row 2 (Units=10) and row 4 (Units=20) → SUM = 30.
         Assert.Equal(30, result.Rows[0].Values.Span[0].AsNumber());
+    }
+
+    /// <summary>
+    /// Sheet has two stacked DataTable regions. A HEADER AUTO query whose range is bounded to
+    /// the SECOND table (A7:B10) must bind row 7 as the header — not row 1 (the first table's header).
+    /// This guards the region-intersection logic in ResolveAutoHeaderRow.
+    /// </summary>
+    [Fact]
+    public void HeaderAuto_BindsHeaderOfTargetedSubTable()
+    {
+        using var ms = BuildMinimalWorkbook("Data", TwoTableSheetXml, TwoTableSstXml);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        // Range A7:B10 covers only table 2 (header "Product | Revenue", data rows 8-10).
+        // If HEADER AUTO incorrectly bound row 1 ("Region" and "Units"), "Revenue" would not resolve.
+        QueryResult result = workbook.ExecuteQuery("""
+            FROM Data!A7:B10 HEADER AUTO
+            SELECT SUM(Revenue)
+            WHERE Product = "Widget"
+            """);
+
+        // Widget appears in rows 8 (100) and 10 (300); SUM = 400.
+        Assert.Equal(400, result.Rows[0].Values.Span[0].AsNumber());
     }
 
     private static MemoryStream BuildMinimalWorkbook(string sheetName, string sheetXml, string sstXml)

@@ -589,20 +589,71 @@ public sealed class WorkbookAnalysisTests
         SheetInfo info = workbook.AnalyzeSheet("Data");
         var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
 
-        // The two 5-column data blocks must be sealed as separate regions, not merged into one.
+        // The two 5-column data blocks are sealed as separate SummaryBlock regions (rows 2-4 and 7-9).
+        // TitleRow fragments for "Section A" (row 1) and "Section B" (row 6) are also present.
+        // We pin the two 5-column data regions precisely so spurious merging or missing seals are caught.
         var dataRegions = inferred.Regions
             .Where(r => r.ColumnCount >= 5)
             .OrderBy(r => r.Range.TopLeft.Row)
             .ToList();
 
-        Assert.True(dataRegions.Count >= 2,
-            $"Expected at least 2 data regions (got {dataRegions.Count}): " +
+        Assert.True(dataRegions.Count == 2,
+            $"Expected exactly 2 data regions with 5 columns (got {dataRegions.Count}): " +
             string.Join(", ", inferred.Regions.Select(r =>
-                $"rows {r.Range.TopLeft.Row}-{r.Range.BottomRight.Row} cols {r.Range.TopLeft.Column}-{r.Range.BottomRight.Column}")));
+                $"{r.Kind} rows {r.Range.TopLeft.Row}-{r.Range.BottomRight.Row} cols {r.Range.TopLeft.Column}-{r.Range.BottomRight.Column}")));
 
-        // The two data blocks must have non-overlapping row ranges.
-        Assert.True(dataRegions[0].Range.BottomRight.Row < dataRegions[1].Range.TopLeft.Row,
-            $"Data regions overlap: first ends row {dataRegions[0].Range.BottomRight.Row}, second starts row {dataRegions[1].Range.TopLeft.Row}");
+        // First data block: rows 2-4.
+        Assert.Equal(2, dataRegions[0].Range.TopLeft.Row);
+        Assert.Equal(4, dataRegions[0].Range.BottomRight.Row);
+
+        // Second data block: rows 7-9.
+        Assert.Equal(7, dataRegions[1].Range.TopLeft.Row);
+        Assert.Equal(9, dataRegions[1].Range.BottomRight.Row);
+    }
+
+    // Sheet: col A has header "Val" (text, row 1), then 10, 20, a stray shared-string "oops", 30.
+    // Observed: DominantType=Number, NumberCount=3, TextCount=2 (header + "oops").
+    private const string SheetXmlMixedTypeColumn = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+            <row r="2"><c r="A2"><v>10</v></c></row>
+            <row r="3"><c r="A3"><v>20</v></c></row>
+            <row r="4"><c r="A4" t="s"><v>1</v></c></row>
+            <row r="5"><c r="A5"><v>30</v></c></row>
+          </sheetData>
+        </worksheet>
+        """;
+
+    private const string SstXmlValOops = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="2">
+          <si><t>Val</t></si>
+          <si><t>oops</t></si>
+        </sst>
+        """;
+
+    [Fact]
+    public void MixedTypeColumn_ReportsBothNumberAndTextCounts()
+    {
+        // Col A: header "Val" (text) in row 1, numerics 10/20/30 in rows 2/3/5, stray text "oops" in row 4.
+        // The column is numeric-dominant but the two text cells must be surfaced so callers can see
+        // the dirty cell (the "oops") at analysis time, before running a query.
+        using var ms = BuildWorkbook(
+            WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlMixedTypeColumn, sstXml: SstXmlValOops);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        SheetInfo info = workbook.AnalyzeSheet("Data", AnalysisLevel.Full);
+
+        var columns = Assert.IsAssignableFrom<IReadOnlyList<ColumnProfile>>(info.Columns);
+        ColumnProfile colA = Assert.Single(columns);
+
+        Assert.Equal(CellType.Number, colA.DominantType);
+        Assert.Equal("Val", colA.InferredHeader);
+        Assert.Equal(5, colA.NonEmptyCount);
+        // Three numeric cells (10, 20, 30).
+        Assert.Equal(3, colA.NumberCount);
+        // Two text cells: the inferred header row ("Val") and the stray "oops".
+        Assert.Equal(2, colA.TextCount);
     }
 
     [Fact]

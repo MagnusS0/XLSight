@@ -106,10 +106,47 @@ public sealed class QueryGuardrailTests
         Assert.Equal(SalesWorkbook.Data.Count(d => d.Units > 5), result.Rows[0].Values.Span[0].AsNumber());
     }
 
+    [Fact]
+    public void StatsPruning_MatchesFootnoteMarkedHeader()
+    {
+        // The profiled header is "Units*" (footnote-marked). A filter referencing "Units" (no marker)
+        // must still be matched during stats pruning via NormalizeHeaderName stripping the asterisk.
+        // The filter Units > max+1 is provably empty, so the result is pruned without scanning.
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook
+            .QueryRange(SalesWorkbook.SheetName, Range)
+            .Where("Units", QueryOperator.GreaterThan, 10)
+            .Select(QueryAggregates.Count())
+            .WithStats([UnitsProfileFootnoted(min: 1, max: 10)])
+            .Execute();
+
+        Assert.Empty(result.Rows);
+        Assert.Equal(0, result.RowsScanned);
+    }
+
     private static ColumnProfile UnitsProfile(double min, double max) => new()
     {
         ColumnIndex = 4,
         InferredHeader = "Units",
+        DominantType = CellType.Number,
+        NonEmptyCount = SalesWorkbook.Data.Length,
+        TextCount = 0,
+        NumberCount = SalesWorkbook.Data.Length,
+        DateCount = 0,
+        BooleanCount = 0,
+        DistinctValueEstimate = SalesWorkbook.Data.Length,
+        MinNumericValue = min,
+        MaxNumericValue = max,
+        MaxTextLength = null,
+        HasFormulas = false,
+    };
+
+    private static ColumnProfile UnitsProfileFootnoted(double min, double max) => new()
+    {
+        ColumnIndex = 4,
+        InferredHeader = "Units*",
         DominantType = CellType.Number,
         NonEmptyCount = SalesWorkbook.Data.Length,
         TextCount = 0,

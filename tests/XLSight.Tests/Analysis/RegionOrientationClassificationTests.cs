@@ -142,9 +142,10 @@ public sealed class RegionOrientationClassificationTests
         SheetInfo info = workbook.AnalyzeSheet("Data");
         var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
 
-        // Expect at least two regions: a crosstab and a data table.
-        Assert.True(inferred.Regions.Count >= 2,
-            $"Expected at least 2 regions, got {inferred.Regions.Count}: " +
+        // Exactly two data regions are produced: one Crosstab, one DataTable.
+        // (There are no TitleRow/Unknown fragments in this fixture, so the total count is exact.)
+        Assert.True(inferred.Regions.Count == 2,
+            $"Expected exactly 2 regions, got {inferred.Regions.Count}: " +
             string.Join(", ", inferred.Regions.Select(r =>
                 $"{r.Kind} rows {r.Range.TopLeft.Row}-{r.Range.BottomRight.Row}")));
 
@@ -152,10 +153,11 @@ public sealed class RegionOrientationClassificationTests
         // Top row is value-like period strings (topVL >= 0.6), body rows have text-first + numeric-dominant.
         var crosstab = inferred.Regions
             .OrderBy(r => r.Range.TopLeft.Row)
-            .FirstOrDefault(r => r.Kind == RegionKind.Crosstab);
+            .First(r => r.Kind == RegionKind.Crosstab);
 
-        Assert.NotNull(crosstab);
         Assert.Equal(RegionKind.Crosstab, crosstab.Kind);
+        Assert.Equal(1, crosstab.Range.TopLeft.Row);
+        Assert.Equal(4, crosstab.Range.BottomRight.Row);
         // KeyColumnIndex is StartCol of the block (col A = 1).
         Assert.Equal(1, crosstab.KeyColumnIndex);
         Assert.True(crosstab.Confidence > 0, $"Expected Confidence > 0 for Crosstab, got {crosstab.Confidence}");
@@ -164,15 +166,72 @@ public sealed class RegionOrientationClassificationTests
         // Top row is all-text field names (topRowTextRatio=1.0), body is numeric-dominant (bodyNumericRatio >= 0.5).
         var dataTable = inferred.Regions
             .OrderBy(r => r.Range.TopLeft.Row)
-            .FirstOrDefault(r => r.Kind == RegionKind.DataTable);
+            .First(r => r.Kind == RegionKind.DataTable);
 
-        Assert.NotNull(dataTable);
         Assert.Equal(RegionKind.DataTable, dataTable.Kind);
+        Assert.Equal(7, dataTable.Range.TopLeft.Row);
+        Assert.Equal(9, dataTable.Range.BottomRight.Row);
+    }
 
-        // --- Regions must not overlap ---
-        Assert.True(
-            crosstab.Range.BottomRight.Row < dataTable.Range.TopLeft.Row,
-            $"Crosstab and DataTable overlap: crosstab ends row {crosstab.Range.BottomRight.Row}, " +
-            $"DataTable starts row {dataTable.Range.TopLeft.Row}");
+    // Fixture: crosstab whose top row holds NUMERIC year cells (2025, 2024, 2023) rather than
+    // text period strings. Col A is the label axis (empty in row 1); body rows have a text label
+    // in col A and numeric values in cols B-D.
+    //
+    // SST: 0=Revenue, 1=Cost, 2=Profit
+    private const string NumericYearSstXml = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="3">
+          <si><t>Revenue</t></si>
+          <si><t>Cost</t></si>
+          <si><t>Profit</t></si>
+        </sst>
+        """;
+
+    // Top row: B1=2025, C1=2024, D1=2023 (numeric cells, no t="s"). A1 omitted (empty label axis).
+    // Body rows: A=text label (shared string), B/C/D=numeric values.
+    private const string NumericYearSheetXml = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="B1"><v>2025</v></c>
+              <c r="C1"><v>2024</v></c>
+              <c r="D1"><v>2023</v></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="s"><v>0</v></c>
+              <c r="B2"><v>100</v></c>
+              <c r="C2"><v>90</v></c>
+              <c r="D2"><v>80</v></c>
+            </row>
+            <row r="3">
+              <c r="A3" t="s"><v>1</v></c>
+              <c r="B3"><v>40</v></c>
+              <c r="C3"><v>35</v></c>
+              <c r="D3"><v>30</v></c>
+            </row>
+            <row r="4">
+              <c r="A4" t="s"><v>2</v></c>
+              <c r="B4"><v>60</v></c>
+              <c r="C4"><v>55</v></c>
+              <c r="D4"><v>50</v></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """;
+
+    [Fact]
+    public void NumericYearHeaderCrosstab_ClassifiedByValueTypeNotText()
+    {
+        // The top row holds raw numeric cells (2025 / 2024 / 2023), not formatted strings.
+        // Value-likeness must be detected by cell TYPE, not by text pattern matching.
+        // Observed: Crosstab rows 1-4, KeyColumnIndex=1, Confidence=0.750.
+        using var ms = BuildWorkbook(NumericYearSheetXml, NumericYearSstXml);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        SheetInfo info = workbook.AnalyzeSheet("Data");
+        var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
+
+        RegionInfo region = Assert.Single(inferred.Regions);
+        Assert.Equal(RegionKind.Crosstab, region.Kind);
+        Assert.Equal(1, region.KeyColumnIndex);
     }
 }
