@@ -1,3 +1,5 @@
+using XLSight.Analysis;
+
 namespace XLSight.Query;
 
 /// <summary>Query entry points over <see cref="ExcelWorkbook"/>.</summary>
@@ -119,7 +121,21 @@ public static class ExcelWorkbookQueryExtensions
             throw new NotSupportedException("HEADER COLUMN is reserved for transposed tables and is not supported by the row-oriented query engine.");
         }
 
-        int headerRow = spec.Header.Kind == SheetQueryHeaderKind.Row ? spec.Header.Row : 0;
+        int headerRow;
+        if (spec.Header.Kind == SheetQueryHeaderKind.Row)
+        {
+            headerRow = spec.Header.Row;
+        }
+        else if (spec.Header.Kind == SheetQueryHeaderKind.Auto)
+        {
+            SheetInfo info = workbook.AnalyzeSheet(spec.Sheet, AnalysisLevel.Full);
+            headerRow = ResolveAutoHeaderRow(info, spec.Range);
+        }
+        else
+        {
+            headerRow = 0;
+        }
+
         SheetQuery query = workbook.QueryRange(spec.Sheet, spec.Range, headerRow);
 
         foreach (SheetQueryPredicate predicate in spec.Predicates)
@@ -143,6 +159,46 @@ public static class ExcelWorkbookQueryExtensions
         }
 
         return query;
+    }
+
+    /// <summary>
+    /// Resolves the 1-based header row for a HEADER AUTO query by consulting inferred regions.
+    /// Returns 0 when no confident match is found (falls back to first non-empty row behaviour).
+    /// </summary>
+    private static int ResolveAutoHeaderRow(SheetInfo info, ExcelRange range)
+    {
+        if (info.Inferred is not { } inferred)
+        {
+            return 0;
+        }
+
+        // Bounded range: find the first intersecting data region.
+        if (!range.IsUnbounded && inferred.Regions.Count > 0)
+        {
+            int queryTop = range.TopLeft.Row;
+            int queryBottom = range.BottomRight.Row;
+
+            foreach (RegionInfo region in inferred.Regions)
+            {
+                if (region.Kind is not (RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed))
+                {
+                    continue;
+                }
+
+                int regionTop = region.Range.TopLeft.Row;
+                int regionBottom = region.Range.BottomRight.Row;
+
+                // Row spans intersect when they overlap (not disjoint).
+                if (regionTop <= queryBottom && regionBottom >= queryTop
+                    && region.HeaderRows.Count > 0)
+                {
+                    return region.HeaderRows[0];
+                }
+            }
+        }
+
+        // Fallback: sheet-level inferred header row.
+        return inferred.HeaderRowIndex;
     }
 
 }
