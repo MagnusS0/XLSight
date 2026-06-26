@@ -162,7 +162,10 @@ internal sealed class QueryScan
         ColumnProfile? profile = null;
         foreach (ColumnProfile candidate in stats)
         {
-            if (string.Equals(candidate.InferredHeader, filter.Column, StringComparison.OrdinalIgnoreCase))
+            // Normalize the profiled header the same way execution binds it, so a footnote-marked
+            // header (e.g. "Units*") still matches a filter on "Units" during stats pruning.
+            if (candidate.InferredHeader is { } header
+                && string.Equals(NormalizeHeaderName(header), filter.Column, StringComparison.OrdinalIgnoreCase))
             {
                 profile = candidate;
                 break;

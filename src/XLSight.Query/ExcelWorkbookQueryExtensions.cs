@@ -172,33 +172,40 @@ public static class ExcelWorkbookQueryExtensions
             return 0;
         }
 
-        // Bounded range: find the first intersecting data region.
-        if (!range.IsUnbounded && inferred.Regions.Count > 0)
+        // Unbounded range: no column/row box to intersect, so use the sheet-level header.
+        if (range.IsUnbounded)
         {
-            int queryTop = range.TopLeft.Row;
-            int queryBottom = range.BottomRight.Row;
+            return inferred.HeaderRowIndex;
+        }
 
-            foreach (RegionInfo region in inferred.Regions)
+        // Bounded range: find the first data region overlapping the query box on BOTH axes,
+        // so side-by-side tables sharing rows don't match a neighbour's header row.
+        int queryTop = range.TopLeft.Row;
+        int queryBottom = range.BottomRight.Row;
+        int queryLeft = range.TopLeft.Column;
+        int queryRight = range.BottomRight.Column;
+
+        foreach (RegionInfo region in inferred.Regions)
+        {
+            if (region.Kind is not (RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed)
+                || region.HeaderRows.Count == 0)
             {
-                if (region.Kind is not (RegionKind.DataTable or RegionKind.Crosstab or RegionKind.Transposed))
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                int regionTop = region.Range.TopLeft.Row;
-                int regionBottom = region.Range.BottomRight.Row;
+            bool rowsOverlap = region.Range.TopLeft.Row <= queryBottom
+                && region.Range.BottomRight.Row >= queryTop;
+            bool colsOverlap = region.Range.TopLeft.Column <= queryRight
+                && region.Range.BottomRight.Column >= queryLeft;
 
-                // Row spans intersect when they overlap (not disjoint).
-                if (regionTop <= queryBottom && regionBottom >= queryTop
-                    && region.HeaderRows.Count > 0)
-                {
-                    return region.HeaderRows[0];
-                }
+            if (rowsOverlap && colsOverlap)
+            {
+                return region.HeaderRows[0];
             }
         }
 
-        // Fallback: sheet-level inferred header row.
-        return inferred.HeaderRowIndex;
+        // No region intersects the bounded range: bind the first non-empty row in range.
+        return 0;
     }
 
 }
