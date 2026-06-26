@@ -528,6 +528,83 @@ public sealed class WorkbookAnalysisTests
         Assert.Null(pivotSheet.RowCount);
     }
 
+    // Sheet layout (VerticalGapTolerance = 1, so 2 non-matching rows are needed to seal a block):
+    //   Row  1: sparse title in A only ("Section A") — Jaccard vs 5-col block = 1/5 = 0.2 < 0.5
+    //   Rows 2-4: first 5-col data block (A:E)
+    //   Row  5: blank (empty — no cells emitted)
+    //   Row  6: sparse title in A only ("Section B") — second non-matching row seals first data block
+    //   Rows 7-9: second 5-col data block (A:E)
+    // After row 5: data-block-1 GapRows=1. After row 6 (title, no Jaccard match): GapRows=2 > 1 → sealed.
+    private const string SheetXmlStackedTables = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="A1" t="s"><v>0</v></c>
+            </row>
+            <row r="2">
+              <c r="A2"><v>1</v></c><c r="B2"><v>2</v></c><c r="C2"><v>3</v></c>
+              <c r="D2"><v>4</v></c><c r="E2"><v>5</v></c>
+            </row>
+            <row r="3">
+              <c r="A3"><v>6</v></c><c r="B3"><v>7</v></c><c r="C3"><v>8</v></c>
+              <c r="D3"><v>9</v></c><c r="E3"><v>10</v></c>
+            </row>
+            <row r="4">
+              <c r="A4"><v>11</v></c><c r="B4"><v>12</v></c><c r="C4"><v>13</v></c>
+              <c r="D4"><v>14</v></c><c r="E4"><v>15</v></c>
+            </row>
+            <row r="6">
+              <c r="A6" t="s"><v>1</v></c>
+            </row>
+            <row r="7">
+              <c r="A7"><v>16</v></c><c r="B7"><v>17</v></c><c r="C7"><v>18</v></c>
+              <c r="D7"><v>19</v></c><c r="E7"><v>20</v></c>
+            </row>
+            <row r="8">
+              <c r="A8"><v>21</v></c><c r="B8"><v>22</v></c><c r="C8"><v>23</v></c>
+              <c r="D8"><v>24</v></c><c r="E8"><v>25</v></c>
+            </row>
+            <row r="9">
+              <c r="A9"><v>26</v></c><c r="B9"><v>27</v></c><c r="C9"><v>28</v></c>
+              <c r="D9"><v>29</v></c><c r="E9"><v>30</v></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """;
+
+    private const string SstXmlSectionAB = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="2">
+          <si><t>Section A</t></si>
+          <si><t>Section B</t></si>
+        </sst>
+        """;
+
+    [Fact]
+    public void StackedTables_SeparatedByTitleRows_SealAsDistinctRegions()
+    {
+        using var ms = BuildWorkbook(
+            WorkbookXmlOneSheet, RelsXmlOneSheet, SheetXmlStackedTables, sstXml: SstXmlSectionAB);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        SheetInfo info = workbook.AnalyzeSheet("Data");
+        var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
+
+        // The two 5-column data blocks must be sealed as separate regions, not merged into one.
+        var dataRegions = inferred.Regions
+            .Where(r => r.ColumnCount >= 5)
+            .OrderBy(r => r.Range.TopLeft.Row)
+            .ToList();
+
+        Assert.True(dataRegions.Count >= 2,
+            $"Expected at least 2 data regions (got {dataRegions.Count}): " +
+            string.Join(", ", inferred.Regions.Select(r =>
+                $"rows {r.Range.TopLeft.Row}-{r.Range.BottomRight.Row} cols {r.Range.TopLeft.Column}-{r.Range.BottomRight.Column}")));
+
+        // The two data blocks must have non-overlapping row ranges.
+        Assert.True(dataRegions[0].Range.BottomRight.Row < dataRegions[1].Range.TopLeft.Row,
+            $"Data regions overlap: first ends row {dataRegions[0].Range.BottomRight.Row}, second starts row {dataRegions[1].Range.TopLeft.Row}");
+    }
+
     [Fact]
     public void SheetInfo_CanBeConstructedSafelyWithoutHiddenInternalState()
     {

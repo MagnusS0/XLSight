@@ -118,9 +118,9 @@ internal partial struct AnalysisSink
             if (_currentRow - block.EndRow > VerticalGapTolerance + 1) { continue; }
 
             int overlap = Overlap(span.StartCol, span.EndCol, block.StartCol, block.EndCol);
-            bool connected = overlap > 0 ||
-                (span.EndCol >= block.StartCol - HorizontalGapTolerance &&
-                 span.StartCol <= block.EndCol + HorizontalGapTolerance);
+            int spanW = span.EndCol - span.StartCol + 1;
+            int blockW = block.EndCol - block.StartCol + 1;
+            bool connected = overlap > 0 && (double)overlap / Math.Max(spanW, blockW) >= 0.5;
             if (!connected) { continue; }
 
             if (overlap > bestOverlap)

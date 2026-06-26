@@ -11,7 +11,6 @@ namespace XLSight.Internal.Sinks;
 internal partial struct AnalysisSink : IByteSheetSink
 {
     private const int VerticalGapTolerance = 1;
-    private const int HorizontalGapTolerance = 1;
 
     // ── Bounds tracking ───────────────────────────────────────────────────────────
     private int _minValueRow;
