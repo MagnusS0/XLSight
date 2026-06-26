@@ -370,7 +370,7 @@ internal sealed class QueryScan
             int column = startColumn + i;
             _columnIndices[i] = column;
             ref readonly ExcelCellValue cell = ref row.GetCellRef(column);
-            string name = cell.IsEmpty ? "" : cell.ToString().Trim();
+            string name = cell.IsEmpty ? "" : NormalizeHeaderName(cell.ToString());
             _columnNames[i] = name.Length > 0 ? name : ColumnLabel(column);
         }
 
@@ -447,6 +447,31 @@ internal sealed class QueryScan
         throw new InvalidOperationException(
             $"Column '{name}' was not found in the header row. Available columns: {string.Join(", ", _columnNames)}.");
     }
+
+    /// <summary>
+    /// Strips leading/trailing whitespace and a trailing run of footnote-marker characters
+    /// (* † ‡ § and superscript digits ¹²³⁴⁵⁶⁷⁸⁹⁰), then trims any space that preceded them.
+    /// Interior characters are never removed.
+    /// </summary>
+    private static string NormalizeHeaderName(string raw)
+    {
+        ReadOnlySpan<char> span = raw.AsSpan().Trim();
+
+        // Strip trailing footnote markers: *, †, ‡, §, superscript digits (U+00B9, U+00B2, U+00B3, U+2070-U+2079)
+        int end = span.Length;
+        while (end > 0 && IsFootnoteMarker(span[end - 1]))
+        {
+            end--;
+        }
+
+        span = span[..end].TrimEnd();
+        return span.Length == raw.Trim().Length ? raw.Trim() : span.ToString();
+    }
+
+    private static bool IsFootnoteMarker(char c) =>
+        c == '*' || c == '†' || c == '‡' || c == '§'
+        || c == '¹' || c == '²' || c == '³'
+        || (c >= '⁰' && c <= '⁹');
 
     private static string ColumnLabel(int column) => new ExcelAddress(column, 1).ToString()[..^1];
 
