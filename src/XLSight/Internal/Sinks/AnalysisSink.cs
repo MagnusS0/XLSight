@@ -40,6 +40,10 @@ internal partial struct AnalysisSink : IByteSheetSink
     private List<RowSpanState> _pendingRowSpans;
     private List<ActiveBlockState> _activeBlocks;
     private List<RegionInfo> _sealedRegions;
+    private const int LayoutTextSampleBudget = 50_000;
+
+    private LayoutCellStore _layoutCells;
+    private int _layoutTextSamplesRemaining;
 
     // ── Scan-time metadata (exact counts, populated by sink callbacks) ─────────────
     private ExcelRange? _declaredDimension;
@@ -81,12 +85,17 @@ internal partial struct AnalysisSink : IByteSheetSink
         _pendingRowSpans = [];
         _activeBlocks = [];
         _sealedRegions = [];
+        _layoutCells = new LayoutCellStore();
+        _layoutTextSamplesRemaining = LayoutTextSampleBudget;
     }
 
     public bool NeedsDecodedValue => false;
     public bool TracksFormulas => _level != AnalysisLevel.Exact;
     public bool TracksFormulaReferences => _level != AnalysisLevel.Exact;
 
+    // Deliberately no layout-fact presizing from the declared dimension: sparse sheets
+    // routinely declare far more cells than they hold, so trusting it reserves memory
+    // the scan never fills.
     public void OnDimension(in ExcelRange dimension) { _declaredDimension = dimension; }
 
     public void OnRowStart(int rowIndex)
@@ -223,7 +232,11 @@ internal partial struct AnalysisSink : IByteSheetSink
 
         bool isFormula = _nextCellIsFormula;
         _nextCellIsFormula = false;
-        if (_level >= AnalysisLevel.Full) { AddRowCell(column, value, isFormula); }
+        if (_level >= AnalysisLevel.Full)
+        {
+            AddRowCell(column, value, isFormula);
+            AddLayoutCell(column, value, isFormula);
+        }
         return true;
     }
 
@@ -433,9 +446,11 @@ internal partial struct AnalysisSink : IByteSheetSink
             });
         }
 
+        SheetLayoutInfo layout = SheetLayoutInference.Infer(_layoutCells);
         return new SheetAnalysisInferred
         {
             Regions = _sealedRegions,
+            Layout = layout,
             HeaderBands = headerBands,
             HeaderRowIndex = effectiveHeaderRow,
             Warnings = warnings,

@@ -6,6 +6,7 @@ public sealed class SheetAnalysisInferred
     internal static SheetAnalysisInferred Empty { get; } = new()
     {
         Regions = [],
+        Layout = SheetLayoutInfo.Empty,
         HeaderBands = [],
         HeaderRowIndex = 0,
         Warnings = [],
@@ -13,6 +14,9 @@ public sealed class SheetAnalysisInferred
 
     /// <summary>Gets inferred structural regions for the sheet.</summary>
     public required IReadOnlyList<RegionInfo> Regions { get; init; }
+
+    /// <summary>Gets the inferred layout structure of the sheet.</summary>
+    public required SheetLayoutInfo Layout { get; init; }
 
     /// <summary>Gets inferred header bands.</summary>
     public required IReadOnlyList<HeaderBandInfo> HeaderBands { get; init; }
