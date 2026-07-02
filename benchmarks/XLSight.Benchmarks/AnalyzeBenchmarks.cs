@@ -9,6 +9,7 @@ public class AnalyzeBenchmarks
     private string  _smallPath       = null!;
     private string  _mediumPath      = null!;
     private string  _namedRangesPath = null!;
+    private string  _complexPath     = null!;
     private string  _xlLargePath     = null!;
 
     [GlobalSetup]
@@ -17,6 +18,7 @@ public class AnalyzeBenchmarks
         _smallPath       = Path.Combine(AppContext.BaseDirectory, "TestData", "small.xlsx");
         _mediumPath      = Path.Combine(AppContext.BaseDirectory, "TestData", "medium.xlsx");
         _namedRangesPath = Path.Combine(AppContext.BaseDirectory, "TestData", "named_ranges.xlsx");
+        _complexPath     = Path.Combine(AppContext.BaseDirectory, "TestData", "complex_workbook.xlsx");
         _xlLargePath     = BenchmarkFixture.OptionalPath("xl_large.xlsx");
     }
 
@@ -38,6 +40,18 @@ public class AnalyzeBenchmarks
     public WorkbookInfo AnalyzeWorkbook_NamedRanges()
     {
         using var wb = ExcelWorkbook.Open(_namedRangesPath);
+        return wb.Analyze();
+    }
+
+    /// <summary>
+    /// Full workbook analysis on complex_workbook.xlsx — mixed text/numeric
+    /// scenario sheets with non-trivial layouts, the closest fixture to real
+    /// financial workbooks. Exercises layout inference beyond simple tables.
+    /// </summary>
+    [Benchmark]
+    public WorkbookInfo AnalyzeWorkbook_Complex()
+    {
+        using var wb = ExcelWorkbook.Open(_complexPath);
         return wb.Analyze();
     }
 
