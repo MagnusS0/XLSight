@@ -14,7 +14,6 @@ internal static class SheetLayoutInference
         }
 
         var sheet = SheetFacts.From(cells);
-        var axisBuilder = new AxisBuilder(sheet);
         var fields = new List<MeasureFieldInfo>();
         var fieldAxes = new List<IReadOnlyList<LayoutAxis>>();
         var occupied = new List<ExcelRange>();
@@ -36,7 +35,12 @@ internal static class SheetLayoutInference
         occupied.Clear();
         occupied.AddRange(dense.Select(static candidate => candidate.Range));
 
-        var vector = CoalesceVectorFields(FindVectorFields(sheet, occupied));
+        var vector = CoalesceVectorFields(FindVectorFields(sheet, occupied)).ToList();
+
+        var fieldRanges = new List<ExcelRange>(dense.Count + vector.Count);
+        fieldRanges.AddRange(dense.Select(static candidate => candidate.Range));
+        fieldRanges.AddRange(vector.Select(static candidate => candidate.Range));
+        var axisBuilder = new AxisBuilder(sheet, fieldRanges);
 
         foreach (var candidate in dense.Concat(vector))
         {
@@ -604,7 +608,7 @@ internal static class SheetLayoutInference
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct FieldCandidate(ExcelRange Range, int HeaderRow, int HeaderStartCol, int HeaderEndCol);
 
-    private sealed class AxisBuilder(SheetFacts sheet)
+    private sealed class AxisBuilder(SheetFacts sheet, List<ExcelRange> fieldRanges)
     {
         private readonly Dictionary<AxisKey, LayoutAxis> _axesByKey = [];
         private int _nextAxisId;
@@ -646,13 +650,27 @@ internal static class SheetLayoutInference
             return axes;
         }
 
+        // Label columns are searched leftward, but another field's columns are data, not labels:
+        // a co-extensive sibling (identical row span, e.g. a CAGR block beside its statement) may
+        // be crossed to reach a shared label column — unless a nearer candidate already scored —
+        // while a field with a different row span marks unrelated table territory and stops the
+        // scan outright.
         private int? FindMainVerticalAxis(ExcelRange range)
         {
-            int leftLimit = sheet.MinCol;
             int bestCol = 0;
             int bestScore = 0;
-            for (int col = range.TopLeft.Column - 1; col >= leftLimit; col--)
+            for (int col = range.TopLeft.Column - 1; col >= sheet.MinCol; col--)
             {
+                switch (ClassifyColumnZone(col, range))
+                {
+                    case ColumnZone.OtherTable:
+                        return bestCol == 0 ? null : bestCol;
+                    case ColumnZone.Sibling when bestScore > 0:
+                        return bestCol;
+                    case ColumnZone.Sibling:
+                        continue;
+                }
+
                 int score = sheet.GetAxisScore(range.TopLeft.Row, range.BottomRight.Row, col);
                 if (score == 0)
                 {
@@ -667,6 +685,32 @@ internal static class SheetLayoutInference
             }
 
             return bestCol == 0 ? null : bestCol;
+        }
+
+        private ColumnZone ClassifyColumnZone(int col, ExcelRange fieldRange)
+        {
+            foreach (var other in fieldRanges)
+            {
+                if (other == fieldRange ||
+                    col < other.TopLeft.Column || col > other.BottomRight.Column ||
+                    other.TopLeft.Row > fieldRange.BottomRight.Row || other.BottomRight.Row < fieldRange.TopLeft.Row)
+                {
+                    continue;
+                }
+
+                bool sameRows = other.TopLeft.Row == fieldRange.TopLeft.Row &&
+                    other.BottomRight.Row == fieldRange.BottomRight.Row;
+
+                // A field abutting this field's left edge with a contained row span is a fragment
+                // of the same table (a sliver column the segmenter split off), not foreign territory.
+                bool adjacentFragment = other.BottomRight.Column == fieldRange.TopLeft.Column - 1 &&
+                    other.TopLeft.Row >= fieldRange.TopLeft.Row &&
+                    other.BottomRight.Row <= fieldRange.BottomRight.Row;
+
+                return sameRows || adjacentFragment ? ColumnZone.Sibling : ColumnZone.OtherTable;
+            }
+
+            return ColumnZone.None;
         }
 
         private LayoutAxis GetOrCreate(
@@ -697,6 +741,13 @@ internal static class SheetLayoutInference
             _axesByKey.Add(key, axis);
             return axis;
         }
+    }
+
+    private enum ColumnZone
+    {
+        None,
+        Sibling,
+        OtherTable,
     }
 
     [StructLayout(LayoutKind.Auto)]
