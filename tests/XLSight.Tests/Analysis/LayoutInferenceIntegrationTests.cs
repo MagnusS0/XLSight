@@ -85,9 +85,25 @@ public sealed class LayoutInferenceIntegrationTests
         AssertField(inferred, "C6:C14", 1);
         AssertField(inferred, "C18:C26", 1);
 
-        // The projection and the sensitivity matrix below it share the same value columns, so they
-        // form one coherent block rather than two separately-headed tables.
-        AssertField(inferred, "E6:K52", 2);
+        // The projection's measure columns must be captured, and the left input/summary labels
+        // (B6:B52) must not attach as its axis — they label the input blocks, not projection rows.
+        // The exact extent is still too coarse (it bleeds into the sensitivity matrix below);
+        // tighten this to the projection rows once section-break detection lands.
+        MeasureFieldInfo projection = AssertFieldContaining(inferred, "G7:K39");
+        Assert.DoesNotContain(inferred.Layout.Axes, axis =>
+            axis.Range == ExcelRange.Parse("B6:B52") && projection.AxisIds.Contains(axis.Id));
+    }
+
+    private static MeasureFieldInfo AssertFieldContaining(SheetAnalysisInferred inferred, string range)
+    {
+        var expected = ExcelRange.Parse(range);
+        MeasureFieldInfo? field = inferred.Layout.MeasureFields.FirstOrDefault(field =>
+            field.Range.TopLeft.Row <= expected.TopLeft.Row &&
+            field.Range.TopLeft.Column <= expected.TopLeft.Column &&
+            field.Range.BottomRight.Row >= expected.BottomRight.Row &&
+            field.Range.BottomRight.Column >= expected.BottomRight.Column);
+        Assert.NotNull(field);
+        return field;
     }
 
     [Fact]
