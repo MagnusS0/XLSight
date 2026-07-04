@@ -114,6 +114,14 @@ internal static class SheetLayoutInference
         }
 
         (int trimmedStartCol, int trimmedEndCol) = TrimMeasureColumns(sheet, startRow, endRow, startCol, endCol);
+
+        // A leading column of years/dates is the table's row coordinate (e.g. a "Year" column),
+        // not measure data; peeling it here lets it attach as a vertical context axis instead.
+        while (trimmedStartCol < trimmedEndCol && sheet.IsYearLikeColumn(startRow, endRow, trimmedStartCol))
+        {
+            trimmedStartCol++;
+        }
+
         int trimmedWidth = trimmedEndCol - trimmedStartCol + 1;
         if (trimmedWidth < 2)
         {
@@ -626,10 +634,12 @@ internal static class SheetLayoutInference
 
                 for (int col = mainCol + 1; col < range.TopLeft.Column; col++)
                 {
+                    // Year-like/date numerics are coordinates, not data, so they don't disqualify
+                    // a context column (e.g. a peeled "Year" column beside the label column).
                     int axisLikeCount = sheet.CountAxisLikeCells(range.TopLeft.Row, range.BottomRight.Row, col);
-                    int numericCount = sheet.CountNumericCells(range.TopLeft.Row, range.BottomRight.Row, col, col);
+                    int measureCount = sheet.CountMeasureCells(range.TopLeft.Row, range.BottomRight.Row, col);
                     int minContextCount = Math.Max(2, range.Height / 3);
-                    if (axisLikeCount >= minContextCount && numericCount == 0)
+                    if (axisLikeCount >= minContextCount && measureCount == 0)
                     {
                         axes.Add(GetOrCreate(LayoutAxisOrientation.Vertical, LayoutAxisRole.Context, col, range.TopLeft.Row, col, range.BottomRight.Row));
                     }
@@ -812,6 +822,49 @@ internal static class SheetLayoutInference
         public static bool IsMeasureCell(LayoutCellFact cell) =>
             cell.HasNumericValue &&
             (cell.KindMask & (LayoutKindMask.YearLikeNumber | LayoutKindMask.Date)) == LayoutKindMask.None;
+
+        /// <summary>Whether the column's numerics in the row span are exclusively year-like or date values (at least two).</summary>
+        public bool IsYearLikeColumn(int startRow, int endRow, int col)
+        {
+            int yearLike = 0;
+            for (int r = FirstRowIndexAtOrAfter(startRow); r < _rowNumbers.Count && _rowNumbers[r] <= endRow; r++)
+            {
+                int rowEnd = _store.RowStartAt(r + 1);
+                int i = ColumnLowerBound(_store.RowStartAt(r), rowEnd, col);
+                if (i >= rowEnd || _store[i].Column != col)
+                {
+                    continue;
+                }
+
+                if (IsMeasureCell(_store[i]))
+                {
+                    return false;
+                }
+
+                if (_store[i].HasNumericValue)
+                {
+                    yearLike++;
+                }
+            }
+
+            return yearLike >= 2;
+        }
+
+        public int CountMeasureCells(int startRow, int endRow, int col)
+        {
+            int count = 0;
+            for (int r = FirstRowIndexAtOrAfter(startRow); r < _rowNumbers.Count && _rowNumbers[r] <= endRow; r++)
+            {
+                int rowEnd = _store.RowStartAt(r + 1);
+                int i = ColumnLowerBound(_store.RowStartAt(r), rowEnd, col);
+                if (i < rowEnd && _store[i].Column == col && IsMeasureCell(_store[i]))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
 
         public IEnumerable<(int StartCol, int EndCol)> GetHeaderRuns(int row)
         {
