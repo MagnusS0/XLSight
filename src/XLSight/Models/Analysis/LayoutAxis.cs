@@ -6,6 +6,11 @@ public sealed class LayoutAxis
     /// <summary>Gets the unique identifier of this axis within this analysis result.</summary>
     public required string Id { get; init; }
 
+    /// <summary>Gets the inferred name of this axis (e.g. "WACC" beside a numeric coordinate
+    /// column), or null when none was detected. Only numeric and date axes are named; text
+    /// axes identify themselves through <see cref="Samples"/>.</summary>
+    public string? Title { get; init; }
+
     /// <summary>Gets whether the axis labels rows or columns.</summary>
     public required LayoutAxisOrientation Orientation { get; init; }
 
