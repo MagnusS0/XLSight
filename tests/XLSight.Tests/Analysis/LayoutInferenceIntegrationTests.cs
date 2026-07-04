@@ -72,6 +72,15 @@ public sealed class LayoutInferenceIntegrationTests
         MeasureFieldInfo terminalField = AssertField(inferred, "E23:E24", 1);
         LayoutAxis rowAxis = AssertAxis(inferred, "C23:C24", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
         Assert.Contains(rowAxis.Id, terminalField.AxisIds);
+
+        // The WACC / terminal-growth sensitivity block is a 2D matrix with numeric coordinate
+        // axes of its own — WACC values down G, growth rates across row 59 — and must not
+        // borrow labels from the WACC-calculation table to its left.
+        MeasureFieldInfo sensitivity = AssertField(inferred, "H60:L64", 2);
+        LayoutAxis waccAxis = AssertAxis(inferred, "G60:G64", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
+        LayoutAxis growthAxis = AssertAxis(inferred, "H59:L59", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+        Assert.Contains(waccAxis.Id, sensitivity.AxisIds);
+        Assert.Contains(growthAxis.Id, sensitivity.AxisIds);
     }
 
     [Fact]
@@ -85,25 +94,19 @@ public sealed class LayoutInferenceIntegrationTests
         AssertField(inferred, "C6:C14", 1);
         AssertField(inferred, "C18:C26", 1);
 
-        // The projection's measure columns must be captured, and the left input/summary labels
-        // (B6:B52) must not attach as its axis — they label the input blocks, not projection rows.
-        // The exact extent is still too coarse (it bleeds into the sensitivity matrix below);
-        // tighten this to the projection rows once section-break detection lands.
-        MeasureFieldInfo projection = AssertFieldContaining(inferred, "G7:K39");
+        // The projection ends at row 40 (the sensitivity matrix below is its own table), and the
+        // left input/summary labels must not attach as its axis — they label the input blocks.
+        MeasureFieldInfo projection = AssertField(inferred, "E6:K40", 1);
         Assert.DoesNotContain(inferred.Layout.Axes, axis =>
             axis.Range == ExcelRange.Parse("B6:B52") && projection.AxisIds.Contains(axis.Id));
-    }
 
-    private static MeasureFieldInfo AssertFieldContaining(SheetAnalysisInferred inferred, string range)
-    {
-        var expected = ExcelRange.Parse(range);
-        MeasureFieldInfo? field = inferred.Layout.MeasureFields.FirstOrDefault(field =>
-            field.Range.TopLeft.Row <= expected.TopLeft.Row &&
-            field.Range.TopLeft.Column <= expected.TopLeft.Column &&
-            field.Range.BottomRight.Row >= expected.BottomRight.Row &&
-            field.Range.BottomRight.Column >= expected.BottomRight.Column);
-        Assert.NotNull(field);
-        return field;
+        // The surplus/shortfall sensitivity block is a 2D matrix: return rates down C,
+        // inflation rates across row 44.
+        MeasureFieldInfo sensitivity = AssertField(inferred, "D46:J52", 2);
+        LayoutAxis returnAxis = AssertAxis(inferred, "C46:C52", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
+        LayoutAxis inflationAxis = AssertAxis(inferred, "D44:J44", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+        Assert.Contains(returnAxis.Id, sensitivity.AxisIds);
+        Assert.Contains(inflationAxis.Id, sensitivity.AxisIds);
     }
 
     [Fact]

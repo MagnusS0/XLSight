@@ -18,8 +18,11 @@ internal static class SheetLayoutInference
         var fieldAxes = new List<IReadOnlyList<LayoutAxis>>();
         var occupied = new List<ExcelRange>();
 
+        List<FieldCandidate> matrices = FindMatrixFields(sheet);
+        AddMatrixZones(matrices, occupied);
+
         var dense = new List<FieldCandidate>();
-        foreach (var candidate in FindDenseFields(sheet))
+        foreach (var candidate in FindDenseFields(sheet, matrices))
         {
             if (!OverlapsAny(candidate.Range, occupied))
             {
@@ -33,16 +36,18 @@ internal static class SheetLayoutInference
         // a fully empty gap column is a real boundary and is left alone.
         dense = MergeColumnAdjacentFields(dense, sheet);
         occupied.Clear();
+        AddMatrixZones(matrices, occupied);
         occupied.AddRange(dense.Select(static candidate => candidate.Range));
 
         var vector = CoalesceVectorFields(FindVectorFields(sheet, occupied)).ToList();
 
-        var fieldRanges = new List<ExcelRange>(dense.Count + vector.Count);
+        var fieldRanges = new List<ExcelRange>(dense.Count + matrices.Count + vector.Count);
         fieldRanges.AddRange(dense.Select(static candidate => candidate.Range));
+        fieldRanges.AddRange(matrices.Select(static candidate => candidate.Range));
         fieldRanges.AddRange(vector.Select(static candidate => candidate.Range));
         var axisBuilder = new AxisBuilder(sheet, fieldRanges);
 
-        foreach (var candidate in dense.Concat(vector))
+        foreach (var candidate in dense.Concat(matrices).Concat(vector))
         {
             var axes = axisBuilder.GetAxes(candidate);
             fields.Add(CreateField(fields.Count + 1, candidate.Range, axes, sheet));
@@ -57,7 +62,166 @@ internal static class SheetLayoutInference
         };
     }
 
-    private static IEnumerable<FieldCandidate> FindDenseFields(SheetFacts sheet)
+    // A matrix occupies its data block plus its two coordinate runs: the header row above and
+    // the column just left. All three must be off-limits to dense/vector candidate detection.
+    private static void AddMatrixZones(List<FieldCandidate> matrices, List<ExcelRange> occupied)
+    {
+        foreach (var matrix in matrices)
+        {
+            occupied.Add(matrix.Range);
+            occupied.Add(new ExcelRange(
+                new ExcelAddress(matrix.HeaderStartCol, matrix.HeaderRow),
+                new ExcelAddress(matrix.HeaderEndCol, matrix.HeaderRow)));
+            occupied.Add(new ExcelRange(
+                new ExcelAddress(matrix.Range.TopLeft.Column - 1, matrix.Range.TopLeft.Row),
+                new ExcelAddress(matrix.Range.TopLeft.Column - 1, matrix.Range.BottomRight.Row)));
+        }
+    }
+
+    // A sensitivity-style matrix announces itself with numeric coordinates instead of text
+    // headers: a strictly monotonic, uniform-step run of plain numerics across a row (e.g.
+    // growth rates 0.5%..2.5%), a matching monotonic run down the column just left of it
+    // (e.g. WACC 3.2%..7.2%), and a dense data block at their intersection. Year/date runs
+    // never qualify (they are not measure cells), so ordinary year headers cannot seed one.
+    private static List<FieldCandidate> FindMatrixFields(SheetFacts sheet)
+    {
+        var matrices = new List<FieldCandidate>();
+        var claimed = new List<ExcelRange>();
+        for (int rowIndex = 0; rowIndex < sheet.Rows.Count; rowIndex++)
+        {
+            (int lo, int hi) = sheet.RowSegment(rowIndex);
+            int runStart = lo;
+            while (runStart < hi)
+            {
+                int runEnd = ExtendUniformRun(sheet, runStart, hi);
+                if (runEnd - runStart >= 3 &&
+                    TryCreateMatrix(sheet, sheet.Rows[rowIndex], runStart, runEnd, claimed) is { } matrix)
+                {
+                    matrices.Add(matrix);
+                    claimed.Add(matrix.Range);
+                    runStart = runEnd;
+                }
+                else
+                {
+                    // Advance one cell, not to runEnd: a failed run's tail may start the real one
+                    // (e.g. a base value in the corner directly before the coordinate run).
+                    runStart++;
+                }
+            }
+        }
+
+        return matrices;
+    }
+
+    // Coordinate runs are hand-typed sequences with an exact constant step (0.5%, 1.0%, ...);
+    // near-exact tolerance keeps computed data rows (which are never uniform) from seeding.
+    private static bool IsUniformStep(double delta, double reference) =>
+        Math.Sign(delta) == Math.Sign(reference) &&
+        Math.Abs(delta - reference) <= Math.Max(Math.Abs(reference) * 0.05, 1e-9);
+
+    // Exclusive end of the run from start of column-consecutive measure cells advancing by a
+    // constant step.
+    private static int ExtendUniformRun(SheetFacts sheet, int start, int hi)
+    {
+        if (!SheetFacts.IsMeasureCell(sheet.CellAt(start)))
+        {
+            return start;
+        }
+
+        int end = start + 1;
+        double? firstDelta = null;
+        while (end < hi)
+        {
+            LayoutCellFact previous = sheet.CellAt(end - 1);
+            LayoutCellFact current = sheet.CellAt(end);
+            if (current.Column != previous.Column + 1 || !SheetFacts.IsMeasureCell(current))
+            {
+                break;
+            }
+
+            double delta = current.NumericValue - previous.NumericValue;
+            if (firstDelta is { } reference)
+            {
+                if (!IsUniformStep(delta, reference))
+                {
+                    break;
+                }
+            }
+            else if (delta == 0)
+            {
+                break;
+            }
+            else
+            {
+                firstDelta = delta;
+            }
+
+            end++;
+        }
+
+        return end;
+    }
+
+    private static FieldCandidate? TryCreateMatrix(SheetFacts sheet, int headerRow, int runStart, int runEnd, List<ExcelRange> claimed)
+    {
+        int startCol = sheet.CellAt(runStart).Column;
+        int endCol = sheet.CellAt(runEnd - 1).Column;
+        int coordinateCol = startCol - 1;
+
+        // The row coordinate column starts within a few rows below the header run (a text
+        // label like "Return Rate" may sit between) and must itself be monotonic-uniform.
+        int firstRow = 0;
+        for (int row = headerRow + 1; row <= headerRow + 3; row++)
+        {
+            if (sheet.TryGetCell(row, coordinateCol, out var cell) && SheetFacts.IsMeasureCell(cell))
+            {
+                firstRow = row;
+                break;
+            }
+        }
+
+        if (firstRow == 0)
+        {
+            return null;
+        }
+
+        int lastRow = ExtendUniformColumnRun(sheet, coordinateCol, firstRow);
+        if (lastRow - firstRow + 1 < 3)
+        {
+            return null;
+        }
+
+        var range = new ExcelRange(new ExcelAddress(startCol, firstRow), new ExcelAddress(endCol, lastRow));
+        int area = range.Width * range.Height;
+        if (OverlapsAny(range, claimed) || sheet.CountNumericCells(firstRow, lastRow, startCol, endCol) * 2 < area)
+        {
+            return null;
+        }
+
+        return new FieldCandidate(range, headerRow, startCol, endCol);
+    }
+
+    private static int ExtendUniformColumnRun(SheetFacts sheet, int col, int firstRow)
+    {
+        int lastRow = firstRow;
+        double? firstDelta = null;
+        while (sheet.TryGetCell(lastRow + 1, col, out var next) && SheetFacts.IsMeasureCell(next))
+        {
+            sheet.TryGetCell(lastRow, col, out var current);
+            double delta = next.NumericValue - current.NumericValue;
+            if (delta == 0 || (firstDelta is { } reference && !IsUniformStep(delta, reference)))
+            {
+                break;
+            }
+
+            firstDelta ??= delta;
+            lastRow++;
+        }
+
+        return lastRow;
+    }
+
+    private static IEnumerable<FieldCandidate> FindDenseFields(SheetFacts sheet, List<FieldCandidate> matrices)
     {
         var rawCandidates = new List<FieldCandidate>();
         var claimed = new List<ExcelRange>();
@@ -79,7 +243,7 @@ internal static class SheetLayoutInference
                     continue;
                 }
 
-                if (TryCreateDenseCandidate(sheet, headerRow, startCol, endCol) is not { } candidate)
+                if (TryCreateDenseCandidate(sheet, headerRow, startCol, endCol, matrices) is not { } candidate)
                 {
                     continue;
                 }
@@ -99,7 +263,7 @@ internal static class SheetLayoutInference
             .ThenBy(static candidate => candidate.Range.TopLeft.Column);
     }
 
-    private static FieldCandidate? TryCreateDenseCandidate(SheetFacts sheet, int headerRow, int startCol, int endCol)
+    private static FieldCandidate? TryCreateDenseCandidate(SheetFacts sheet, int headerRow, int startCol, int endCol, List<FieldCandidate> matrices)
     {
         int startRow = FindDenseStartRow(sheet, headerRow, startCol, endCol);
         if (startRow == 0)
@@ -107,7 +271,7 @@ internal static class SheetLayoutInference
             return null;
         }
 
-        int endRow = FindDenseEndRow(sheet, headerRow, startRow, startCol, endCol);
+        int endRow = FindDenseEndRow(sheet, headerRow, startRow, startCol, endCol, matrices);
         if (endRow < startRow)
         {
             return null;
@@ -254,7 +418,7 @@ internal static class SheetLayoutInference
         return 0;
     }
 
-    private static int FindDenseEndRow(SheetFacts sheet, int headerRow, int startRow, int startCol, int endCol)
+    private static int FindDenseEndRow(SheetFacts sheet, int headerRow, int startRow, int startCol, int endCol, List<FieldCandidate> matrices)
     {
         int lastSubstantiveRow = startRow;
         int emptyRows = 0;
@@ -263,6 +427,13 @@ internal static class SheetLayoutInference
             // A repeated header band after a blank gap starts a new section (e.g. the year
             // row reprinted above each of Income Statement / Balance Sheet / Cash Flow).
             if (row > startRow && emptyRows > 0 && sheet.IsHeaderRowForRun(row, startCol, endCol))
+            {
+                break;
+            }
+
+            // Matrix territory (numeric coordinate headers carry no header-like cells, so the
+            // check above cannot see them) ends the table just like a reprinted header band.
+            if (row > startRow && EntersMatrixZone(row, startCol, endCol, matrices))
             {
                 break;
             }
@@ -297,6 +468,20 @@ internal static class SheetLayoutInference
         }
 
         return lastSubstantiveRow;
+    }
+
+    private static bool EntersMatrixZone(int row, int startCol, int endCol, List<FieldCandidate> matrices)
+    {
+        foreach (var matrix in matrices)
+        {
+            if (row >= matrix.HeaderRow && row <= matrix.Range.BottomRight.Row &&
+                startCol <= matrix.HeaderEndCol && endCol >= matrix.Range.TopLeft.Column - 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static List<FieldCandidate> MergeColumnAdjacentFields(List<FieldCandidate> fields, SheetFacts sheet)
@@ -782,7 +967,7 @@ internal static class SheetLayoutInference
             _rowNumbers = store.RowNumbers;
         }
 
-        public IReadOnlyList<int> Rows => _rowNumbers;
+        public List<int> Rows => _rowNumbers;
         public int MaxRow => _rowNumbers[^1];
         public int MinCol => _store.MinCol;
         public int MaxCol => _store.MaxCol;
@@ -792,6 +977,28 @@ internal static class SheetLayoutInference
 
         public static SheetFacts From(LayoutCellStore cells) =>
             new(cells.IsSorted ? cells : cells.Rebuilt());
+
+        /// <summary>Cell-index bounds [Lo, Hi) of the row at <paramref name="rowIndex"/> into <see cref="Rows"/>.</summary>
+        public (int Lo, int Hi) RowSegment(int rowIndex) =>
+            (_store.RowStartAt(rowIndex), _store.RowStartAt(rowIndex + 1));
+
+        public bool TryGetCell(int row, int col, out LayoutCellFact cell)
+        {
+            int rowIndex = _rowNumbers.BinarySearch(row);
+            if (rowIndex >= 0)
+            {
+                int rowEnd = _store.RowStartAt(rowIndex + 1);
+                int i = ColumnLowerBound(_store.RowStartAt(rowIndex), rowEnd, col);
+                if (i < rowEnd && _store[i].Column == col)
+                {
+                    cell = _store[i];
+                    return true;
+                }
+            }
+
+            cell = default;
+            return false;
+        }
 
         // Index into _rowNumbers of the first row >= row, or _rowNumbers.Count.
         private int FirstRowIndexAtOrAfter(int row)
