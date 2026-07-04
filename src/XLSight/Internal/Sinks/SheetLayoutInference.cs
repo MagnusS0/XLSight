@@ -14,8 +14,6 @@ internal static class SheetLayoutInference
         }
 
         var sheet = SheetFacts.From(cells);
-        var fields = new List<MeasureFieldInfo>();
-        var fieldAxes = new List<IReadOnlyList<LayoutAxis>>();
         var occupied = new List<ExcelRange>();
 
         List<FieldCandidate> matrices = FindMatrixFields(sheet);
@@ -47,11 +45,29 @@ internal static class SheetLayoutInference
         fieldRanges.AddRange(vector.Select(static candidate => candidate.Range));
         var axisBuilder = new AxisBuilder(sheet, fieldRanges);
 
-        foreach (var candidate in dense.Concat(matrices).Concat(vector))
+        var candidates = new List<FieldCandidate>(fieldRanges.Count);
+        candidates.AddRange(dense);
+        candidates.AddRange(matrices);
+        candidates.AddRange(vector);
+        return BuildLayout(sheet, axisBuilder, candidates);
+    }
+
+    private static SheetLayoutInfo BuildLayout(SheetFacts sheet, AxisBuilder axisBuilder, List<FieldCandidate> candidates)
+    {
+        var axesPerField = new List<List<LayoutAxis>>(candidates.Count);
+        foreach (var candidate in candidates)
         {
-            var axes = axisBuilder.GetAxes(candidate);
-            fields.Add(CreateField(fields.Count + 1, candidate.Range, axes, sheet));
-            fieldAxes.Add(axes);
+            axesPerField.Add(axisBuilder.GetAxes(candidate));
+        }
+
+        InheritHorizontalContext(candidates, axesPerField, axisBuilder);
+
+        var fields = new List<MeasureFieldInfo>(candidates.Count);
+        var fieldAxes = new List<IReadOnlyList<LayoutAxis>>(candidates.Count);
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            fields.Add(CreateField(i + 1, candidates[i].Range, axesPerField[i], sheet));
+            fieldAxes.Add(axesPerField[i]);
         }
 
         return new SheetLayoutInfo
@@ -468,6 +484,72 @@ internal static class SheetLayoutInference
         }
 
         return lastSubstantiveRow;
+    }
+
+    // Header-less fields sitting under another table's column header still answer to it: a block
+    // spanning most of a year header's columns (e.g. per-year assumption rows far below the year
+    // row) inherits it as Context, and a fragment abutting such a block's left edge inherits its
+    // host's horizontals. Context-role copies keep the tables in separate groups.
+    private static void InheritHorizontalContext(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField, AxisBuilder axisBuilder)
+    {
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (axesPerField[i].Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
+            {
+                continue;
+            }
+
+            ExcelRange range = candidates[i].Range;
+            LayoutAxis? inherited = axisBuilder.Axes
+                .Where(axis => axis.Orientation == LayoutAxisOrientation.Horizontal &&
+                    axis.Role == LayoutAxisRole.Primary &&
+                    axis.Range.TopLeft.Row < range.TopLeft.Row &&
+                    axis.Range.TopLeft.Column <= range.TopLeft.Column &&
+                    axis.Range.BottomRight.Column >= range.BottomRight.Column &&
+                    range.Width * 2 >= axis.Range.Width)
+                .MaxBy(static axis => axis.Range.TopLeft.Row);
+            if (inherited is not null)
+            {
+                axesPerField[i].Add(axisBuilder.CreateContextCopy(inherited));
+            }
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (axesPerField[i].Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
+            {
+                continue;
+            }
+
+            InheritFromHost(candidates, axesPerField, axisBuilder, i);
+        }
+    }
+
+    private static void InheritFromHost(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField, AxisBuilder axisBuilder, int fragmentIndex)
+    {
+        ExcelRange fragment = candidates[fragmentIndex].Range;
+        for (int host = 0; host < candidates.Count; host++)
+        {
+            ExcelRange hostRange = candidates[host].Range;
+            if (host == fragmentIndex ||
+                fragment.BottomRight.Column != hostRange.TopLeft.Column - 1 ||
+                fragment.TopLeft.Row < hostRange.TopLeft.Row ||
+                fragment.BottomRight.Row > hostRange.BottomRight.Row)
+            {
+                continue;
+            }
+
+            foreach (var axis in axesPerField[host])
+            {
+                if (axis.Orientation == LayoutAxisOrientation.Horizontal &&
+                    axis.Range.TopLeft.Column <= fragment.TopLeft.Column &&
+                    axis.Range.BottomRight.Column >= fragment.BottomRight.Column)
+                {
+                    axesPerField[fragmentIndex].Add(axisBuilder.CreateContextCopy(axis));
+                    return;
+                }
+            }
+        }
     }
 
     private static bool EntersMatrixZone(int row, int startCol, int endCol, List<FieldCandidate> matrices)
@@ -907,6 +989,16 @@ internal static class SheetLayoutInference
 
             return ColumnZone.None;
         }
+
+        /// <summary>A Context-role axis over the same range as <paramref name="source"/>, for fields inheriting it.</summary>
+        public LayoutAxis CreateContextCopy(LayoutAxis source) =>
+            GetOrCreate(
+                source.Orientation,
+                LayoutAxisRole.Context,
+                source.Range.TopLeft.Column,
+                source.Range.TopLeft.Row,
+                source.Range.BottomRight.Column,
+                source.Range.BottomRight.Row);
 
         private LayoutAxis GetOrCreate(
             LayoutAxisOrientation orientation,
