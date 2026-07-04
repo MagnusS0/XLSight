@@ -16,7 +16,7 @@ internal partial struct AnalysisSink
                 string text = value.AsText().Trim();
                 mask |= LayoutKindMask.Text;
                 isHeaderLike = IsHeaderLikeText(text);
-                sampleText = CapSampleText(text.Length <= 32 ? text : text[..32]);
+                sampleText = CapSampleText(text.Length <= 64 ? text : text[..64]);
                 break;
 
             case CellType.Number:

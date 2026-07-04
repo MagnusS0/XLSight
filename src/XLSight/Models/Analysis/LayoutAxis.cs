@@ -23,4 +23,8 @@ public sealed class LayoutAxis
 
     /// <summary>Gets capped display samples from the axis for diagnostics.</summary>
     public required IReadOnlyList<string> Samples { get; init; }
+
+    /// <summary>Gets inferred titled sections scoping runs of this axis (e.g. "Total Funding"
+    /// heading the label rows beneath it); empty when no section structure was detected.</summary>
+    public IReadOnlyList<LayoutAxisSection> Sections { get; init; } = [];
 }

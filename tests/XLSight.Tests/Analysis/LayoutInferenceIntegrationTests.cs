@@ -23,6 +23,15 @@ public sealed class LayoutInferenceIntegrationTests
         AssertField(inferred, "B45:AO62", 2);
         AssertAxis(inferred, "A4:A19", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
         AssertAxis(inferred, "B3:AO3", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+
+        // Each stacked section's title row is captured as its group's title.
+        Assert.Equal(
+            [
+                "Core profit and net profit for the period (DKKm)",
+                "Summary of balance sheet, end of period (DKKm)",
+                "Financial ratios and key figures",
+            ],
+            inferred.Layout.Groups.Select(static group => group.Title));
     }
 
     [Fact]
@@ -126,6 +135,14 @@ public sealed class LayoutInferenceIntegrationTests
         // coherent block rather than dozens of per-column or per-section shards.
         AssertField(inferred, "C6:M260", 2);
         Assert.Single(inferred.Layout.MeasureFields);
+
+        // The dark-blue no-data header rows inside the label column become axis sections, so a
+        // repeated row label like "Total" resolves to its parent (e.g. Total Funding -> Total).
+        LayoutAxis labelAxis = AssertAxis(inferred, "B6:B260", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
+        Assert.Contains(labelAxis.Sections, static section =>
+            section.Title == "Total Funding" && section.Range == ExcelRange.Parse("B5:B10"));
+        Assert.Contains(labelAxis.Sections, static section => section.Title == "Customer Deposits");
+        Assert.Contains(labelAxis.Sections, static section => section.Title == "Gross Loans and Advances");
     }
 
     [Fact]
