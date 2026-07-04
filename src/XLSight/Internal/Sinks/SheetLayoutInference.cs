@@ -1084,6 +1084,7 @@ internal static class SheetLayoutInference
             new()
             {
                 Id = axis.Id,
+                Title = axis.Title,
                 Orientation = axis.Orientation,
                 ValueKind = axis.ValueKind,
                 Role = axis.Role,
@@ -1118,18 +1119,39 @@ internal static class SheetLayoutInference
             }
 
             var range = new ExcelRange(new ExcelAddress(startCol, startRow), new ExcelAddress(endCol, endRow));
+            LayoutAxisValueKind valueKind = sheet.GetAxisKind(range);
             axis = new LayoutAxis
             {
                 Id = $"axis{++_nextAxisId}",
+                Title = valueKind is LayoutAxisValueKind.Numeric or LayoutAxisValueKind.Date ? FindAxisTitle(range) : null,
                 Orientation = orientation,
                 Role = role,
-                ValueKind = sheet.GetAxisKind(range),
+                ValueKind = valueKind,
                 Range = range,
                 Coverage = orientation == LayoutAxisOrientation.Vertical ? range.Height : range.Width,
                 Samples = sheet.GetSamples(range),
             };
             _axesByKey.Add(key, axis);
             return axis;
+        }
+
+        // A numeric/date axis carries no self-describing labels, so its name is the nearest text
+        // cell just before its start: up to two cells above, then up to two cells left (covers
+        // "WACC" over a coordinate column and "Inflation Rate" beside a coordinate row).
+        private string? FindAxisTitle(ExcelRange range)
+        {
+            int startCol = range.TopLeft.Column;
+            int startRow = range.TopLeft.Row;
+            Span<(int Col, int Row)> probes = [(startCol, startRow - 1), (startCol, startRow - 2), (startCol - 1, startRow), (startCol - 2, startRow)];
+            foreach ((int col, int row) in probes)
+            {
+                if (col >= 1 && row >= 1 && sheet.TryGetCell(row, col, out var cell) && cell.Text is { } title)
+                {
+                    return title;
+                }
+            }
+
+            return null;
         }
     }
 
