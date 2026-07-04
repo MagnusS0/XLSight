@@ -138,15 +138,21 @@ public sealed class LayoutInferenceIntegrationTests
 
         var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Industry Benchmark").Inferred);
 
-        // The top grid's four column-groups stay separated by their fully empty spacer columns
-        // (their stacked metric bands merge vertically into one block per column-group). The bottom
-        // wide table re-joins across its data-bearing spacers (split only at the fully empty U).
-        AssertFieldRange(inferred, "E8:H33");
-        AssertFieldRange(inferred, "K8:N33");
-        AssertFieldRange(inferred, "Q8:T33");
-        AssertFieldRange(inferred, "W8:Z33");
-        AssertField(inferred, "E38:T62", 2);
-        AssertField(inferred, "V38:AD62", 2);
+        // The top grid's four column-groups stay separated by their fully empty spacer columns,
+        // each anchoring its own adjacent label column (D/J/P/V) rather than inheriting the
+        // first panel's.
+        AssertField(inferred, "E8:H33", 2);
+        AssertField(inferred, "K8:N33", 2);
+        AssertField(inferred, "Q8:T33", 2);
+        AssertField(inferred, "W8:Z33", 2);
+
+        // The bottom wide table re-joins across its data-bearing spacers (split only at the fully
+        // empty U), and its leading year column peels off as a vertical context axis: rows are
+        // keyed by Name (D) + Year (E).
+        MeasureFieldInfo bottomLeft = AssertField(inferred, "F38:T62", 3);
+        AssertField(inferred, "V38:AD62", 3);
+        LayoutAxis yearContext = AssertAxis(inferred, "E38:E62", LayoutAxisOrientation.Vertical, LayoutAxisRole.Context);
+        Assert.Contains(yearContext.Id, bottomLeft.AxisIds);
     }
 
     private static MeasureFieldInfo AssertField(SheetAnalysisInferred inferred, string range, int rank)
