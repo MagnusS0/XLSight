@@ -8,11 +8,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_JyskeGroup_ReturnsStackedCrosstabLayout()
     {
-        string? workbookPath = FindRepoFile("Jyske+Bank+Fact+Book+2025+Q4.xlsx");
-        if (workbookPath is null)
-        {
-            return;
-        }
+        string workbookPath = RequireRepoFile("Jyske+Bank+Fact+Book+2025+Q4.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -37,11 +33,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_McDonaldsFinancials_ReturnsSharedAxisSiblingFields()
     {
-        string? workbookPath = FindRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
-        if (workbookPath is null)
-        {
-            return;
-        }
+        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -68,11 +60,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_McDonaldsValuation_ReturnsScalarVectorLayout()
     {
-        string? workbookPath = FindRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
-        if (workbookPath is null)
-        {
-            return;
-        }
+        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -121,11 +109,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_BankingAssumptions_ReturnsOneCoherentBlock()
     {
-        string? workbookPath = FindRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
-        if (workbookPath is null)
-        {
-            return;
-        }
+        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -148,11 +132,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_BankingIndustryBenchmark_MergesWideTableAndKeepsColumnGroups()
     {
-        string? workbookPath = FindRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
-        if (workbookPath is null)
-        {
-            return;
-        }
+        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -206,7 +186,9 @@ public sealed class LayoutInferenceIntegrationTests
         return axis;
     }
 
-    private static string? FindRepoFile(string relativePath)
+    // Skips at runtime rather than returning silently, so a missing external corpus workbook
+    // shows up as a Skipped test instead of a Passed test that never asserted anything.
+    private static string RequireRepoFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
@@ -220,6 +202,7 @@ public sealed class LayoutInferenceIntegrationTests
             directory = directory.Parent;
         }
 
-        return null;
+        Assert.Skip($"External corpus workbook not present: {relativePath}");
+        throw new InvalidOperationException("Unreachable: Assert.Skip always throws.");
     }
 }
