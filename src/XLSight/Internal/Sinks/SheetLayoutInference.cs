@@ -61,6 +61,7 @@ internal static class SheetLayoutInference
         }
 
         InheritHorizontalContext(candidates, axesPerField, axisBuilder);
+        axisBuilder.AttachSections(candidates, axesPerField);
 
         var fields = new List<MeasureFieldInfo>(candidates.Count);
         var fieldAxes = new List<IReadOnlyList<LayoutAxis>>(candidates.Count);
@@ -74,7 +75,7 @@ internal static class SheetLayoutInference
         {
             Axes = axisBuilder.Axes,
             MeasureFields = fields,
-            Groups = BuildGroups(fields, fieldAxes),
+            Groups = BuildGroups(fields, fieldAxes, sheet),
         };
     }
 
@@ -743,17 +744,41 @@ internal static class SheetLayoutInference
         };
     }
 
-    private static List<LayoutGroupInfo> BuildGroups(List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes)
+    private static List<LayoutGroupInfo> BuildGroups(List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes, SheetFacts sheet)
     {
         List<List<int>> clusters = ClusterFieldsBySharedAxis(fields.Count, fieldAxes);
 
         var groups = new List<LayoutGroupInfo>(clusters.Count);
         for (int g = 0; g < clusters.Count; g++)
         {
-            groups.Add(CreateGroup(g + 1, clusters[g], fields, fieldAxes));
+            groups.Add(CreateGroup(g + 1, clusters[g], fields, fieldAxes, sheet));
         }
 
         return groups;
+    }
+
+    // A group's title is a lone text cell on an otherwise data-free row directly above it (up
+    // to three rows up, so one blank spacer row is fine). Rows with several text cells are
+    // header bands, not titles, and a row carrying measure data means another table sits
+    // directly above — stop looking.
+    private static string? FindGroupTitle(SheetFacts sheet, ExcelRange range)
+    {
+        int startCol = Math.Max(1, range.TopLeft.Column - 1);
+        for (int row = range.TopLeft.Row - 1; row >= Math.Max(1, range.TopLeft.Row - 3); row--)
+        {
+            (int textCount, string? firstText, bool hasMeasure) = sheet.ScanRowContent(row, startCol, range.BottomRight.Column);
+            if (hasMeasure)
+            {
+                return null;
+            }
+
+            if (textCount == 1 && firstText is not null)
+            {
+                return firstText;
+            }
+        }
+
+        return null;
     }
 
     // Fields that share at least one axis id belong to one group; union-find over field indices
@@ -812,7 +837,7 @@ internal static class SheetLayoutInference
         return clusterOrder;
     }
 
-    private static LayoutGroupInfo CreateGroup(int id, List<int> members, List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes)
+    private static LayoutGroupInfo CreateGroup(int id, List<int> members, List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes, SheetFacts sheet)
     {
         ExcelRange range = fields[members[0]].Range;
         var axisIds = new List<string>();
@@ -836,6 +861,7 @@ internal static class SheetLayoutInference
         return new LayoutGroupInfo
         {
             Id = $"group{id}",
+            Title = FindGroupTitle(sheet, range),
             Range = range,
             AxisIds = axisIds,
             MeasureFieldIds = measureFieldIds,
@@ -990,6 +1016,83 @@ internal static class SheetLayoutInference
             return ColumnZone.None;
         }
 
+        // A section header is an axis-column text row with no measure data across the attached
+        // fields' columns — exactly the rows the field detection skipped over. The scan starts
+        // two rows above the axis so a header directly above the first labeled row still counts.
+        public void AttachSections(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField)
+        {
+            var spans = new Dictionary<string, (int MinCol, int MaxCol)>(StringComparer.Ordinal);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                foreach (var axis in axesPerField[i])
+                {
+                    if (axis.Orientation != LayoutAxisOrientation.Vertical || axis.Role != LayoutAxisRole.Primary)
+                    {
+                        continue;
+                    }
+
+                    ExcelRange range = candidates[i].Range;
+                    spans[axis.Id] = spans.TryGetValue(axis.Id, out (int MinCol, int MaxCol) span)
+                        ? (Math.Min(span.MinCol, range.TopLeft.Column), Math.Max(span.MaxCol, range.BottomRight.Column))
+                        : (range.TopLeft.Column, range.BottomRight.Column);
+                }
+            }
+
+            foreach (var key in _axesByKey.Keys.ToList())
+            {
+                LayoutAxis axis = _axesByKey[key];
+                if (spans.TryGetValue(axis.Id, out (int MinCol, int MaxCol) span))
+                {
+                    List<LayoutAxisSection> sections = BuildSections(axis, span.MinCol, span.MaxCol);
+                    if (sections.Count > 0)
+                    {
+                        _axesByKey[key] = CloneWithSections(axis, sections);
+                    }
+                }
+            }
+        }
+
+        private List<LayoutAxisSection> BuildSections(LayoutAxis axis, int fieldStartCol, int fieldEndCol)
+        {
+            int col = axis.Range.TopLeft.Column;
+            int bottom = axis.Range.BottomRight.Row;
+            var headers = new List<(int Row, string Title)>();
+            for (int row = Math.Max(1, axis.Range.TopLeft.Row - 2); row <= bottom; row++)
+            {
+                if (sheet.TryGetCell(row, col, out var cell) && cell.Text is { } title &&
+                    !sheet.ScanRowContent(row, fieldStartCol, fieldEndCol).HasMeasure)
+                {
+                    headers.Add((row, title));
+                }
+            }
+
+            var sections = new List<LayoutAxisSection>(headers.Count);
+            for (int i = 0; i < headers.Count; i++)
+            {
+                int end = i + 1 < headers.Count ? headers[i + 1].Row - 1 : bottom;
+                sections.Add(new LayoutAxisSection
+                {
+                    Title = headers[i].Title,
+                    Range = new ExcelRange(new ExcelAddress(col, headers[i].Row), new ExcelAddress(col, end)),
+                });
+            }
+
+            return sections;
+        }
+
+        private static LayoutAxis CloneWithSections(LayoutAxis axis, List<LayoutAxisSection> sections) =>
+            new()
+            {
+                Id = axis.Id,
+                Orientation = axis.Orientation,
+                ValueKind = axis.ValueKind,
+                Role = axis.Role,
+                Range = axis.Range,
+                Coverage = axis.Coverage,
+                Samples = axis.Samples,
+                Sections = sections,
+            };
+
         /// <summary>A Context-role axis over the same range as <paramref name="source"/>, for fields inheriting it.</summary>
         public LayoutAxis CreateContextCopy(LayoutAxis source) =>
             GetOrCreate(
@@ -1073,6 +1176,34 @@ internal static class SheetLayoutInference
         /// <summary>Cell-index bounds [Lo, Hi) of the row at <paramref name="rowIndex"/> into <see cref="Rows"/>.</summary>
         public (int Lo, int Hi) RowSegment(int rowIndex) =>
             (_store.RowStartAt(rowIndex), _store.RowStartAt(rowIndex + 1));
+
+        /// <summary>Text-cell count, first text sample, and measure-cell presence within one row's column span.</summary>
+        public (int TextCount, string? FirstText, bool HasMeasure) ScanRowContent(int row, int startCol, int endCol)
+        {
+            int rowIndex = _rowNumbers.BinarySearch(row);
+            if (rowIndex < 0)
+            {
+                return (0, null, false);
+            }
+
+            int textCount = 0;
+            string? firstText = null;
+            bool hasMeasure = false;
+            int rowEnd = _store.RowStartAt(rowIndex + 1);
+            for (int i = ColumnLowerBound(_store.RowStartAt(rowIndex), rowEnd, startCol); i < rowEnd && _store[i].Column <= endCol; i++)
+            {
+                LayoutCellFact cell = _store[i];
+                if ((cell.KindMask & LayoutKindMask.Text) != LayoutKindMask.None)
+                {
+                    textCount++;
+                    firstText ??= cell.Text;
+                }
+
+                hasMeasure |= IsMeasureCell(cell);
+            }
+
+            return (textCount, firstText, hasMeasure);
+        }
 
         public bool TryGetCell(int row, int col, out LayoutCellFact cell)
         {
