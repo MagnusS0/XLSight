@@ -35,47 +35,46 @@ internal static class SheetLayoutInference
         dense = MergeColumnAdjacentFields(dense, sheet);
         occupied.Clear();
         AddMatrixZones(matrices, occupied);
-        occupied.AddRange(dense.Select(static candidate => candidate.Range));
+        List<ExcelRange> denseRanges = [.. dense.Select(static candidate => candidate.Range)];
+        occupied.AddRange(denseRanges);
 
         var vector = CoalesceVectorFields(FindVectorFields(sheet, occupied)).ToList();
 
-        var fieldRanges = new List<ExcelRange>(dense.Count + matrices.Count + vector.Count);
-        fieldRanges.AddRange(dense.Select(static candidate => candidate.Range));
-        fieldRanges.AddRange(matrices.Select(static candidate => candidate.Range));
-        fieldRanges.AddRange(vector.Select(static candidate => candidate.Range));
-        var axisBuilder = new AxisBuilder(sheet, fieldRanges);
-
-        var candidates = new List<FieldCandidate>(fieldRanges.Count);
+        var candidates = new List<FieldCandidate>(dense.Count + matrices.Count + vector.Count);
         candidates.AddRange(dense);
         candidates.AddRange(matrices);
         candidates.AddRange(vector);
+        List<ExcelRange> fieldRanges = [.. candidates.Select(static candidate => candidate.Range)];
+        var axisBuilder = new AxisBuilder(sheet, fieldRanges);
         return BuildLayout(sheet, axisBuilder, candidates);
     }
 
     private static SheetLayoutInfo BuildLayout(SheetFacts sheet, AxisBuilder axisBuilder, List<FieldCandidate> candidates)
     {
-        var axesPerField = new List<List<LayoutAxis>>(candidates.Count);
+        var detectedFields = new List<DetectedField>(candidates.Count);
         foreach (var candidate in candidates)
         {
-            axesPerField.Add(axisBuilder.GetAxes(candidate));
+            var detected = new DetectedField(candidate);
+            detected.Axes.AddRange(axisBuilder.GetAxes(candidate));
+            detectedFields.Add(detected);
         }
 
-        InheritHorizontalContext(candidates, axesPerField, axisBuilder);
-        axisBuilder.AttachSections(candidates, axesPerField);
+        InheritHorizontalContext(detectedFields, axisBuilder);
+        axisBuilder.AttachSections(detectedFields);
 
         var fields = new List<MeasureFieldInfo>(candidates.Count);
-        var fieldAxes = new List<IReadOnlyList<LayoutAxis>>(candidates.Count);
-        for (int i = 0; i < candidates.Count; i++)
+        for (int i = 0; i < detectedFields.Count; i++)
         {
-            fields.Add(CreateField(i + 1, candidates[i].Range, axesPerField[i], sheet));
-            fieldAxes.Add(axesPerField[i]);
+            DetectedField detected = detectedFields[i];
+            detected.Field = CreateField(i + 1, detected.Candidate.Range, detected.Axes, sheet);
+            fields.Add(detected.Field);
         }
 
         return new SheetLayoutInfo
         {
             Axes = axisBuilder.Axes,
             MeasureFields = fields,
-            Groups = BuildGroups(fields, fieldAxes, sheet),
+            Groups = BuildGroups(detectedFields, sheet),
         };
     }
 
@@ -222,9 +221,13 @@ internal static class SheetLayoutInference
     {
         int lastRow = firstRow;
         double? firstDelta = null;
+        if (!sheet.TryGetCell(lastRow, col, out var current))
+        {
+            return lastRow;
+        }
+
         while (sheet.TryGetCell(lastRow + 1, col, out var next) && SheetFacts.IsMeasureCell(next))
         {
-            sheet.TryGetCell(lastRow, col, out var current);
             double delta = next.NumericValue - current.NumericValue;
             if (delta == 0 || (firstDelta is { } reference && !IsUniformStep(delta, reference)))
             {
@@ -232,6 +235,7 @@ internal static class SheetLayoutInference
             }
 
             firstDelta ??= delta;
+            current = next;
             lastRow++;
         }
 
@@ -345,6 +349,7 @@ internal static class SheetLayoutInference
         {
             var orderedGroup = group.OrderBy(static candidate => candidate.Range.TopLeft.Column).ToList();
             int groupStartRow = orderedGroup.Min(static candidate => candidate.Range.TopLeft.Row);
+            // The leftmost sibling owns the table length; right-side blocks are aligned to it.
             int groupEndRow = orderedGroup[0].Range.BottomRight.Row;
             foreach (var candidate in orderedGroup)
             {
@@ -459,6 +464,7 @@ internal static class SheetLayoutInference
             if (numericCount > 0)
             {
                 int width = endCol - startCol + 1;
+                // After a blank gap, a thin numeric straggler is treated as a footnote, not body.
                 if (emptyRows > 0 && width >= 4 && numericCount < Math.Max(2, width / 4))
                 {
                     break;
@@ -491,17 +497,18 @@ internal static class SheetLayoutInference
     // spanning most of a year header's columns (e.g. per-year assumption rows far below the year
     // row) inherits it as Context, and a fragment abutting such a block's left edge inherits its
     // host's horizontals. Context-role copies keep the tables in separate groups.
-    private static void InheritHorizontalContext(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField, AxisBuilder axisBuilder)
+    private static void InheritHorizontalContext(List<DetectedField> fields, AxisBuilder axisBuilder)
     {
-        for (int i = 0; i < candidates.Count; i++)
+        IReadOnlyList<LayoutAxis> axes = axisBuilder.Axes;
+        foreach (var field in fields)
         {
-            if (axesPerField[i].Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
+            if (field.Axes.Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
             {
                 continue;
             }
 
-            ExcelRange range = candidates[i].Range;
-            LayoutAxis? inherited = axisBuilder.Axes
+            ExcelRange range = field.Candidate.Range;
+            LayoutAxis? inherited = axes
                 .Where(axis => axis.Orientation == LayoutAxisOrientation.Horizontal &&
                     axis.Role == LayoutAxisRole.Primary &&
                     axis.Range.TopLeft.Row < range.TopLeft.Row &&
@@ -511,27 +518,27 @@ internal static class SheetLayoutInference
                 .MaxBy(static axis => axis.Range.TopLeft.Row);
             if (inherited is not null)
             {
-                axesPerField[i].Add(axisBuilder.CreateContextCopy(inherited));
+                field.Axes.Add(axisBuilder.CreateContextCopy(inherited));
             }
         }
 
-        for (int i = 0; i < candidates.Count; i++)
+        for (int i = 0; i < fields.Count; i++)
         {
-            if (axesPerField[i].Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
+            if (fields[i].Axes.Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
             {
                 continue;
             }
 
-            InheritFromHost(candidates, axesPerField, axisBuilder, i);
+            InheritFromHost(fields, axisBuilder, i);
         }
     }
 
-    private static void InheritFromHost(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField, AxisBuilder axisBuilder, int fragmentIndex)
+    private static void InheritFromHost(List<DetectedField> fields, AxisBuilder axisBuilder, int fragmentIndex)
     {
-        ExcelRange fragment = candidates[fragmentIndex].Range;
-        for (int host = 0; host < candidates.Count; host++)
+        ExcelRange fragment = fields[fragmentIndex].Candidate.Range;
+        for (int host = 0; host < fields.Count; host++)
         {
-            ExcelRange hostRange = candidates[host].Range;
+            ExcelRange hostRange = fields[host].Candidate.Range;
             if (host == fragmentIndex ||
                 fragment.BottomRight.Column != hostRange.TopLeft.Column - 1 ||
                 fragment.TopLeft.Row < hostRange.TopLeft.Row ||
@@ -540,13 +547,13 @@ internal static class SheetLayoutInference
                 continue;
             }
 
-            foreach (var axis in axesPerField[host])
+            foreach (var axis in fields[host].Axes)
             {
                 if (axis.Orientation == LayoutAxisOrientation.Horizontal &&
                     axis.Range.TopLeft.Column <= fragment.TopLeft.Column &&
                     axis.Range.BottomRight.Column >= fragment.BottomRight.Column)
                 {
-                    axesPerField[fragmentIndex].Add(axisBuilder.CreateContextCopy(axis));
+                    fields[fragmentIndex].Axes.Add(axisBuilder.CreateContextCopy(axis));
                     return;
                 }
             }
@@ -582,7 +589,8 @@ internal static class SheetLayoutInference
                 FieldCandidate other = ordered[j];
                 if (current.Range.TopLeft.Row == other.Range.TopLeft.Row &&
                     current.Range.BottomRight.Row == other.Range.BottomRight.Row &&
-                    GapIsBridgeable(sheet, current.Range, other.Range))
+                    GapIsBridgeable(sheet, current.Range, other.Range) &&
+                    !HasDifferentSpanFieldBetween(ordered, current.Range, other.Range))
                 {
                     current = current with
                     {
@@ -601,6 +609,35 @@ internal static class SheetLayoutInference
         }
 
         return ordered;
+    }
+
+    private static bool HasDifferentSpanFieldBetween(List<FieldCandidate> fields, ExcelRange left, ExcelRange right)
+    {
+        int gapStartCol = left.BottomRight.Column + 1;
+        int gapEndCol = right.TopLeft.Column - 1;
+        if (gapStartCol > gapEndCol)
+        {
+            return false;
+        }
+
+        foreach (var field in fields)
+        {
+            ExcelRange range = field.Range;
+            if (range == left || range == right)
+            {
+                continue;
+            }
+
+            bool columnsInGap = range.TopLeft.Column <= gapEndCol && range.BottomRight.Column >= gapStartCol;
+            bool rowsOverlap = range.TopLeft.Row <= left.BottomRight.Row && range.BottomRight.Row >= left.TopLeft.Row;
+            bool sameRows = range.TopLeft.Row == left.TopLeft.Row && range.BottomRight.Row == left.BottomRight.Row;
+            if (columnsInGap && rowsOverlap && !sameRows)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Two co-extensive fields belong to one table when the columns between them all carry data
@@ -744,14 +781,14 @@ internal static class SheetLayoutInference
         };
     }
 
-    private static List<LayoutGroupInfo> BuildGroups(List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes, SheetFacts sheet)
+    private static List<LayoutGroupInfo> BuildGroups(List<DetectedField> fields, SheetFacts sheet)
     {
-        List<List<int>> clusters = ClusterFieldsBySharedAxis(fields.Count, fieldAxes);
+        List<List<int>> clusters = ClusterFieldsBySharedAxis(fields);
 
         var groups = new List<LayoutGroupInfo>(clusters.Count);
         for (int g = 0; g < clusters.Count; g++)
         {
-            groups.Add(CreateGroup(g + 1, clusters[g], fields, fieldAxes, sheet));
+            groups.Add(CreateGroup(g + 1, clusters[g], fields, sheet));
         }
 
         return groups;
@@ -783,8 +820,9 @@ internal static class SheetLayoutInference
 
     // Fields that share at least one axis id belong to one group; union-find over field indices
     // finds those clusters transitively (field A sharing with B, and B with C, joins A and C too).
-    private static List<List<int>> ClusterFieldsBySharedAxis(int fieldCount, List<IReadOnlyList<LayoutAxis>> fieldAxes)
+    private static List<List<int>> ClusterFieldsBySharedAxis(List<DetectedField> fields)
     {
+        int fieldCount = fields.Count;
         int[] parent = [.. Enumerable.Range(0, fieldCount)];
 
         int Find(int x)
@@ -801,7 +839,7 @@ internal static class SheetLayoutInference
         var axisFirstField = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < fieldCount; i++)
         {
-            foreach (var axis in fieldAxes[i])
+            foreach (var axis in fields[i].Axes)
             {
                 if (axisFirstField.TryGetValue(axis.Id, out int firstIndex))
                 {
@@ -837,16 +875,17 @@ internal static class SheetLayoutInference
         return clusterOrder;
     }
 
-    private static LayoutGroupInfo CreateGroup(int id, List<int> members, List<MeasureFieldInfo> fields, List<IReadOnlyList<LayoutAxis>> fieldAxes, SheetFacts sheet)
+    private static LayoutGroupInfo CreateGroup(int id, List<int> members, List<DetectedField> fields, SheetFacts sheet)
     {
-        ExcelRange range = fields[members[0]].Range;
+        ExcelRange range = fields[members[0]].Field.Range;
         var axisIds = new List<string>();
         var seenAxisIds = new HashSet<string>(StringComparer.Ordinal);
         var measureFieldIds = new List<string>(members.Count);
         foreach (int index in members)
         {
-            range = Union(range, fields[index].Range);
-            foreach (var axis in fieldAxes[index])
+            DetectedField field = fields[index];
+            range = Union(range, field.Field.Range);
+            foreach (var axis in field.Axes)
             {
                 range = Union(range, axis.Range);
                 if (seenAxisIds.Add(axis.Id))
@@ -855,7 +894,7 @@ internal static class SheetLayoutInference
                 }
             }
 
-            measureFieldIds.Add(fields[index].Id);
+            measureFieldIds.Add(field.Field.Id);
         }
 
         return new LayoutGroupInfo
@@ -906,8 +945,17 @@ internal static class SheetLayoutInference
             new ExcelAddress(Math.Min(left.TopLeft.Column, right.TopLeft.Column), Math.Min(left.TopLeft.Row, right.TopLeft.Row)),
             new ExcelAddress(Math.Max(left.BottomRight.Column, right.BottomRight.Column), Math.Max(left.BottomRight.Row, right.BottomRight.Row)));
 
+    // HeaderRow == 0 marks header-less vector fields; HeaderStartCol/HeaderEndCol are the
+    // horizontal header span for dense fields, matrix coordinate span for matrices, or own column for vectors.
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct FieldCandidate(ExcelRange Range, int HeaderRow, int HeaderStartCol, int HeaderEndCol);
+
+    private sealed class DetectedField(FieldCandidate candidate)
+    {
+        public FieldCandidate Candidate { get; } = candidate;
+        public List<LayoutAxis> Axes { get; } = [];
+        public MeasureFieldInfo Field { get; set; } = null!;
+    }
 
     private sealed class AxisBuilder(SheetFacts sheet, List<ExcelRange> fieldRanges)
     {
@@ -980,7 +1028,8 @@ internal static class SheetLayoutInference
                     continue;
                 }
 
-                if (score > bestScore || (score == bestScore && col < bestCol))
+                // The scan moves right-to-left; ties deliberately keep walking to the leftmost label column.
+                if (score >= bestScore)
                 {
                     bestCol = col;
                     bestScore = score;
@@ -1019,19 +1068,19 @@ internal static class SheetLayoutInference
         // A section header is an axis-column text row with no measure data across the attached
         // fields' columns — exactly the rows the field detection skipped over. The scan starts
         // two rows above the axis so a header directly above the first labeled row still counts.
-        public void AttachSections(List<FieldCandidate> candidates, List<List<LayoutAxis>> axesPerField)
+        public void AttachSections(List<DetectedField> fields)
         {
             var spans = new Dictionary<string, (int MinCol, int MaxCol)>(StringComparer.Ordinal);
-            for (int i = 0; i < candidates.Count; i++)
+            foreach (var field in fields)
             {
-                foreach (var axis in axesPerField[i])
+                foreach (var axis in field.Axes)
                 {
                     if (axis.Orientation != LayoutAxisOrientation.Vertical || axis.Role != LayoutAxisRole.Primary)
                     {
                         continue;
                     }
 
-                    ExcelRange range = candidates[i].Range;
+                    ExcelRange range = field.Candidate.Range;
                     spans[axis.Id] = spans.TryGetValue(axis.Id, out (int MinCol, int MaxCol) span)
                         ? (Math.Min(span.MinCol, range.TopLeft.Column), Math.Max(span.MaxCol, range.BottomRight.Column))
                         : (range.TopLeft.Column, range.BottomRight.Column);

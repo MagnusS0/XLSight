@@ -318,6 +318,135 @@ public sealed class LayoutInferenceSyntheticTests
         </worksheet>
         """;
 
+    // The right-hand metric block runs two rows longer than the main table. Dense siblings use
+    // the leftmost table as the row-span anchor, so the extra right-side rows remain outside it.
+    private const string SiblingRowsLeftAnchorSstXml = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
+          <si><t>Revenue</t></si>
+          <si><t>Costs</t></si>
+          <si><t>EBITDA</t></si>
+          <si><t>Other income</t></si>
+          <si><t>Other costs</t></si>
+          <si><t>CAGR</t></si>
+          <si><t>Avg</t></si>
+          <si><t>Metric</t></si>
+        </sst>
+        """;
+
+    private const string SiblingRowsLeftAnchorSheetXml = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="B1"><v>2023</v></c>
+              <c r="C1"><v>2024</v></c>
+              <c r="E1" t="s"><v>5</v></c>
+              <c r="F1" t="s"><v>6</v></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="s"><v>0</v></c>
+              <c r="B2"><v>100</v></c>
+              <c r="C2"><v>110</v></c>
+              <c r="E2"><v>0.1</v></c>
+              <c r="F2"><v>105</v></c>
+            </row>
+            <row r="3">
+              <c r="A3" t="s"><v>1</v></c>
+              <c r="B3"><v>40</v></c>
+              <c r="C3"><v>44</v></c>
+              <c r="E3"><v>0.1</v></c>
+              <c r="F3"><v>42</v></c>
+            </row>
+            <row r="4">
+              <c r="A4" t="s"><v>2</v></c>
+              <c r="B4"><v>60</v></c>
+              <c r="C4"><v>66</v></c>
+              <c r="E4"><v>0.1</v></c>
+              <c r="F4"><v>63</v></c>
+            </row>
+            <row r="5">
+              <c r="A5" t="s"><v>3</v></c>
+              <c r="E5"><v>5</v></c>
+              <c r="F5"><v>6</v></c>
+            </row>
+            <row r="6">
+              <c r="A6" t="s"><v>4</v></c>
+              <c r="E6"><v>7</v></c>
+              <c r="F6"><v>8</v></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """;
+
+    // Two co-extensive panels sit on either side of a shorter table in the gap. The side panels
+    // must not merge across that different-span table, because that would create overlapping fields.
+    private const string InterveningTableSstXml = """
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="9">
+          <si><t>Revenue</t></si>
+          <si><t>Costs</t></si>
+          <si><t>EBITDA</t></si>
+          <si><t>Tax</t></si>
+          <si><t>Cash</t></si>
+          <si><t>Current</t></si>
+          <si><t>Prior</t></si>
+          <si><t>Short A</t></si>
+          <si><t>Short B</t></si>
+        </sst>
+        """;
+
+    private const string InterveningTableSheetXml = """
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="B1"><v>2023</v></c>
+              <c r="C1"><v>2024</v></c>
+              <c r="F1" t="s"><v>5</v></c>
+              <c r="G1" t="s"><v>6</v></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="s"><v>0</v></c>
+              <c r="B2"><v>100</v></c>
+              <c r="C2"><v>110</v></c>
+              <c r="F2"><v>10</v></c>
+              <c r="G2"><v>11</v></c>
+            </row>
+            <row r="3">
+              <c r="A3" t="s"><v>1</v></c>
+              <c r="B3"><v>40</v></c>
+              <c r="C3"><v>44</v></c>
+              <c r="D3" t="s"><v>7</v></c>
+              <c r="E3" t="s"><v>8</v></c>
+              <c r="F3"><v>20</v></c>
+              <c r="G3"><v>22</v></c>
+            </row>
+            <row r="4">
+              <c r="A4" t="s"><v>2</v></c>
+              <c r="B4"><v>60</v></c>
+              <c r="C4"><v>66</v></c>
+              <c r="D4"><v>1</v></c>
+              <c r="E4"><v>2</v></c>
+              <c r="F4"><v>30</v></c>
+              <c r="G4"><v>33</v></c>
+            </row>
+            <row r="5">
+              <c r="A5" t="s"><v>3</v></c>
+              <c r="B5"><v>25</v></c>
+              <c r="C5"><v>28</v></c>
+              <c r="D5"><v>3</v></c>
+              <c r="E5"><v>4</v></c>
+              <c r="F5"><v>40</v></c>
+              <c r="G5"><v>44</v></c>
+            </row>
+            <row r="6">
+              <c r="A6" t="s"><v>4</v></c>
+              <c r="B6"><v>35</v></c>
+              <c r="C6"><v>38</v></c>
+              <c r="F6"><v>50</v></c>
+              <c r="G6"><v>55</v></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """;
+
     [Fact]
     public void StackedSections_SplitAtReprintedHeaders_WithGroupTitles()
     {
@@ -379,9 +508,30 @@ public sealed class LayoutInferenceSyntheticTests
 
         LayoutAxis labelAxis = AssertAxis(layout, "A3:A9", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
         Assert.Contains(labelAxis.Sections, static section =>
-            section.Title == "Funding" && section.Range == ExcelRange.Parse("A2:A5"));
+            string.Equals(section.Title, "Funding", StringComparison.Ordinal) && section.Range == ExcelRange.Parse("A2:A5"));
         Assert.Contains(labelAxis.Sections, static section =>
-            section.Title == "Loans" && section.Range == ExcelRange.Parse("A6:A9"));
+            string.Equals(section.Title, "Loans", StringComparison.Ordinal) && section.Range == ExcelRange.Parse("A6:A9"));
+    }
+
+    [Fact]
+    public void SiblingRows_UseLeftmostFieldAsRowSpanAnchor()
+    {
+        SheetLayoutInfo layout = Infer(SiblingRowsLeftAnchorSheetXml, SiblingRowsLeftAnchorSstXml);
+
+        AssertField(layout, "B2:C4", 2);
+        AssertField(layout, "E2:F4", 2);
+        Assert.DoesNotContain(layout.MeasureFields, static field => field.Range == ExcelRange.Parse("E2:F6"));
+    }
+
+    [Fact]
+    public void MergeColumnAdjacentFields_DoesNotMergeAcrossDifferentSpanTable()
+    {
+        SheetLayoutInfo layout = Infer(InterveningTableSheetXml, InterveningTableSstXml);
+
+        AssertFieldRange(layout, "B2:C6");
+        AssertFieldRange(layout, "D4:E5");
+        AssertFieldRange(layout, "F2:G6");
+        AssertNoOverlappingFields(layout);
     }
 
     private static SheetLayoutInfo Infer(string sheetXml, string sstXml)
@@ -393,10 +543,16 @@ public sealed class LayoutInferenceSyntheticTests
 
     private static MeasureFieldInfo AssertField(SheetLayoutInfo layout, string range, int rank)
     {
+        MeasureFieldInfo field = AssertFieldRange(layout, range);
+        Assert.Equal(rank, field.Rank);
+        return field;
+    }
+
+    private static MeasureFieldInfo AssertFieldRange(SheetLayoutInfo layout, string range)
+    {
         var expectedRange = ExcelRange.Parse(range);
         MeasureFieldInfo? field = layout.MeasureFields.FirstOrDefault(field => field.Range == expectedRange);
         Assert.NotNull(field);
-        Assert.Equal(rank, field.Rank);
         return field;
     }
 
@@ -414,4 +570,21 @@ public sealed class LayoutInferenceSyntheticTests
         Assert.NotNull(axis);
         return axis;
     }
+
+    private static void AssertNoOverlappingFields(SheetLayoutInfo layout)
+    {
+        for (int i = 0; i < layout.MeasureFields.Count; i++)
+        {
+            for (int j = i + 1; j < layout.MeasureFields.Count; j++)
+            {
+                Assert.False(
+                    Overlaps(layout.MeasureFields[i].Range, layout.MeasureFields[j].Range),
+                    $"{layout.MeasureFields[i].Range} overlaps {layout.MeasureFields[j].Range}");
+            }
+        }
+    }
+
+    private static bool Overlaps(ExcelRange left, ExcelRange right) =>
+        Math.Min(left.BottomRight.Column, right.BottomRight.Column) >= Math.Max(left.TopLeft.Column, right.TopLeft.Column) &&
+        Math.Min(left.BottomRight.Row, right.BottomRight.Row) >= Math.Max(left.TopLeft.Row, right.TopLeft.Row);
 }
