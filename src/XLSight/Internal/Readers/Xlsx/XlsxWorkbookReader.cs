@@ -33,7 +33,8 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
 
         // Do NOT use 'using' — ownership is transferred to the lazy SharedStringTable,
         // which holds the stream open for on-demand pumping and disposes it when done.
-        var stream = entry.OpenBuffered();
+        // Unbuffered: the parser reads through its own pooled ScanBuffer window.
+        var stream = entry.Open();
         return SharedStringsParser.Parse(stream);
     }
 
@@ -99,7 +100,9 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
     /// </summary>
     private Stream OpenSheetStream(string sheetPath)
     {
-        var freshStream = Package.TryOpenFreshEntry(sheetPath);
+        // Every consumer wraps the stream in a ScanBuffer with its own pooled 64 KB window,
+        // so an intermediate BufferedStream would only add a heap buffer and an extra copy.
+        var freshStream = Package.TryOpenFreshEntryUnbuffered(sheetPath);
         if (freshStream is not null)
         {
             return freshStream;
@@ -107,7 +110,7 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
 
         var entry = Package.GetEntry(sheetPath)
             ?? throw new MalformedWorkbookException($"Worksheet entry '{sheetPath}' was not found in the package.");
-        return entry.OpenBuffered();
+        return entry.Open();
     }
 
     protected override RangeResult ReadRangeCore(string sheetName, ExcelRange range, ReadMode mode)
