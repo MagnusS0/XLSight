@@ -2,14 +2,17 @@ namespace XLSight.Internal.Sinks;
 
 /// <summary>
 /// Chunked append-only store for layout cell facts with the CSR row index and numeric prefix
-/// counts built at append time. Chunks stay under the LOH threshold and growth never copies,
-/// so peak memory stays proportional to content even on million-cell sheets.
+/// counts built at append time. Chunks stay under the LOH threshold; only the first chunk ever
+/// copies, doubling from <see cref="FirstChunkSize"/> up to <see cref="ChunkSize"/> so small
+/// sheets don't pay for a full-size chunk, while chunks after it are allocated at full size
+/// as today. Peak memory stays proportional to content even on million-cell sheets.
 /// </summary>
 internal sealed class LayoutCellStore
 {
     private const int ChunkShift = 11;
     private const int ChunkSize = 1 << ChunkShift;
     private const int ChunkMask = ChunkSize - 1;
+    private const int FirstChunkSize = 64;
 
     private readonly List<LayoutCellFact[]> _factChunks = [];
     private readonly List<int[]> _numericBeforeChunks = [];
@@ -43,7 +46,11 @@ internal sealed class LayoutCellStore
     public void Add(in LayoutCellFact fact)
     {
         int chunkIndex = Count >> ChunkShift;
-        if (chunkIndex == _factChunks.Count)
+        if (chunkIndex == 0)
+        {
+            GrowFirstChunkIfNeeded();
+        }
+        else if (chunkIndex == _factChunks.Count)
         {
             _factChunks.Add(new LayoutCellFact[ChunkSize]);
             _numericBeforeChunks.Add(new int[ChunkSize]);
@@ -78,6 +85,34 @@ internal sealed class LayoutCellStore
         MinCol = Math.Min(MinCol, fact.Column);
         MaxCol = Math.Max(MaxCol, fact.Column);
         Count++;
+    }
+
+    // Only called while chunkIndex == 0, so Count == the write offset into chunk 0. Doubling from
+    // FirstChunkSize up to ChunkSize keeps every step a power of two, landing on exactly ChunkSize
+    // at the point Count would otherwise roll into chunk 1 — after that, chunk 0 is indistinguishable
+    // in size from later chunks and this method is never reached again.
+    private void GrowFirstChunkIfNeeded()
+    {
+        if (_factChunks.Count == 0)
+        {
+            _factChunks.Add(new LayoutCellFact[FirstChunkSize]);
+            _numericBeforeChunks.Add(new int[FirstChunkSize]);
+            return;
+        }
+
+        if (Count < _factChunks[0].Length)
+        {
+            return;
+        }
+
+        int newSize = Math.Min(_factChunks[0].Length * 2, ChunkSize);
+        var facts = new LayoutCellFact[newSize];
+        Array.Copy(_factChunks[0], facts, _factChunks[0].Length);
+        _factChunks[0] = facts;
+
+        var numericBefore = new int[newSize];
+        Array.Copy(_numericBeforeChunks[0], numericBefore, _numericBeforeChunks[0].Length);
+        _numericBeforeChunks[0] = numericBefore;
     }
 
     /// <summary>Rare fallback for producers that violate scan order: flat copy, sort, re-append.</summary>

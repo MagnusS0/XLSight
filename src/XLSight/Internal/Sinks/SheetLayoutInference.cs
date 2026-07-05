@@ -696,18 +696,36 @@ internal static class SheetLayoutInference
     }
 
     // One row-major pass with per-column run state: measure cells in a column chain into one
-    // vector while at most one non-measure row separates them.
-    private static IEnumerable<FieldCandidate> FindVectorFields(SheetFacts sheet, IReadOnlyList<ExcelRange> occupied)
+    // vector while at most one non-measure row separates them. `occupied` is fixed for the
+    // whole pass, so each row's covering column intervals are computed once as the row starts
+    // and then swept with a cursor, since columns strictly ascend within a row.
+    private static IEnumerable<FieldCandidate> FindVectorFields(SheetFacts sheet, List<ExcelRange> occupied)
     {
         var candidates = new List<FieldCandidate>();
         int width = sheet.MaxCol - sheet.MinCol + 1;
         int[] startRows = new int[width];
         int[] lastRows = new int[width];
+        var rowIntervals = new List<(int Start, int End)>();
+        int currentRow = int.MinValue;
+        int intervalCursor = 0;
 
         for (int i = 0; i < sheet.CellCount; i++)
         {
             LayoutCellFact cell = sheet.CellAt(i);
-            if (!SheetFacts.IsMeasureCell(cell) || IsCellInRanges(cell.Row, cell.Column, occupied))
+            if (cell.Row != currentRow)
+            {
+                currentRow = cell.Row;
+                BuildRowIntervals(occupied, currentRow, rowIntervals);
+                intervalCursor = 0;
+            }
+
+            while (intervalCursor < rowIntervals.Count && rowIntervals[intervalCursor].End < cell.Column)
+            {
+                intervalCursor++;
+            }
+
+            bool inOccupiedRange = intervalCursor < rowIntervals.Count && rowIntervals[intervalCursor].Start <= cell.Column;
+            if (!SheetFacts.IsMeasureCell(cell) || inOccupiedRange)
             {
                 continue;
             }
@@ -734,9 +752,48 @@ internal static class SheetLayoutInference
             .ThenBy(static candidate => candidate.Range.TopLeft.Column);
     }
 
+    // Column intervals from ranges in `occupied` that cover `row`, merged and sorted ascending
+    // so the caller's cursor never needs to revisit an interval once it has moved past it.
+    private static void BuildRowIntervals(List<ExcelRange> occupied, int row, List<(int Start, int End)> buffer)
+    {
+        buffer.Clear();
+        foreach (var range in occupied)
+        {
+            if (row >= range.TopLeft.Row && row <= range.BottomRight.Row)
+            {
+                buffer.Add((range.TopLeft.Column, range.BottomRight.Column));
+            }
+        }
+
+        if (buffer.Count <= 1)
+        {
+            return;
+        }
+
+        buffer.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+        int write = 0;
+        for (int read = 1; read < buffer.Count; read++)
+        {
+            if (buffer[read].Start <= buffer[write].End + 1)
+            {
+                if (buffer[read].End > buffer[write].End)
+                {
+                    buffer[write] = (buffer[write].Start, buffer[read].End);
+                }
+            }
+            else
+            {
+                write++;
+                buffer[write] = buffer[read];
+            }
+        }
+
+        buffer.RemoveRange(write + 1, buffer.Count - write - 1);
+    }
+
     private static void AddVectorCandidate(
         SheetFacts sheet,
-        IReadOnlyList<ExcelRange> occupied,
+        List<ExcelRange> occupied,
         List<FieldCandidate> candidates,
         int col,
         int startRow,
@@ -907,7 +964,7 @@ internal static class SheetLayoutInference
         };
     }
 
-    private static bool OverlapsAny(ExcelRange range, IReadOnlyList<ExcelRange> ranges)
+    private static bool OverlapsAny(ExcelRange range, List<ExcelRange> ranges)
     {
         foreach (var existing in ranges)
         {
@@ -925,20 +982,6 @@ internal static class SheetLayoutInference
         left.BottomRight.Row >= right.TopLeft.Row &&
         left.TopLeft.Column <= right.BottomRight.Column &&
         left.BottomRight.Column >= right.TopLeft.Column;
-
-    private static bool IsCellInRanges(int row, int col, IReadOnlyList<ExcelRange> ranges)
-    {
-        var address = new ExcelAddress(col, row);
-        foreach (var range in ranges)
-        {
-            if (range.Contains(address))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     private static ExcelRange Union(ExcelRange left, ExcelRange right) =>
         new(
