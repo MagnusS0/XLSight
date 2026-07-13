@@ -72,7 +72,7 @@ internal static class SheetLayoutInference
 
         return new SheetLayoutInfo
         {
-            Axes = axisBuilder.Axes,
+            Axes = axisBuilder.SnapshotAxes(),
             MeasureFields = fields,
             Groups = BuildGroups(detectedFields, sheet),
         };
@@ -183,6 +183,25 @@ internal static class SheetLayoutInference
         int startCol = sheet.CellAt(runStart).Column;
         int endCol = sheet.CellAt(runEnd - 1).Column;
         int coordinateCol = startCol - 1;
+
+        // A genuine sensitivity matrix has numeric coordinates instead of a text header; if a
+        // text header band already spans this run one row up, it's an ordinary table's data row.
+        if (headerRow - 1 >= 1 && sheet.IsHeaderRowForRun(headerRow - 1, startCol, endCol))
+        {
+            return null;
+        }
+
+        // A standalone matrix always sits under a title or blank separator row; a uniform-stepped
+        // forecast row embedded in a larger table (e.g. CAGR-driven model output that happens to
+        // step near-uniformly) sits flush under that table's own data instead. If the row above
+        // already carries real measure cells across the run's full span — including the
+        // corner/coordinate column — this isn't a fresh matrix start, so reject it.
+        // ponytail: flush-stacked matrices (no title/blank row between two tables) are a known
+        // ceiling this heuristic can't resolve; it only catches the separator-row signal's absence.
+        if (headerRow - 1 >= 1 && sheet.ScanRowContent(headerRow - 1, coordinateCol, endCol).HasMeasure)
+        {
+            return null;
+        }
 
         // The row coordinate column starts within a few rows below the header run (a text
         // label like "Return Rate" may sit between) and must itself be monotonic-uniform.
@@ -431,6 +450,13 @@ internal static class SheetLayoutInference
         int maxProbeRow = Math.Min(sheet.MaxRow, headerRow + 6);
         for (int row = headerRow + 1; row <= maxProbeRow; row++)
         {
+            // A row that is itself a header band for this run (e.g. a year row reprinted under
+            // a band header) belongs to the nearer header's own table, not this one as data.
+            if (sheet.IsFullHeaderBandForRun(row, startCol, endCol))
+            {
+                return 0;
+            }
+
             if (sheet.CountNumericCells(row, row, startCol, endCol) > 0)
             {
                 return row;
@@ -499,7 +525,7 @@ internal static class SheetLayoutInference
     // host's horizontals. Context-role copies keep the tables in separate groups.
     private static void InheritHorizontalContext(List<DetectedField> fields, AxisBuilder axisBuilder)
     {
-        IReadOnlyList<LayoutAxis> axes = axisBuilder.Axes;
+        IReadOnlyList<LayoutAxis> axes = axisBuilder.SnapshotAxes();
         foreach (var field in fields)
         {
             if (field.Axes.Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
@@ -1005,7 +1031,10 @@ internal static class SheetLayoutInference
         private readonly Dictionary<AxisKey, LayoutAxis> _axesByKey = [];
         private int _nextAxisId;
 
-        public IReadOnlyList<LayoutAxis> Axes => [.. _axesByKey.Values.OrderBy(static axis => axis.Range.TopLeft.Row).ThenBy(static axis => axis.Range.TopLeft.Column)];
+        // A method, not a property: axes are still being added/mutated between call sites, so
+        // each call allocates and sorts a fresh snapshot rather than caching a stale one.
+        public IReadOnlyList<LayoutAxis> SnapshotAxes() =>
+            [.. _axesByKey.Values.OrderBy(static axis => axis.Range.TopLeft.Row).ThenBy(static axis => axis.Range.TopLeft.Column)];
 
         public List<LayoutAxis> GetAxes(FieldCandidate field)
         {
@@ -1215,7 +1244,16 @@ internal static class SheetLayoutInference
             axis = new LayoutAxis
             {
                 Id = $"axis{++_nextAxisId}",
-                Title = valueKind is LayoutAxisValueKind.Numeric or LayoutAxisValueKind.Date ? FindAxisTitle(range) : null,
+                // A horizontal axis is a block caption's natural home (e.g. "CAGR (%)" merged
+                // above a side-by-side header row) regardless of the header cells' own kind, so
+                // it always probes for a title. A vertical axis only probes when it carries no
+                // self-describing labels of its own (Numeric/Date) — a text label column already
+                // identifies itself through its Samples, and probing above it would instead grab
+                // an unrelated section header as noise.
+                Title = orientation == LayoutAxisOrientation.Horizontal ||
+                    valueKind is LayoutAxisValueKind.Numeric or LayoutAxisValueKind.Date
+                        ? FindAxisTitle(range)
+                        : null,
                 Orientation = orientation,
                 Role = role,
                 ValueKind = valueKind,
@@ -1227,9 +1265,10 @@ internal static class SheetLayoutInference
             return axis;
         }
 
-        // A numeric/date axis carries no self-describing labels, so its name is the nearest text
-        // cell just before its start: up to two cells above, then up to two cells left (covers
-        // "WACC" over a coordinate column and "Inflation Rate" beside a coordinate row).
+        // Finds the nearest text cell just before the axis's start: up to two cells above, then
+        // up to two cells left (covers "WACC" over a coordinate column, "Inflation Rate" beside a
+        // coordinate row, and a merged block caption like "CAGR (%)" sitting above a horizontal
+        // header row that is itself text or mixed-kind).
         private string? FindAxisTitle(ExcelRange range)
         {
             int startCol = range.TopLeft.Column;
@@ -1371,6 +1410,8 @@ internal static class SheetLayoutInference
         public bool IsYearLikeColumn(int startRow, int endRow, int col)
         {
             int yearLike = 0;
+            double? previous = null;
+            double runStart = 0;
             for (int r = FirstRowIndexAtOrAfter(startRow); r < _rowNumbers.Count && _rowNumbers[r] <= endRow; r++)
             {
                 int rowEnd = _store.RowStartAt(r + 1);
@@ -1387,6 +1428,30 @@ internal static class SheetLayoutInference
 
                 if (_store[i].HasNumericValue)
                 {
+                    double value = _store[i].NumericValue;
+
+                    // Real year/date key columns run non-decreasing top-to-bottom, restarting
+                    // at or below the first value of the previous run for each new group (e.g.
+                    // per-name year ranges repeating down the sheet). Data unrelated to a key
+                    // never sorts this way: it neither keeps climbing nor drops back to restart.
+                    if (previous is { } last)
+                    {
+                        if (value < last && value > runStart)
+                        {
+                            return false;
+                        }
+
+                        if (value < last)
+                        {
+                            runStart = value;
+                        }
+                    }
+                    else
+                    {
+                        runStart = value;
+                    }
+
+                    previous = value;
                     yearLike++;
                 }
             }
@@ -1469,6 +1534,22 @@ internal static class SheetLayoutInference
             }
 
             return false;
+        }
+
+        // Stricter than IsHeaderRowForRun's half-width threshold: a reprinted header band (e.g.
+        // a year row repeated under a band header) has no break, so header-like cells must cover
+        // the run's entire width. A genuine first data row (leading label/year columns next to
+        // real measure columns) only ever covers part of the width and must not match here.
+        public bool IsFullHeaderBandForRun(int row, int startCol, int endCol)
+        {
+            int width = endCol - startCol + 1;
+            int covered = 0;
+            foreach ((int start, int end) in GetHeaderRuns(row))
+            {
+                covered += Math.Max(0, Math.Min(end, endCol) - Math.Max(start, startCol) + 1);
+            }
+
+            return covered == width;
         }
 
         public int CountNumericCells(int startRow, int endRow, int startCol, int endCol)
