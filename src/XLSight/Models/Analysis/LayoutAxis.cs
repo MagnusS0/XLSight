@@ -7,8 +7,11 @@ public sealed class LayoutAxis
     public required string Id { get; init; }
 
     /// <summary>Gets the inferred name of this axis (e.g. "WACC" beside a numeric coordinate
-    /// column), or null when none was detected. Only numeric and date axes are named; text
-    /// axes identify themselves through <see cref="Samples"/>.</summary>
+    /// column, or "CAGR (%)" captioning a horizontal header row), or null when none was detected.
+    /// Horizontal axes are always probed for a title regardless of value kind, since a block
+    /// caption may sit above a text or mixed-kind header row. Vertical axes are only named when
+    /// they carry no self-describing labels of their own (Numeric or Date); a vertical text axis
+    /// already identifies itself through <see cref="Samples"/>.</summary>
     public string? Title { get; init; }
 
     /// <summary>Gets whether the axis labels rows or columns.</summary>
