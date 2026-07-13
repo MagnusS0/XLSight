@@ -16,7 +16,7 @@ internal partial struct AnalysisSink
                 string text = value.AsText().Trim();
                 mask |= LayoutKindMask.Text;
                 isHeaderLike = IsHeaderLikeText(text);
-                sampleText = CapSampleText(text.Length <= 64 ? text : text[..64]);
+                sampleText = CapSampleText(text);
                 break;
 
             case CellType.Number:
@@ -66,7 +66,7 @@ internal partial struct AnalysisSink
     // Sample text is diagnostics-only; the budget keeps a high-cardinality text sheet from
     // pinning millions of distinct strings for the fact store's lifetime. Axes discovered
     // past the budget lose text samples but keep range, kind, and coverage.
-    private string? CapSampleText(string sampleText)
+    private string? CapSampleText(string text)
     {
         if (_layoutTextSamplesRemaining == 0)
         {
@@ -74,7 +74,14 @@ internal partial struct AnalysisSink
         }
 
         _layoutTextSamplesRemaining--;
-        return sampleText;
+        if (text.Length <= 64)
+        {
+            return text;
+        }
+
+        // Avoid splitting a surrogate pair (e.g. an emoji) across the truncation boundary.
+        int cutoff = char.IsHighSurrogate(text[63]) ? 63 : 64;
+        return text[..cutoff];
     }
 
     // Deliberately permissive: any short text can label a row or column, so length is the only

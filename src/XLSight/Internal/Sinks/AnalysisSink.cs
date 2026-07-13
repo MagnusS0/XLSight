@@ -199,7 +199,13 @@ internal partial struct AnalysisSink : IByteSheetSink
         bool isStyledCell = styleIdx != 0 || isCellNonEmpty;
 
         if (isStyledCell) { UpdateStyledBounds(_currentRow, column); }
-        if (!isCellNonEmpty) { return true; }
+        if (!isCellNonEmpty)
+        {
+            // A value-less formula cell (e.g. openpyxl-written <f> with no cached <v>) must not
+            // leak its formula flag onto the next non-empty cell.
+            _nextCellIsFormula = false;
+            return true;
+        }
 
         UpdateValueBounds(_currentRow, column);
         _cellCount++;
