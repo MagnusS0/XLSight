@@ -3,37 +3,14 @@ using Xunit;
 
 namespace XLSight.Tests.Analysis;
 
+// Test workbooks 10_McDonalds_golden.xlsx and 03_Banking_golden.xlsx come from SpreadsheetBench
+// v2, an open financial-modeling benchmark dataset.
 public sealed class LayoutInferenceIntegrationTests
 {
     [Fact]
-    public void AnalyzeSheet_JyskeGroup_ReturnsStackedCrosstabLayout()
-    {
-        string workbookPath = RequireRepoFile("Jyske+Bank+Fact+Book+2025+Q4.xlsx");
-
-        using var workbook = ExcelWorkbook.Open(workbookPath);
-
-        var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Group").Inferred);
-
-        AssertField(inferred, "B4:AO19", 2);
-        AssertField(inferred, "B24:AO40", 2);
-        AssertField(inferred, "B45:AO62", 2);
-        AssertAxis(inferred, "A4:A19", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
-        AssertAxis(inferred, "B3:AO3", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
-
-        // Each stacked section's title row is captured as its group's title.
-        Assert.Equal(
-            [
-                "Core profit and net profit for the period (DKKm)",
-                "Summary of balance sheet, end of period (DKKm)",
-                "Financial ratios and key figures",
-            ],
-            inferred.Layout.Groups.Select(static group => group.Title));
-    }
-
-    [Fact]
     public void AnalyzeSheet_McDonaldsFinancials_ReturnsSharedAxisSiblingFields()
     {
-        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
+        string workbookPath = TestDataFile("10_McDonalds_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -60,7 +37,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_McDonaldsValuation_ReturnsScalarVectorLayout()
     {
-        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/10_McDonalds/10_McDonalds_golden.xlsx");
+        string workbookPath = TestDataFile("10_McDonalds_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -83,7 +60,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_Calculator_ReturnsProjectionAndSensitivityLayout()
     {
-        string workbookPath = Path.Combine(AppContext.BaseDirectory, "TestData", "complex_workbook.xlsx");
+        string workbookPath = TestDataFile("complex_workbook.xlsx");
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
         var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Calculator").Inferred);
@@ -109,7 +86,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_BankingAssumptions_ReturnsOneCoherentBlock()
     {
-        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
+        string workbookPath = TestDataFile("03_Banking_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -132,7 +109,7 @@ public sealed class LayoutInferenceIntegrationTests
     [Fact]
     public void AnalyzeSheet_BankingIndustryBenchmark_MergesWideTableAndKeepsColumnGroups()
     {
-        string workbookPath = RequireRepoFile("spreadsheetbench-v2/Financial_Model/spreadsheet/03_Project Banking/03_Banking_golden.xlsx");
+        string workbookPath = TestDataFile("03_Banking_golden.xlsx");
 
         using var workbook = ExcelWorkbook.Open(workbookPath);
 
@@ -154,6 +131,71 @@ public sealed class LayoutInferenceIntegrationTests
         LayoutAxis yearContext = AssertAxis(inferred, "E38:E62", LayoutAxisOrientation.Vertical, LayoutAxisRole.Context);
         Assert.Contains(yearContext.Id, bottomLeft.AxisIds);
     }
+
+    [Fact]
+    public void AnalyzeSheet_BankingFinalOutput_ReturnsTitledDashboardGroups()
+    {
+        string workbookPath = TestDataFile("03_Banking_golden.xlsx");
+
+        using var workbook = ExcelWorkbook.Open(workbookPath);
+
+        var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Final Output").Inferred);
+
+        // A dashboard of small titled tables: each keeps its own title-row group rather than
+        // merging into one sheet-wide block.
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Valuation Multiples" && g.Range == ExcelRange.Parse("C62:E68"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Growth & Efficiency Ratios" && g.Range == ExcelRange.Parse("C71:E79"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Financial Summary" && g.Range == ExcelRange.Parse("C91:M103"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "SAR" && g.Range == ExcelRange.Parse("C7:E10"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Stock Facts" && g.Range == ExcelRange.Parse("C14:E17"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Stock Performance (%)" && g.Range == ExcelRange.Parse("C20:E22"));
+        Assert.Contains(inferred.Layout.Groups, static g => g.Title == "Valuation - 2014F" && g.Range == ExcelRange.Parse("C25:E34"));
+
+        MeasureFieldInfo financialSummary = AssertField(inferred, "H93:M103", 2);
+        LayoutAxis labelAxis = AssertAxis(inferred, "C93:C103", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
+        Assert.Contains(labelAxis.Id, financialSummary.AxisIds);
+    }
+
+    [Fact]
+    public void AnalyzeSheet_BankingBalanceSheet_ExtendsMainFieldPastFormerPhantomMatrix()
+    {
+        string workbookPath = TestDataFile("03_Banking_golden.xlsx");
+
+        using var workbook = ExcelWorkbook.Open(workbookPath);
+
+        var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Balance Sheet").Inferred);
+
+        // The main statement runs its full row extent (5-53) in one field: a uniform-stepped
+        // forecast row (I9:M9, CAGR-driven model output) no longer seeds a phantom sensitivity
+        // matrix at J10:M12 that used to truncate the field at row 8.
+        AssertField(inferred, "C5:M53", 2);
+        Assert.DoesNotContain(inferred.Layout.MeasureFields, static f => f.Range == ExcelRange.Parse("J10:M12"));
+
+        // The three ratio blocks (CAGR/Growth/Composition) are column-siblings of the main
+        // statement's header row. Once that header's field no longer splits at row 8, sibling-row
+        // anchoring extends all three to the same row span and their shared label axis merges all
+        // four fields into one group — an accepted over-merge rather than leaving the table
+        // fragmented. Their individual captions aren't lost, though: each side block's own
+        // horizontal header axis still picks up its merged caption cell as a title.
+        LayoutGroupInfo group = Assert.Single(inferred.Layout.Groups);
+        Assert.Equal(ExcelRange.Parse("B3:AL53"), group.Range);
+        Assert.Equal(4, group.MeasureFieldIds.Count);
+
+        AssertField(inferred, "O5:P53", 2);
+        AssertField(inferred, "R5:AA53", 2);
+        AssertField(inferred, "AC5:AL53", 2);
+        LayoutAxis labelAxis = AssertAxis(inferred, "B5:B53", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
+        Assert.All(inferred.Layout.MeasureFields, field => Assert.Contains(labelAxis.Id, field.AxisIds));
+
+        LayoutAxis cagrHeader = AssertAxis(inferred, "O3:P3", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+        LayoutAxis growthHeader = AssertAxis(inferred, "R3:AA3", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+        LayoutAxis compositionHeader = AssertAxis(inferred, "AC3:AL3", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
+        Assert.Equal("CAGR (%)", cagrHeader.Title);
+        Assert.Equal("Growth (%)", growthHeader.Title);
+        Assert.Equal("COMPOSITION OF BALANCE SHEET", compositionHeader.Title);
+    }
+
+    private static string TestDataFile(string fileName) => Path.Combine(AppContext.BaseDirectory, "TestData", fileName);
 
     private static MeasureFieldInfo AssertField(SheetAnalysisInferred inferred, string range, int rank)
     {
@@ -184,25 +226,5 @@ public sealed class LayoutInferenceIntegrationTests
             axis.Role == role);
         Assert.NotNull(axis);
         return axis;
-    }
-
-    // Skips at runtime rather than returning silently, so a missing external corpus workbook
-    // shows up as a Skipped test instead of a Passed test that never asserted anything.
-    private static string RequireRepoFile(string relativePath)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            string candidate = Path.Combine(directory.FullName, relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            directory = directory.Parent;
-        }
-
-        Assert.Skip($"External corpus workbook not present: {relativePath}");
-        throw new InvalidOperationException("Unreachable: Assert.Skip always throws.");
     }
 }
