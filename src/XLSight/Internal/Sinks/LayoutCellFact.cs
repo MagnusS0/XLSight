@@ -10,4 +10,5 @@ internal readonly record struct LayoutCellFact(
     double NumericValue,
     bool HasNumericValue,
     bool IsHeaderLike,
-    string? Text = null);
+    int SharedStringIndex = -1,
+    string? InlineText = null);
