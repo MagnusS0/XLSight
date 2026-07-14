@@ -40,10 +40,8 @@ internal partial struct AnalysisSink : IByteSheetSink
     private List<RowSpanState> _pendingRowSpans;
     private List<ActiveBlockState> _activeBlocks;
     private List<RegionInfo> _sealedRegions;
-    private const int LayoutTextSampleBudget = 50_000;
 
     private LayoutCellStore _layoutCells;
-    private int _layoutTextSamplesRemaining;
 
     // ── Scan-time metadata (exact counts, populated by sink callbacks) ─────────────
     private ExcelRange? _declaredDimension;
@@ -86,7 +84,6 @@ internal partial struct AnalysisSink : IByteSheetSink
         _activeBlocks = [];
         _sealedRegions = [];
         _layoutCells = new LayoutCellStore();
-        _layoutTextSamplesRemaining = LayoutTextSampleBudget;
     }
 
     public bool NeedsDecodedValue => false;
@@ -236,7 +233,7 @@ internal partial struct AnalysisSink : IByteSheetSink
         if (_level >= AnalysisLevel.Full)
         {
             AddRowCell(column, value, isFormula);
-            AddLayoutCell(column, value, isFormula);
+            AddLayoutCell(column, value, isFormula, rawIndex);
         }
         return true;
     }
@@ -447,7 +444,7 @@ internal partial struct AnalysisSink : IByteSheetSink
             });
         }
 
-        SheetLayoutInfo layout = SheetLayoutInference.Infer(_layoutCells);
+        SheetLayoutInfo layout = SheetLayoutInference.Infer(_layoutCells, _sst);
         return new SheetAnalysisInferred
         {
             Regions = _sealedRegions,

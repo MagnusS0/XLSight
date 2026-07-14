@@ -30,14 +30,14 @@ internal static class LayoutTestWorkbook
         </Relationships>
         """;
 
-    public static MemoryStream Build(string sheetXml, string sstXml)
+    public static MemoryStream Build(string sheetXml, string sstXml, string stylesXml = StylesXmlDefault)
     {
         var ms = new MemoryStream();
         using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
         {
             WriteEntry(archive, "xl/workbook.xml", WorkbookXmlOneSheet);
             WriteEntry(archive, "xl/_rels/workbook.xml.rels", RelsXmlOneSheet);
-            WriteEntry(archive, "xl/styles.xml", StylesXmlDefault);
+            WriteEntry(archive, "xl/styles.xml", stylesXml);
             WriteEntry(archive, "xl/worksheets/sheet1.xml", sheetXml);
             WriteEntry(archive, "xl/sharedStrings.xml", sstXml);
         }
