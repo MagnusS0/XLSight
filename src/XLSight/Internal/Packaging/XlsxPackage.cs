@@ -4,6 +4,7 @@ namespace XLSight.Internal.Packaging;
 
 internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
 {
+    private const int MaxPooledArchives = 4;
     private bool _disposed;
 
     private XlsxPackage(SeekableBacking backing, ZipArchive archive)
@@ -22,6 +23,17 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     // disposes the archive itself, or it lands in the pool before Dispose's drain sees it.
     private readonly Stack<ZipArchive> _archivePool = new();
     private readonly Lock _poolLock = new();
+
+    internal int PooledArchiveCount
+    {
+        get
+        {
+            lock (_poolLock)
+            {
+                return _archivePool.Count;
+            }
+        }
+    }
 
     /// <summary>True when the workbook was opened from a file path and concurrent entry reads are safe.</summary>
     public bool IsFileBacked => _backing.Stream is FileStream;
@@ -140,10 +152,30 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
             return null;
         }
 
-        Stream raw = entry.Open();
-        // addBuffer=false when the caller supplies its own pool buffer (e.g. XlsbRecordIterator),
-        // avoiding a redundant 65 KB heap allocation that would otherwise pressure the GC.
-        return new OwnedEntryStream(addBuffer ? new BufferedStream(raw, 65536) : raw, new PooledArchiveHandle(this, zip));
+        Stream? raw = null;
+        try
+        {
+            raw = entry.Open();
+            // addBuffer=false when the caller supplies its own pool buffer (e.g. XlsbRecordIterator),
+            // avoiding a redundant 65 KB heap allocation that would otherwise pressure the GC.
+            Stream inner = addBuffer ? new BufferedStream(raw, 65536) : raw;
+            var owned = new OwnedEntryStream(inner, new PooledArchiveHandle(this, zip));
+            raw = null;
+            return owned;
+        }
+        catch
+        {
+            try
+            {
+                raw?.Dispose();
+            }
+            finally
+            {
+                ReturnArchive(zip);
+            }
+
+            throw;
+        }
     }
 
     private ZipArchive RentArchive(string path)
@@ -165,15 +197,14 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
     {
         lock (_poolLock)
         {
-            if (!_disposed)
+            if (!_disposed && _archivePool.Count < MaxPooledArchives)
             {
                 _archivePool.Push(archive);
                 return;
             }
         }
 
-        // The package was disposed while this archive was on loan: pooling it would leak the
-        // FileStream past Dispose's drain, which already ran.
+        // The package was disposed while this archive was on loan, or the idle pool is full.
         archive.Dispose();
     }
 
