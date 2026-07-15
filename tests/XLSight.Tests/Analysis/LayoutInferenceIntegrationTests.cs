@@ -107,6 +107,21 @@ public sealed class LayoutInferenceIntegrationTests
     }
 
     [Fact]
+    public void AnalyzeSheet_BankingIntroduction_DoesNotGroupAxislessField()
+    {
+        string workbookPath = TestDataFile("03_Banking_golden.xlsx");
+        using var workbook = ExcelWorkbook.Open(workbookPath);
+
+        var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Introduction").Inferred);
+        MeasureFieldInfo axislessField = AssertField(inferred, "T7:T11", 0);
+
+        Assert.Empty(axislessField.AxisIds);
+        Assert.DoesNotContain(inferred.Layout.Groups, group => group.MeasureFieldIds.Any(
+            id => string.Equals(id, axislessField.Id, StringComparison.Ordinal)));
+        Assert.All(inferred.Layout.Groups, static group => Assert.NotEmpty(group.AxisIds));
+    }
+
+    [Fact]
     public void AnalyzeSheet_BankingIndustryBenchmark_MergesWideTableAndKeepsColumnGroups()
     {
         string workbookPath = TestDataFile("03_Banking_golden.xlsx");

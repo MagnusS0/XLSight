@@ -871,7 +871,21 @@ internal static class SheetLayoutInference
         var groups = new List<LayoutGroupInfo>(clusters.Count);
         for (int g = 0; g < clusters.Count; g++)
         {
-            groups.Add(CreateGroup(g + 1, clusters[g], fields, sheet));
+            List<int> cluster = clusters[g];
+            bool hasAxis = false;
+            foreach (int index in cluster)
+            {
+                if (fields[index].Axes.Count > 0)
+                {
+                    hasAxis = true;
+                    break;
+                }
+            }
+
+            if (hasAxis)
+            {
+                groups.Add(CreateGroup(groups.Count + 1, cluster, fields, sheet));
+            }
         }
 
         return groups;
