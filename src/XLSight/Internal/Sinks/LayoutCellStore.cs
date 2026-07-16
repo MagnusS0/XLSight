@@ -20,18 +20,14 @@ internal sealed class LayoutCellStore
     private readonly List<int> _rowStarts = [];
     private int _numericTotal;
     private int _lastRow;
-    private int _lastColumn;
 
     public int Count { get; private set; }
-
-    /// <summary>Whether cells arrived in scan order (rows ascending, columns strictly ascending within a row).</summary>
-    public bool IsSorted { get; private set; } = true;
 
     public int MinCol { get; private set; } = int.MaxValue;
 
     public int MaxCol { get; private set; } = int.MinValue;
 
-    /// <summary>Distinct row numbers in first-seen order; ascending when <see cref="IsSorted"/>.</summary>
+    /// <summary>Distinct row numbers in ascending scanner order.</summary>
     public List<int> RowNumbers => _rowNumbers;
 
     public LayoutCellFact this[int index] => _factChunks[index >> ChunkShift][index & ChunkMask];
@@ -62,21 +58,11 @@ internal sealed class LayoutCellStore
 
         if (Count == 0 || fact.Row != _lastRow)
         {
-            if (Count > 0 && fact.Row < _lastRow)
-            {
-                IsSorted = false;
-            }
-
             _rowNumbers.Add(fact.Row);
             _rowStarts.Add(Count);
         }
-        else if (fact.Column <= _lastColumn)
-        {
-            IsSorted = false;
-        }
 
         _lastRow = fact.Row;
-        _lastColumn = fact.Column;
         if (fact.HasNumericValue)
         {
             _numericTotal++;
@@ -115,25 +101,4 @@ internal sealed class LayoutCellStore
         _numericBeforeChunks[0] = numericBefore;
     }
 
-    /// <summary>Rare fallback for producers that violate scan order: flat copy, sort, re-append.</summary>
-    public LayoutCellStore Rebuilt()
-    {
-        var facts = new LayoutCellFact[Count];
-        for (int i = 0; i < Count; i++)
-        {
-            facts[i] = this[i];
-        }
-
-        Array.Sort(facts, static (left, right) => left.Row != right.Row
-            ? left.Row.CompareTo(right.Row)
-            : left.Column.CompareTo(right.Column));
-
-        var store = new LayoutCellStore();
-        foreach (var fact in facts)
-        {
-            store.Add(fact);
-        }
-
-        return store;
-    }
 }

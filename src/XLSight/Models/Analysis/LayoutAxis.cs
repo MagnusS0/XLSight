@@ -27,7 +27,7 @@ public sealed class LayoutAxis
     public required ExcelRange Range { get; init; }
 
     /// <summary>Gets the number of measure rows or columns explained by this axis.</summary>
-    public required int Coverage { get; init; }
+    public int Coverage => Orientation == LayoutAxisOrientation.Vertical ? Range.Height : Range.Width;
 
     /// <summary>Gets capped display samples from the axis for diagnostics.</summary>
     public required IReadOnlyList<string> Samples { get; init; }
