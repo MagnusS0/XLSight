@@ -1,5 +1,7 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
+using XLSight.Internal.Sinks;
 using XLSight.Analysis;
 using Xunit;
 
@@ -183,6 +185,13 @@ public sealed class WorkbookAnalysisTests
         return ms;
     }
 
+    private sealed class EmptySharedStringSource : ISharedStringSource
+    {
+        public string GetString(int index) => string.Empty;
+
+        public int GetCharCount(int index) => 0;
+    }
+
     // --- Tests ---
 
     [Fact]
@@ -355,6 +364,21 @@ public sealed class WorkbookAnalysisTests
         Assert.Null(dependency.TargetWorkbook);
         Assert.Equal("Sheet2", dependency.TargetSheet);
         Assert.Equal(3, dependency.FormulaCount);
+    }
+
+    [Fact]
+    public void AnalysisSink_ValueLessFormula_ClearsPendingFormulaState()
+    {
+        var sink = new AnalysisSink(new EmptySharedStringSource(), "Data", AnalysisLevel.Observed);
+        sink.OnRowStart(1);
+        sink.OnFormula(1, isArray: false);
+
+        sink.OnCell(1, CellDataKind.Number, styleIdx: 0, ExcelCellValue.Empty, rawIndex: -1);
+
+        FieldInfo pendingFormula = typeof(AnalysisSink).GetField(
+            "_nextCellIsFormula",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.False(Assert.IsType<bool>(pendingFormula.GetValue(sink)));
     }
 
     [Fact]
