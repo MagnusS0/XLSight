@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
 using XLSight;
 
 /// <summary>
@@ -7,7 +8,7 @@ using XLSight;
 /// full-sheet scan throughput.
 /// </summary>
 [MemoryDiagnoser]
-[SimpleJob]
+[ShortRunJob]
 public class RepeatedReadBenchmarks
 {
     private ExcelWorkbook _medium = null!;
