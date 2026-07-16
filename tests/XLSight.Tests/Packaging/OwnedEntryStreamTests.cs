@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
 using XLSight.Internal.Packaging;
@@ -273,6 +274,32 @@ public sealed class OwnedEntryStreamTests : IDisposable
         Assert.Null(stream);
     }
 
+    [Fact]
+    public void TryOpenFreshEntry_WhenEntryOpenFails_ReturnsArchiveToPool()
+    {
+        SetUnsupportedCompressionMethod(_tempFile);
+        using var package = OpenFileBacked();
+
+        Assert.Throws<InvalidDataException>(() => package.TryOpenFreshEntry("xl/workbook.xml"));
+
+        Assert.Equal(1, package.PooledArchiveCount);
+    }
+
+    [Fact]
+    public void TryOpenFreshEntry_AfterParallelSpike_CapsIdlePool()
+    {
+        using var package = OpenFileBacked();
+        Stream[] streams = [.. Enumerable.Range(0, 8).Select(_ =>
+            Assert.IsAssignableFrom<Stream>(package.TryOpenFreshEntry("xl/workbook.xml")))];
+
+        foreach (Stream stream in streams)
+        {
+            stream.Dispose();
+        }
+
+        Assert.Equal(4, package.PooledArchiveCount);
+    }
+
     // ── Non-file-backed package returns null ─────────────────────────────────
 
     [Fact]
@@ -292,5 +319,27 @@ public sealed class OwnedEntryStreamTests : IDisposable
         using XlsxPackage package = XlsxPackage.Open(ms);
         Stream? result = package.TryOpenFreshEntry("xl/workbook.xml");
         Assert.Null(result);
+    }
+
+    private static void SetUnsupportedCompressionMethod(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        for (int i = 0; i <= bytes.Length - sizeof(uint); i++)
+        {
+            uint signature = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i));
+            int methodOffset = signature switch
+            {
+                0x04034b50 => i + 8,
+                0x02014b50 => i + 10,
+                _ => -1,
+            };
+
+            if (methodOffset >= 0)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(methodOffset), 99);
+            }
+        }
+
+        File.WriteAllBytes(path, bytes);
     }
 }
