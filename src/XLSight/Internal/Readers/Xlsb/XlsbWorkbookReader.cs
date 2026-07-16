@@ -2,6 +2,7 @@ using XLSight.Analysis;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
+using XLSight.Internal.Scanning;
 using XLSight.Internal.Sinks;
 using XLSight.Internal.Vba;
 
@@ -337,6 +338,23 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
             ref sink,
             _metadata.FormulaContext);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
+    }
+
+    protected override void ScanWorksheetCore<TSink>(XlsbSheetInfo sheet, ref TSink sink)
+    {
+        using Stream sheetStream = OpenConcurrentSheetStream(sheet.Path);
+        var adapter = new WorksheetScanAdapter<TSink>(sink);
+        XlsbWorksheetScanner.ScanSheet(
+            sheetStream,
+            SharedStringsLazy,
+            _styles.Value,
+            _metadata.UsesDate1904,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            ref adapter,
+            _metadata.FormulaContext,
+            includePostSheetMetadata: false);
+        sink = adapter.Sink;
     }
 
     private Stream OpenConcurrentSheetStream(string sheetPath)

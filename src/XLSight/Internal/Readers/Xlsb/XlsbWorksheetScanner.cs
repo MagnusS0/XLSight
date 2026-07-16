@@ -14,12 +14,13 @@ internal static class XlsbWorksheetScanner
         ReadMode mode,
         ExcelRange range,
         ref TSink sink,
-        XlsbFormulaContext? formulaContext = null)
+        XlsbFormulaContext? formulaContext = null,
+        bool includePostSheetMetadata = true)
         where TSink : struct, IByteSheetSink
     {
         using var iterator = new XlsbRecordIterator(worksheetStream);
         int currentRowIndex = 0;
-        bool shouldScanExactMetadata = range.IsUnbounded;
+        bool shouldScanExactMetadata = range.IsUnbounded && includePostSheetMetadata;
 
         while (iterator.TryRead(out XlsbRecord record))
         {
