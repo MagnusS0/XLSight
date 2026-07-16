@@ -30,17 +30,18 @@ jobs:
           cache-dependency-path: '**/packages.lock.json'
 
       - name: Restore
-        run: dotnet restore XLSight.slnx --locked-mode
+        run: dotnet restore XLSight.slnx --locked-mode -m:1
 
       - name: Build
-        run: dotnet build XLSight.slnx --no-restore -c Release
+        run: dotnet build XLSight.slnx --no-restore -c Release -m:1
 
       - name: Test
-        run: dotnet test XLSight.slnx --no-build -c Release
+        run: dotnet test XLSight.slnx --no-build -c Release -m:1
 
       - name: Pack
         run: |
           dotnet pack src/XLSight/XLSight.csproj --no-build -c Release -o ./nupkg
+          dotnet pack src/XLSight.Layout/XLSight.Layout.csproj --no-build -c Release -o ./nupkg
           dotnet pack src/XLSight.Query/XLSight.Query.csproj --no-build -c Release -o ./nupkg
 
       - name: NuGet login (OIDC)

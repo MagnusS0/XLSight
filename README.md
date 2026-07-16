@@ -284,6 +284,25 @@ var options = new AnalysisOptions { DistinctValuesCap = 50 };
 SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
 ```
 
+### Infer worksheet layout (XLSight.Layout)
+
+The optional [`XLSight.Layout`](src/XLSight.Layout/README.md) package identifies
+worksheet axes, measure fields, and related layout groups across `.xlsx`, `.xlsm`,
+and `.xlsb` files.
+
+```bash
+dotnet add package XLSight.Layout
+```
+
+```csharp
+using XLSight.Analysis.Layout;
+
+SheetLayoutInfo layout = workbook.AnalyzeLayout("Financials");
+```
+
+Layout inference is an explicit worksheet scan. Core `Analyze` and `AnalyzeSheet`
+do not collect layout facts or run layout heuristics.
+
 ### Query a range (XLSight.Query)
 
 The optional [`XLSight.Query`](src/XLSight.Query/README.md) package answers
