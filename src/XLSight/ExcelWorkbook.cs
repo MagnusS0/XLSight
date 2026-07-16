@@ -7,6 +7,7 @@ using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers;
 using XLSight.Internal.Readers.Xlsb;
 using XLSight.Internal.Readers.Xlsx;
+using XLSight.Internal.Scanning;
 using XLSight.Internal.Vba;
 
 namespace XLSight;
@@ -962,6 +963,22 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     {
         ct.ThrowIfCancellationRequested();
         return new(GetRangeReader(sheet, range, mode, projection));
+    }
+
+    internal void ScanWorksheet<TSink>(string sheet, ref TSink sink)
+        where TSink : struct, IWorksheetScanSink
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            _engine.ScanWorksheet(sheet, ref sink);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null)

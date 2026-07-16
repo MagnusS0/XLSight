@@ -1,6 +1,7 @@
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
+using XLSight.Internal.Scanning;
 using XLSight.Internal.Sinks;
 using XLSight.Analysis;
 
@@ -91,6 +92,22 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
         var sink = new AnalysisSink(SharedStrings, sheet.Name, level, options);
         XlsxSheetScanner.ScanSheet(sheetStream, SharedStrings, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
+    }
+
+    protected override void ScanWorksheetCore<TSink>(WorkbookMetadata.WorkbookSheetInfo sheet, ref TSink sink)
+    {
+        using var sheetStream = OpenSheetStream(sheet.Path);
+        var adapter = new WorksheetScanAdapter<TSink>(sink);
+        XlsxSheetScanner.ScanSheet(
+            sheetStream,
+            SharedStrings,
+            _styles.Value,
+            _metadata.UsesDate1904,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            ref adapter,
+            includePostSheetMetadata: false);
+        sink = adapter.Sink;
     }
 
     /// <summary>

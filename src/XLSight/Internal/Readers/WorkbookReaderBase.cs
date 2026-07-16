@@ -2,6 +2,7 @@ using XLSight.Analysis;
 using System.Diagnostics.CodeAnalysis;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Packaging;
+using XLSight.Internal.Scanning;
 using XLSight.Internal.Vba;
 
 namespace XLSight.Internal.Readers;
@@ -133,6 +134,13 @@ internal abstract class WorkbookReaderBase<
         return OpenCursorCore(FindSheet(sheetName).Sheet, range, mode, projection);
     }
 
+    public void ScanWorksheet<TSink>(string sheetName, ref TSink sink)
+        where TSink : struct, IWorksheetScanSink
+    {
+        ThrowIfDisposed();
+        ScanWorksheetCore(FindSheet(sheetName).Sheet, ref sink);
+    }
+
     public WorkbookInfo Analyze(
         AnalysisLevel level,
         int maxDegreeOfParallelism = -1,
@@ -261,6 +269,8 @@ internal abstract class WorkbookReaderBase<
     protected abstract TSharedStrings LoadSharedStrings();
     protected abstract AnalyzerMetadata BuildAnalyzerMetadata();
     protected abstract IRowCursor OpenCursorCore(TSheet sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null);
+    protected abstract void ScanWorksheetCore<TSink>(TSheet sheet, ref TSink sink)
+        where TSink : struct, IWorksheetScanSink;
     protected abstract SheetInfo AnalyzeSheetCore(
         TSheet sheet,
         int sheetIndex,

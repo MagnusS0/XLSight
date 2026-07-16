@@ -51,7 +51,8 @@ internal static partial class XlsxSheetScanner
         ReadMode mode,
         ExcelRange range,
         ref TSink sink,
-        long seekHint = -1)
+        long seekHint = -1,
+        bool includePostSheetMetadata = true)
         where TSink : struct, IByteSheetSink
     {
         using var buf = new ScanBuffer(entryStream);
@@ -94,7 +95,7 @@ internal static partial class XlsxSheetScanner
 
         // Scan for merge regions, CF, DV, and hyperlinks after </sheetData>.
         // Only relevant for analysis sinks (range.IsUnbounded); RangeSink no-ops these callbacks.
-        if (range.IsUnbounded)
+        if (range.IsUnbounded && includePostSheetMetadata)
         {
             TryScanPostSheetData(buf, ref sink);
         }
