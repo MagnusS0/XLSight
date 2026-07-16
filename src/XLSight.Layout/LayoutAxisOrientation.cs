@@ -1,4 +1,4 @@
-namespace XLSight.Analysis;
+namespace XLSight.Analysis.Layout;
 
 /// <summary>Identifies the direction in which a layout axis labels measure values.</summary>
 public enum LayoutAxisOrientation

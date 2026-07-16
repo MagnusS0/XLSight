@@ -1,4 +1,4 @@
-namespace XLSight.Analysis;
+namespace XLSight.Analysis.Layout;
 
 /// <summary>Heuristically inferred layout structure of a worksheet: axes, measure fields, and their groupings.</summary>
 public sealed class SheetLayoutInfo

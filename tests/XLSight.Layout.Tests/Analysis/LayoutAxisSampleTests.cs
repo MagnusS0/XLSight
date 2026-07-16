@@ -1,8 +1,8 @@
-using XLSight.Analysis;
+using XLSight.Analysis.Layout;
 using Xunit;
-using static XLSight.Tests.Analysis.LayoutTestWorkbook;
+using static XLSight.Layout.Tests.Analysis.LayoutTestWorkbook;
 
-namespace XLSight.Tests.Analysis;
+namespace XLSight.Layout.Tests.Analysis;
 
 public sealed class LayoutAxisSampleTests
 {
@@ -38,9 +38,9 @@ public sealed class LayoutAxisSampleTests
         using var ms = LayoutTestWorkbook.Build(TextAxisRows);
         using var workbook = ExcelWorkbook.Open(ms);
 
-        var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred);
+        SheetLayoutInfo layout = workbook.AnalyzeLayout("Data");
         var expectedRange = ExcelRange.Parse("A2:A4");
-        LayoutAxis? textAxis = inferred.Layout.Axes.FirstOrDefault(axis =>
+        LayoutAxis? textAxis = layout.Axes.FirstOrDefault(axis =>
             axis.Range == expectedRange &&
             axis.Orientation == LayoutAxisOrientation.Vertical &&
             axis.Role == LayoutAxisRole.Primary);
@@ -54,7 +54,7 @@ public sealed class LayoutAxisSampleTests
         using var ms = LayoutTestWorkbook.Build([.. BuildLateTableRows()]);
         using var workbook = ExcelWorkbook.Open(ms);
 
-        SheetLayoutInfo layout = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
+        SheetLayoutInfo layout = workbook.AnalyzeLayout("Data");
         LayoutGroupInfo group = Assert.Single(layout.Groups, static group => group.Range.BottomRight.Row == 5014);
         LayoutAxis axis = Assert.Single(layout.Axes, static axis => axis.Range == ExcelRange.Parse("B5012:B5014"));
 
@@ -68,7 +68,7 @@ public sealed class LayoutAxisSampleTests
         using var ms = LayoutTestWorkbook.Build(MixedAxisRows, DateStylesXml);
         using var workbook = ExcelWorkbook.Open(ms);
 
-        SheetLayoutInfo layout = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
+        SheetLayoutInfo layout = workbook.AnalyzeLayout("Data");
         LayoutAxis axis = Assert.Single(layout.Axes, static axis => axis.Range == ExcelRange.Parse("A2:A5"));
 
         Assert.Equal(LayoutAxisValueKind.Mixed, axis.ValueKind);

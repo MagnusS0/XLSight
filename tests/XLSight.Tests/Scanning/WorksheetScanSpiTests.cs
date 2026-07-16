@@ -59,6 +59,25 @@ public sealed class WorksheetScanSpiTests
             cell => Assert.False(cell.IsFormula));
     }
 
+    [Fact]
+    public async Task ScanWorksheetAsync_CancellationDuringScan_StopsAndReleasesOperationGuard()
+    {
+        using var stream = new MemoryStream(File.ReadAllBytes(GetTestDataPath("string_heavy.xlsx")));
+        using var workbook = ExcelWorkbook.Open(stream);
+        using var source = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => workbook.ScanWorksheetAsync(
+                "Strings",
+                new CancelingSink(source),
+                source.Token));
+
+        List<CellEvent> cells = [];
+        var sink = new RecordingSink(cells);
+        workbook.ScanWorksheet("Strings", ref sink);
+        Assert.NotEmpty(cells);
+    }
+
     private static List<CellEvent> Scan(string fileName, string sheetName)
     {
         using var workbook = ExcelWorkbook.Open(GetTestDataPath(fileName));
@@ -102,5 +121,12 @@ public sealed class WorksheetScanSpiTests
     {
         public void OnCell(int row, int column, in ExcelCellValue value, bool isFormula) =>
             cells.Add((row, column, value, isFormula));
+    }
+
+    [StructLayout(LayoutKind.Auto)]
+    private readonly struct CancelingSink(CancellationTokenSource source) : IWorksheetScanSink
+    {
+        public void OnCell(int row, int column, in ExcelCellValue value, bool isFormula) =>
+            source.Cancel();
     }
 }

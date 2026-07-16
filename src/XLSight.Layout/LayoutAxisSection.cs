@@ -1,4 +1,4 @@
-namespace XLSight.Analysis;
+namespace XLSight.Analysis.Layout;
 
 /// <summary>A titled run of rows or columns inside an inferred axis, e.g. a section header like
 /// "Total Funding" scoping the label rows beneath it until the next section begins.</summary>

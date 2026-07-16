@@ -2,7 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Xml;
 
-namespace XLSight.Tests.Analysis;
+namespace XLSight.Layout.Tests.Analysis;
 
 /// <summary>Builds minimal in-memory xlsx packages for layout-inference tests.</summary>
 internal static class LayoutTestWorkbook

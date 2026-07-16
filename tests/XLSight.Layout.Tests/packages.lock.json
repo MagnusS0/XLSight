@@ -207,7 +207,7 @@
       "xlsight": {
         "type": "Project"
       },
-      "xlsight.query": {
+      "xlsight.layout": {
         "type": "Project",
         "dependencies": {
           "XLSight": "[0.7.0, )"

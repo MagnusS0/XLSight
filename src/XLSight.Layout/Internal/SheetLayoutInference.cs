@@ -1,19 +1,18 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
-using XLSight.Analysis;
 
-namespace XLSight.Internal.Sinks;
+namespace XLSight.Analysis.Layout.Internal;
 
 internal static class SheetLayoutInference
 {
-    public static SheetLayoutInfo Infer(LayoutCellStore cells, ISharedStringSource sharedStrings)
+    public static SheetLayoutInfo Infer(LayoutCellStore cells)
     {
         if (cells.Count == 0)
         {
             return SheetLayoutInfo.Empty;
         }
 
-        var sheet = new SheetFacts(cells, sharedStrings);
+        var sheet = new SheetFacts(cells);
         var occupied = new List<ExcelRange>();
 
         List<FieldCandidate> matrices = FindMatrixFields(sheet);
@@ -1194,7 +1193,7 @@ internal static class SheetLayoutInference
             for (int row = Math.Max(1, axis.Range.TopLeft.Row - 2); row <= bottom; row++)
             {
                 if (!sheet.ScanRowContent(row, fieldStartCol, fieldEndCol).HasMeasure &&
-                    sheet.TryGetCell(row, col, out var cell) && sheet.GetText(cell) is { } title)
+                    sheet.TryGetCell(row, col, out var cell) && SheetFacts.GetText(cell) is { } title)
                 {
                     headers.Add((row, title));
                 }
@@ -1287,7 +1286,7 @@ internal static class SheetLayoutInference
             Span<(int Col, int Row)> probes = [(startCol, startRow - 1), (startCol, startRow - 2), (startCol - 1, startRow), (startCol - 2, startRow)];
             foreach ((int col, int row) in probes)
             {
-                if (col >= 1 && row >= 1 && sheet.TryGetCell(row, col, out var cell) && sheet.GetText(cell) is { } title)
+                if (col >= 1 && row >= 1 && sheet.TryGetCell(row, col, out var cell) && SheetFacts.GetText(cell) is { } title)
                 {
                     return title;
                 }
@@ -1319,13 +1318,11 @@ internal static class SheetLayoutInference
     {
         private readonly LayoutCellStore _store;
         private readonly List<int> _rowNumbers;
-        private readonly ISharedStringSource _sharedStrings;
 
-        public SheetFacts(LayoutCellStore store, ISharedStringSource sharedStrings)
+        public SheetFacts(LayoutCellStore store)
         {
             _store = store;
             _rowNumbers = store.RowNumbers;
-            _sharedStrings = sharedStrings;
         }
 
         public List<int> Rows => _rowNumbers;
@@ -1368,26 +1365,14 @@ internal static class SheetLayoutInference
             return (textCount, firstText, hasMeasure);
         }
 
-        public string? GetText(LayoutCellFact cell)
+        public static string? GetText(LayoutCellFact cell)
         {
             if ((cell.KindMask & LayoutKindMask.Text) == LayoutKindMask.None)
             {
                 return null;
             }
 
-            if (cell.SharedStringIndex < 0)
-            {
-                return cell.InlineText ?? string.Empty;
-            }
-
-            string text = _sharedStrings.GetString(cell.SharedStringIndex).Trim();
-            if (text.Length <= 64)
-            {
-                return text;
-            }
-
-            int cutoff = char.IsHighSurrogate(text[63]) ? 63 : 64;
-            return text[..cutoff];
+            return cell.Text ?? string.Empty;
         }
 
         public bool TryGetCell(int row, int col, out LayoutCellFact cell)

@@ -1,4 +1,4 @@
-namespace XLSight.Analysis;
+namespace XLSight.Analysis.Layout;
 
 /// <summary>Describes the dominant value kind carried by a layout axis.</summary>
 public enum LayoutAxisValueKind

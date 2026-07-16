@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>XLSight.Layout</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>XLSight.Layout</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Magnus</Authors>
+    <Description>Optional worksheet layout inference for XLSight, including axes, measure fields, and related groups across .xlsx, .xlsm, and .xlsb workbooks.</Description>
+    <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;layout;analysis;inference;dotnet</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/MagnusS0/XLSight</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MagnusS0/XLSight</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../XLSight/XLSight.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

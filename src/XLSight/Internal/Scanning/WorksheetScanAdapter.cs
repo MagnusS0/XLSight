@@ -5,10 +5,13 @@ using XLSight.Internal.Sinks;
 namespace XLSight.Internal.Scanning;
 
 [StructLayout(LayoutKind.Auto)]
-internal struct WorksheetScanAdapter<TSink>(TSink sink) : IByteSheetSink
+internal struct WorksheetScanAdapter<TSink>(
+    TSink sink,
+    CancellationToken cancellationToken = default) : IByteSheetSink
     where TSink : struct, IWorksheetScanSink
 {
     private TSink _sink = sink;
+    private readonly CancellationToken _cancellationToken = cancellationToken;
     private int _currentRow;
     private bool _nextCellIsFormula;
 
@@ -30,6 +33,7 @@ internal struct WorksheetScanAdapter<TSink>(TSink sink) : IByteSheetSink
 
     public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         _sink.OnCell(_currentRow, column, in value, _nextCellIsFormula);
         _nextCellIsFormula = false;
         return true;

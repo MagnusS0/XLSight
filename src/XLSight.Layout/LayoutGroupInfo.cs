@@ -1,4 +1,4 @@
-namespace XLSight.Analysis;
+namespace XLSight.Analysis.Layout;
 
 /// <summary>Ties together measure fields that share at least one axis, and the axes they share.</summary>
 public sealed class LayoutGroupInfo

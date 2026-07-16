@@ -1,8 +1,8 @@
-using XLSight.Analysis;
+using XLSight.Analysis.Layout;
 using Xunit;
-using static XLSight.Tests.Analysis.LayoutTestWorkbook;
+using static XLSight.Layout.Tests.Analysis.LayoutTestWorkbook;
 
-namespace XLSight.Tests.Analysis;
+namespace XLSight.Layout.Tests.Analysis;
 
 /// <summary>Small in-memory workbooks proving layout-inference behaviors that would otherwise
 /// only be exercised by the external corpora in <see cref="LayoutInferenceIntegrationTests"/>.</summary>
@@ -319,7 +319,7 @@ public sealed class LayoutInferenceSyntheticTests
     {
         using var ms = LayoutTestWorkbook.Build(rows);
         using var workbook = ExcelWorkbook.Open(ms);
-        return Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
+        return workbook.AnalyzeLayout("Data");
     }
 
     private static MeasureFieldInfo AssertField(SheetLayoutInfo layout, string range, int rank)

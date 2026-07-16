@@ -1,4 +1,4 @@
-namespace XLSight.Internal.Sinks;
+namespace XLSight.Analysis.Layout.Internal;
 
 [Flags]
 internal enum LayoutKindMask : ushort
