@@ -1,6 +1,6 @@
-using System.Text;
 using XLSight.Analysis;
 using Xunit;
+using static XLSight.Tests.Analysis.LayoutTestWorkbook;
 
 namespace XLSight.Tests.Analysis;
 
@@ -15,79 +15,43 @@ public sealed class LayoutAxisSampleTests
         </styleSheet>
         """;
 
-    // Row 1 (header): year labels anchor the horizontal axis.
-    // Rows 2-4: col A carries text labels (the vertical axis), cols B-D carry numeric data.
-    // SST: 0=Revenue, 1=Costs, 2=EBITDA.
-    private const string SstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="3">
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-        </sst>
-        """;
+    private static readonly RowSpec[] TextAxisRows =
+    [
+        Row(1, Number("B", 2023), Number("C", 2024), Number("D", 2025)),
+        Row(2, Text("A", "Revenue"), Number("B", 100), Number("C", 110), Number("D", 120)),
+        Row(3, Text("A", "Costs"), Number("B", 40), Number("C", 45), Number("D", 50)),
+        Row(4, Text("A", "EBITDA"), Number("B", 60), Number("C", 65), Number("D", 70)),
+    ];
 
-    private const string SheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1"><v>2023</v></c>
-              <c r="C1"><v>2024</v></c>
-              <c r="D1"><v>2025</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>0</v></c>
-              <c r="B2"><v>100</v></c>
-              <c r="C2"><v>110</v></c>
-              <c r="D2"><v>120</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>40</v></c>
-              <c r="C3"><v>45</v></c>
-              <c r="D3"><v>50</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>65</v></c>
-              <c r="D4"><v>70</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    private static readonly RowSpec[] MixedAxisRows =
+    [
+        Row(1, Text("B", "M1"), Text("C", "M2")),
+        Row(2, Text("A", "Start"), Number("B", 1), Number("C", 2)),
+        Row(3, Number("A", 45000, styleIndex: 1), Number("B", 3), Number("C", 4)),
+        Row(4, Text("A", "End"), Number("B", 5), Number("C", 6)),
+        Row(5, Number("A", 45001, styleIndex: 1), Number("B", 7), Number("C", 8)),
+    ];
 
     [Fact]
     public void TextAxis_ExposesTextSamples()
     {
-        using var ms = LayoutTestWorkbook.Build(SheetXml, SstXml);
+        using var ms = LayoutTestWorkbook.Build(TextAxisRows);
         using var workbook = ExcelWorkbook.Open(ms);
 
         var inferred = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred);
-
         var expectedRange = ExcelRange.Parse("A2:A4");
         LayoutAxis? textAxis = inferred.Layout.Axes.FirstOrDefault(axis =>
             axis.Range == expectedRange &&
             axis.Orientation == LayoutAxisOrientation.Vertical &&
             axis.Role == LayoutAxisRole.Primary);
         Assert.NotNull(textAxis);
-
         Assert.Equal(["Revenue", "Costs", "EBITDA"], textAxis.Samples);
     }
 
     [Fact]
     public void TextAfterFormerGlobalBudget_RemainsAvailableForTitlesAndSamples()
     {
-        const string sstXml = """
-            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="5">
-              <si><t>x</t></si>
-              <si><t>Revenue Summary</t></si>
-              <si><t>Revenue</t></si>
-              <si><t>Costs</t></si>
-              <si><t>Profit</t></si>
-            </sst>
-            """;
-
-        using var ms = LayoutTestWorkbook.Build(BuildLateTableSheetXml(), sstXml);
+        using var ms = LayoutTestWorkbook.Build([.. BuildLateTableRows()]);
         using var workbook = ExcelWorkbook.Open(ms);
 
         SheetLayoutInfo layout = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
@@ -101,46 +65,7 @@ public sealed class LayoutAxisSampleTests
     [Fact]
     public void TextAndDateAxis_ReportsMixedValueKind()
     {
-        const string sstXml = """
-            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="4">
-              <si><t>M1</t></si>
-              <si><t>M2</t></si>
-              <si><t>Start</t></si>
-              <si><t>End</t></si>
-            </sst>
-            """;
-        const string sheetXml = """
-            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-              <sheetData>
-                <row r="1">
-                  <c r="B1" t="s"><v>0</v></c>
-                  <c r="C1" t="s"><v>1</v></c>
-                </row>
-                <row r="2">
-                  <c r="A2" t="s"><v>2</v></c>
-                  <c r="B2"><v>1</v></c>
-                  <c r="C2"><v>2</v></c>
-                </row>
-                <row r="3">
-                  <c r="A3" s="1"><v>45000</v></c>
-                  <c r="B3"><v>3</v></c>
-                  <c r="C3"><v>4</v></c>
-                </row>
-                <row r="4">
-                  <c r="A4" t="s"><v>3</v></c>
-                  <c r="B4"><v>5</v></c>
-                  <c r="C4"><v>6</v></c>
-                </row>
-                <row r="5">
-                  <c r="A5" s="1"><v>45001</v></c>
-                  <c r="B5"><v>7</v></c>
-                  <c r="C5"><v>8</v></c>
-                </row>
-              </sheetData>
-            </worksheet>
-            """;
-
-        using var ms = LayoutTestWorkbook.Build(sheetXml, sstXml, DateStylesXml);
+        using var ms = LayoutTestWorkbook.Build(MixedAxisRows, DateStylesXml);
         using var workbook = ExcelWorkbook.Open(ms);
 
         SheetLayoutInfo layout = Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
@@ -149,29 +74,18 @@ public sealed class LayoutAxisSampleTests
         Assert.Equal(LayoutAxisValueKind.Mixed, axis.ValueKind);
     }
 
-    private static string BuildLateTableSheetXml()
+    private static IEnumerable<RowSpec> BuildLateTableRows()
     {
         string[] fillerColumns = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-        var xml = new StringBuilder("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
         for (int row = 1; row <= 5_000; row++)
         {
-            xml.Append("<row r=\"").Append(row).Append("\">");
-            foreach (string column in fillerColumns)
-            {
-                xml.Append("<c r=\"").Append(column).Append(row).Append("\" t=\"s\"><v>0</v></c>");
-            }
-
-            xml.Append("</row>");
+            yield return Row(row, [.. fillerColumns.Select(static column => Text(column, "x"))]);
         }
 
-        xml.Append("""
-            <row r="5010"><c r="B5010" t="s"><v>1</v></c></row>
-            <row r="5011"><c r="C5011"><v>2024</v></c><c r="D5011"><v>2025</v></c></row>
-            <row r="5012"><c r="B5012" t="s"><v>2</v></c><c r="C5012"><v>10</v></c><c r="D5012"><v>11</v></c></row>
-            <row r="5013"><c r="B5013" t="s"><v>3</v></c><c r="C5013"><v>5</v></c><c r="D5013"><v>6</v></c></row>
-            <row r="5014"><c r="B5014" t="s"><v>4</v></c><c r="C5014"><v>5</v></c><c r="D5014"><v>5</v></c></row>
-            </sheetData></worksheet>
-            """);
-        return xml.ToString();
+        yield return Row(5010, Text("B", "Revenue Summary"));
+        yield return Row(5011, Number("C", 2024), Number("D", 2025));
+        yield return Row(5012, Text("B", "Revenue"), Number("C", 10), Number("D", 11));
+        yield return Row(5013, Text("B", "Costs"), Number("C", 5), Number("D", 6));
+        yield return Row(5014, Text("B", "Profit"), Number("C", 5), Number("D", 5));
     }
 }

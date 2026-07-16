@@ -1,5 +1,6 @@
 using XLSight.Analysis;
 using Xunit;
+using static XLSight.Tests.Analysis.LayoutTestWorkbook;
 
 namespace XLSight.Tests.Analysis;
 
@@ -7,738 +8,144 @@ namespace XLSight.Tests.Analysis;
 /// only be exercised by the external corpora in <see cref="LayoutInferenceIntegrationTests"/>.</summary>
 public sealed class LayoutInferenceSyntheticTests
 {
-    private const string EmptySstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="0"></sst>
-        """;
+    // Two stacked statements, each with its own reprinted year header, separated by a title row.
+    private static readonly RowSpec[] StackedSectionsRows =
+    [
+        Row(1, Text("A", "Income statement")),
+        Row(2, Number("B", 2023), Number("C", 2024), Number("D", 2025)),
+        Row(3, Text("A", "Revenue"), Number("B", 100), Number("C", 110), Number("D", 120)),
+        Row(4, Text("A", "Costs"), Number("B", 40), Number("C", 45), Number("D", 50)),
+        Row(5, Text("A", "EBITDA"), Number("B", 60), Number("C", 65), Number("D", 70)),
+        Row(7, Text("A", "Balance sheet")),
+        Row(8, Number("B", 2023), Number("C", 2024), Number("D", 2025)),
+        Row(9, Text("A", "Assets"), Number("B", 500), Number("C", 520), Number("D", 540)),
+        Row(10, Text("A", "Liabilities"), Number("B", 300), Number("C", 310), Number("D", 320)),
+        Row(11, Text("A", "Equity"), Number("B", 200), Number("C", 210), Number("D", 220)),
+    ];
 
-    // Two stacked statements, each with its own reprinted year header, separated by a lone
-    // title row: rows 1-5 are "Income statement", rows 7-11 are "Balance sheet".
-    private const string StackedSectionsSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
-          <si><t>Income statement</t></si>
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-          <si><t>Balance sheet</t></si>
-          <si><t>Assets</t></si>
-          <si><t>Liabilities</t></si>
-          <si><t>Equity</t></si>
-        </sst>
-        """;
+    // One table sits beside a CAGR/Avg block across an empty spacer; both share row labels.
+    private static readonly RowSpec[] SiblingFieldsRows =
+    [
+        Row(1, Number("B", 2023), Number("C", 2024), Number("D", 2025), Text("F", "CAGR"), Text("G", "Avg")),
+        Row(2, Text("A", "Revenue"), Number("B", 100), Number("C", 110), Number("D", 120), Number("F", 0.1), Number("G", 105)),
+        Row(3, Text("A", "Costs"), Number("B", 40), Number("C", 45), Number("D", 50), Number("F", 0.05), Number("G", 45)),
+        Row(4, Text("A", "EBITDA"), Number("B", 60), Number("C", 65), Number("D", 70), Number("F", 0.08), Number("G", 65)),
+        Row(5, Text("A", "NetIncome"), Number("B", 50), Number("C", 55), Number("D", 60), Number("F", 0.1), Number("G", 57)),
+    ];
 
-    private const string StackedSectionsSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1"><c r="A1" t="s"><v>0</v></c></row>
-            <row r="2">
-              <c r="B2"><v>2023</v></c>
-              <c r="C2"><v>2024</v></c>
-              <c r="D2"><v>2025</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>100</v></c>
-              <c r="C3"><v>110</v></c>
-              <c r="D3"><v>120</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>40</v></c>
-              <c r="C4"><v>45</v></c>
-              <c r="D4"><v>50</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>3</v></c>
-              <c r="B5"><v>60</v></c>
-              <c r="C5"><v>65</v></c>
-              <c r="D5"><v>70</v></c>
-            </row>
-            <row r="7"><c r="A7" t="s"><v>4</v></c></row>
-            <row r="8">
-              <c r="B8"><v>2023</v></c>
-              <c r="C8"><v>2024</v></c>
-              <c r="D8"><v>2025</v></c>
-            </row>
-            <row r="9">
-              <c r="A9" t="s"><v>5</v></c>
-              <c r="B9"><v>500</v></c>
-              <c r="C9"><v>520</v></c>
-              <c r="D9"><v>540</v></c>
-            </row>
-            <row r="10">
-              <c r="A10" t="s"><v>6</v></c>
-              <c r="B10"><v>300</v></c>
-              <c r="C10"><v>310</v></c>
-              <c r="D10"><v>320</v></c>
-            </row>
-            <row r="11">
-              <c r="A11" t="s"><v>7</v></c>
-              <c r="B11"><v>200</v></c>
-              <c r="C11"><v>210</v></c>
-              <c r="D11"><v>220</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // A repeated year column between labels and measures must peel off as a context axis.
+    private static readonly RowSpec[] LeadingYearColumnRows =
+    [
+        Row(1, Text("A", "Name"), Text("B", "Year"), Text("C", "Assets"), Text("D", "Deposits")),
+        Row(2, Text("A", "Bank A"), Number("B", 2020), Number("C", 100), Number("D", 50)),
+        Row(3, Text("A", "Bank A"), Number("B", 2021), Number("C", 110), Number("D", 55)),
+        Row(4, Text("A", "Bank A"), Number("B", 2022), Number("C", 120), Number("D", 60)),
+        Row(5, Text("A", "Bank B"), Number("B", 2020), Number("C", 200), Number("D", 90)),
+        Row(6, Text("A", "Bank B"), Number("B", 2021), Number("C", 210), Number("D", 95)),
+        Row(7, Text("A", "Bank B"), Number("B", 2022), Number("C", 220), Number("D", 100)),
+    ];
 
-    // One table (A2:D5) sits beside a CAGR/Avg block (F2:G5) across an empty spacer column E;
-    // both share row labels in column A.
-    private const string SiblingFieldsSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="6">
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-          <si><t>NetIncome</t></si>
-          <si><t>CAGR</t></si>
-          <si><t>Avg</t></si>
-        </sst>
-        """;
+    // A uniform first data row under weekday labels is a dense field, not matrix coordinates.
+    private static readonly RowSpec[] CalendarGridRows =
+    [
+        Row(1, Text("A", "Mon"), Text("B", "Tue"), Text("C", "Wed"), Text("D", "Thu"), Text("E", "Fri"), Text("F", "Sat"), Text("G", "Sun")),
+        Row(2, Number("A", 1), Number("B", 2), Number("C", 3), Number("D", 4), Number("E", 5), Number("F", 6), Number("G", 7)),
+        Row(3, Number("A", 8), Number("B", 9), Number("C", 10), Number("D", 11), Number("E", 12), Number("F", 13), Number("G", 14)),
+        Row(4, Number("A", 15), Number("B", 16), Number("C", 17), Number("D", 18), Number("E", 19), Number("F", 20), Number("G", 21)),
+        Row(5, Number("A", 22), Number("B", 23), Number("C", 24), Number("D", 25), Number("E", 26), Number("F", 27), Number("G", 28)),
+    ];
 
-    private const string SiblingFieldsSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1"><v>2023</v></c>
-              <c r="C1"><v>2024</v></c>
-              <c r="D1"><v>2025</v></c>
-              <c r="F1" t="s"><v>4</v></c>
-              <c r="G1" t="s"><v>5</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>0</v></c>
-              <c r="B2"><v>100</v></c>
-              <c r="C2"><v>110</v></c>
-              <c r="D2"><v>120</v></c>
-              <c r="F2"><v>0.1</v></c>
-              <c r="G2"><v>105</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>40</v></c>
-              <c r="C3"><v>45</v></c>
-              <c r="D3"><v>50</v></c>
-              <c r="F3"><v>0.05</v></c>
-              <c r="G3"><v>45</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>65</v></c>
-              <c r="D4"><v>70</v></c>
-              <c r="F4"><v>0.08</v></c>
-              <c r="G4"><v>65</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>3</v></c>
-              <c r="B5"><v>50</v></c>
-              <c r="C5"><v>55</v></c>
-              <c r="D5"><v>60</v></c>
-              <c r="F5"><v>0.1</v></c>
-              <c r="G5"><v>57</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // Uniform quantity and first-price runs must not seed a phantom matrix.
+    private static readonly RowSpec[] PricingTableRows =
+    [
+        Row(1, Text("A", "Quantity"), Text("B", "North"), Text("C", "South"), Text("D", "East")),
+        Row(2, Number("A", 10), Number("B", 5.0), Number("C", 5.5), Number("D", 6.0)),
+        Row(3, Number("A", 20), Number("B", 4.8), Number("C", 5.9), Number("D", 6.4)),
+        Row(4, Number("A", 30), Number("B", 4.1), Number("C", 5.2), Number("D", 6.9)),
+        Row(5, Number("A", 40), Number("B", 3.9), Number("C", 4.8), Number("D", 7.7)),
+    ];
 
-    // A dense data block (B3:F7) with non-uniform, sign-alternating deltas (so it can never seed
-    // a spurious matrix run itself), flanked by a uniform-step numeric header row (B2:F2) and a
-    // uniform-step numeric coordinate column (A3:A7).
-    private const string NumericMatrixSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="2">
-              <c r="B2"><v>0.01</v></c>
-              <c r="C2"><v>0.015</v></c>
-              <c r="D2"><v>0.02</v></c>
-              <c r="E2"><v>0.025</v></c>
-              <c r="F2"><v>0.03</v></c>
-            </row>
-            <row r="3">
-              <c r="A3"><v>0.04</v></c>
-              <c r="B3"><v>950</v></c>
-              <c r="C3"><v>53</v></c>
-              <c r="D3"><v>956</v></c>
-              <c r="E3"><v>59</v></c>
-              <c r="F3"><v>962</v></c>
-            </row>
-            <row r="4">
-              <c r="A4"><v>0.05</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>963</v></c>
-              <c r="D4"><v>66</v></c>
-              <c r="E4"><v>969</v></c>
-              <c r="F4"><v>72</v></c>
-            </row>
-            <row r="5">
-              <c r="A5"><v>0.06</v></c>
-              <c r="B5"><v>970</v></c>
-              <c r="C5"><v>73</v></c>
-              <c r="D5"><v>976</v></c>
-              <c r="E5"><v>79</v></c>
-              <c r="F5"><v>982</v></c>
-            </row>
-            <row r="6">
-              <c r="A6"><v>0.07</v></c>
-              <c r="B6"><v>80</v></c>
-              <c r="C6"><v>983</v></c>
-              <c r="D6"><v>86</v></c>
-              <c r="E6"><v>989</v></c>
-              <c r="F6"><v>92</v></c>
-            </row>
-            <row r="7">
-              <c r="A7"><v>0.08</v></c>
-              <c r="B7"><v>990</v></c>
-              <c r="C7"><v>93</v></c>
-              <c r="D7"><v>996</v></c>
-              <c r="E7"><v>99</v></c>
-              <c r="F7"><v>1002</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // Band labels sit above a reprinted year row, which must stay outside the measure field.
+    private static readonly RowSpec[] BandOverYearHeaderRows =
+    [
+        Row(1, Text("B", "Group A"), Text("C", "Group A"), Text("D", "Group B"), Text("E", "Group B")),
+        Row(2, Number("B", 2023), Number("C", 2024), Number("D", 2023), Number("E", 2024)),
+        Row(3, Text("A", "Revenue"), Number("B", 10), Number("C", 13), Number("D", 12), Number("E", 18)),
+        Row(4, Text("A", "Costs"), Number("B", 20), Number("C", 27), Number("D", 22), Number("E", 31)),
+        Row(5, Text("A", "EBITDA"), Number("B", 34), Number("C", 41), Number("D", 39), Number("E", 52)),
+    ];
 
-    // A "Year" column (B) sits between the row-label column (A) and the measure columns
-    // (C:D); it repeats 2020-2022 per name and must peel off as a context axis rather than
-    // widen the measure field.
-    private const string LeadingYearColumnSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="6">
-          <si><t>Name</t></si>
-          <si><t>Year</t></si>
-          <si><t>Assets</t></si>
-          <si><t>Deposits</t></si>
-          <si><t>Bank A</t></si>
-          <si><t>Bank B</t></si>
-        </sst>
-        """;
+    // Non-monotonic integers in the year range are measures, not a year context axis.
+    private static readonly RowSpec[] NonMonotonicUnitsColumnRows =
+    [
+        Row(1, Text("A", "Product"), Text("B", "Units"), Text("C", "Price"), Text("D", "Total")),
+        Row(2, Text("A", "Alpha"), Number("B", 1950), Number("C", 5), Number("D", 9750)),
+        Row(3, Text("A", "Beta"), Number("B", 2010), Number("C", 7), Number("D", 14070)),
+        Row(4, Text("A", "Gamma"), Number("B", 1980), Number("C", 6), Number("D", 11880)),
+    ];
 
-    private const string LeadingYearColumnSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="s"><v>0</v></c>
-              <c r="B1" t="s"><v>1</v></c>
-              <c r="C1" t="s"><v>2</v></c>
-              <c r="D1" t="s"><v>3</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>4</v></c>
-              <c r="B2"><v>2020</v></c>
-              <c r="C2"><v>100</v></c>
-              <c r="D2"><v>50</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>4</v></c>
-              <c r="B3"><v>2021</v></c>
-              <c r="C3"><v>110</v></c>
-              <c r="D3"><v>55</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>4</v></c>
-              <c r="B4"><v>2022</v></c>
-              <c r="C4"><v>120</v></c>
-              <c r="D4"><v>60</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>5</v></c>
-              <c r="B5"><v>2020</v></c>
-              <c r="C5"><v>200</v></c>
-              <c r="D5"><v>90</v></c>
-            </row>
-            <row r="6">
-              <c r="A6" t="s"><v>5</v></c>
-              <c r="B6"><v>2021</v></c>
-              <c r="C6"><v>210</v></c>
-              <c r="D6"><v>95</v></c>
-            </row>
-            <row r="7">
-              <c r="A7" t="s"><v>5</v></c>
-              <c r="B7"><v>2022</v></c>
-              <c r="C7"><v>220</v></c>
-              <c r="D7"><v>100</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // A stepped forecast row embedded in ordinary data must not seed a phantom matrix.
+    private static readonly RowSpec[] EmbeddedForecastRows =
+    [
+        Row(1, Text("A", "Name"), Text("B", "Year"), Text("C", "Metric0"), Text("D", "Metric1"), Text("E", "Metric2"), Text("F", "Metric3"), Text("G", "Metric4")),
+        Row(2, Text("A", "Foo"), Number("B", 2020), Number("C", 200), Number("D", 10), Number("E", 20), Number("F", 30), Number("G", 40)),
+        Row(3, Text("A", "Foo"), Number("B", 2021), Number("C", 210), Number("D", 41), Number("E", 42), Number("F", 43), Number("G", 44)),
+        Row(4, Text("A", "Foo"), Number("B", 2022), Number("C", 463), Number("D", 590.4), Number("E", 670.9), Number("F", 752.2), Number("G", 834.9)),
+        Row(5, Text("A", "Foo"), Number("B", 2023), Number("C", 463), Number("D", 111), Number("E", 112), Number("F", 113), Number("G", 114)),
+        Row(6, Text("A", "Foo"), Number("B", 2024), Number("C", 1620), Number("D", 121), Number("E", 122), Number("F", 123), Number("G", 124)),
+        Row(7, Text("A", "Foo"), Number("B", 2025), Number("C", 2786), Number("D", 131), Number("E", 132), Number("F", 133), Number("G", 134)),
+    ];
 
-    // Day-of-week text header over day numbers: a strictly uniform first data row (1..7) must
-    // not be mistaken for a sensitivity matrix's numeric coordinate run.
-    private const string CalendarGridSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="7">
-          <si><t>Mon</t></si>
-          <si><t>Tue</t></si>
-          <si><t>Wed</t></si>
-          <si><t>Thu</t></si>
-          <si><t>Fri</t></si>
-          <si><t>Sat</t></si>
-          <si><t>Sun</t></si>
-        </sst>
-        """;
+    // A lone caption above a text-kind header row should become its horizontal-axis title.
+    private static readonly RowSpec[] CaptionedTextHeaderRows =
+    [
+        Row(1, Text("B", "Growth (%)")),
+        Row(2, Text("A", "Name"), Text("B", "Q1"), Text("C", "Q2"), Text("D", "Q3")),
+        Row(3, Text("A", "Foo"), Number("B", 10), Number("C", 11), Number("D", 12)),
+        Row(4, Text("A", "Bar"), Number("B", 20), Number("C", 21), Number("D", 22)),
+        Row(5, Text("A", "Baz"), Number("B", 30), Number("C", 31), Number("D", 32)),
+    ];
 
-    private const string CalendarGridSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c>
-              <c r="D1" t="s"><v>3</v></c><c r="E1" t="s"><v>4</v></c><c r="F1" t="s"><v>5</v></c><c r="G1" t="s"><v>6</v></c>
-            </row>
-            <row r="2">
-              <c r="A2"><v>1</v></c><c r="B2"><v>2</v></c><c r="C2"><v>3</v></c>
-              <c r="D2"><v>4</v></c><c r="E2"><v>5</v></c><c r="F2"><v>6</v></c><c r="G2"><v>7</v></c>
-            </row>
-            <row r="3">
-              <c r="A3"><v>8</v></c><c r="B3"><v>9</v></c><c r="C3"><v>10</v></c>
-              <c r="D3"><v>11</v></c><c r="E3"><v>12</v></c><c r="F3"><v>13</v></c><c r="G3"><v>14</v></c>
-            </row>
-            <row r="4">
-              <c r="A4"><v>15</v></c><c r="B4"><v>16</v></c><c r="C4"><v>17</v></c>
-              <c r="D4"><v>18</v></c><c r="E4"><v>19</v></c><c r="F4"><v>20</v></c><c r="G4"><v>21</v></c>
-            </row>
-            <row r="5">
-              <c r="A5"><v>22</v></c><c r="B5"><v>23</v></c><c r="C5"><v>24</v></c>
-              <c r="D5"><v>25</v></c><c r="E5"><v>26</v></c><c r="F5"><v>27</v></c><c r="G5"><v>28</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // No-data label rows split one vertical axis into titled sections.
+    private static readonly RowSpec[] AxisSectionRows =
+    [
+        Row(1, Number("B", 2023), Number("C", 2024)),
+        Row(2, Text("A", "Funding")),
+        Row(3, Text("A", "Deposits"), Number("B", 100), Number("C", 110)),
+        Row(4, Text("A", "Savings"), Number("B", 200), Number("C", 210)),
+        Row(5, Text("A", "Total Funding"), Number("B", 300), Number("C", 320)),
+        Row(6, Text("A", "Loans")),
+        Row(7, Text("A", "Mortgages"), Number("B", 150), Number("C", 160)),
+        Row(8, Text("A", "Auto"), Number("B", 90), Number("C", 95)),
+        Row(9, Text("A", "Total Loans"), Number("B", 240), Number("C", 255)),
+    ];
 
-    // A "Quantity" text header with a uniform qty column (10/20/30/40) and a uniform first
-    // price row (5.0/5.5/6.0): both uniform runs must not seed a phantom matrix that swallows
-    // the text header.
-    private const string PricingTableSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="4">
-          <si><t>Quantity</t></si>
-          <si><t>North</t></si>
-          <si><t>South</t></si>
-          <si><t>East</t></si>
-        </sst>
-        """;
+    // A right-side metric block extends beyond the left table's row-span anchor.
+    private static readonly RowSpec[] SiblingRowsLeftAnchorRows =
+    [
+        Row(1, Number("B", 2023), Number("C", 2024), Text("E", "CAGR"), Text("F", "Avg")),
+        Row(2, Text("A", "Revenue"), Number("B", 100), Number("C", 110), Number("E", 0.1), Number("F", 105)),
+        Row(3, Text("A", "Costs"), Number("B", 40), Number("C", 44), Number("E", 0.1), Number("F", 42)),
+        Row(4, Text("A", "EBITDA"), Number("B", 60), Number("C", 66), Number("E", 0.1), Number("F", 63)),
+        Row(5, Text("A", "Other income"), Number("E", 5), Number("F", 6)),
+        Row(6, Text("A", "Other costs"), Number("E", 7), Number("F", 8)),
+    ];
 
-    private const string PricingTableSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c>
-            </row>
-            <row r="2">
-              <c r="A2"><v>10</v></c><c r="B2"><v>5.0</v></c><c r="C2"><v>5.5</v></c><c r="D2"><v>6.0</v></c>
-            </row>
-            <row r="3">
-              <c r="A3"><v>20</v></c><c r="B3"><v>4.8</v></c><c r="C3"><v>5.9</v></c><c r="D3"><v>6.4</v></c>
-            </row>
-            <row r="4">
-              <c r="A4"><v>30</v></c><c r="B4"><v>4.1</v></c><c r="C4"><v>5.2</v></c><c r="D4"><v>6.9</v></c>
-            </row>
-            <row r="5">
-              <c r="A5"><v>40</v></c><c r="B5"><v>3.9</v></c><c r="C5"><v>4.8</v></c><c r="D5"><v>7.7</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // Row 1 reprints band labels ("Group A" x2, "Group B" x2), row 2 reprints years under them;
-    // the year row must not be swallowed as measure data by the band header's own candidate.
-    private const string BandOverYearHeaderSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="5">
-          <si><t>Group A</t></si>
-          <si><t>Group B</t></si>
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-        </sst>
-        """;
-
-    private const string BandOverYearHeaderSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1" t="s"><v>0</v></c><c r="C1" t="s"><v>0</v></c><c r="D1" t="s"><v>1</v></c><c r="E1" t="s"><v>1</v></c>
-            </row>
-            <row r="2">
-              <c r="B2"><v>2023</v></c><c r="C2"><v>2024</v></c><c r="D2"><v>2023</v></c><c r="E2"><v>2024</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>2</v></c><c r="B3"><v>10</v></c><c r="C3"><v>13</v></c><c r="D3"><v>12</v></c><c r="E3"><v>18</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>3</v></c><c r="B4"><v>20</v></c><c r="C4"><v>27</v></c><c r="D4"><v>22</v></c><c r="E4"><v>31</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>4</v></c><c r="B5"><v>34</v></c><c r="C5"><v>41</v></c><c r="D5"><v>39</v></c><c r="E5"><v>52</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // A "Units" data column (B) holds non-monotonic integers that happen to fall in the year
-    // range (1950/2010/1980); unlike a real year key, it must stay in the measure field.
-    private const string NonMonotonicUnitsColumnSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="7">
-          <si><t>Product</t></si>
-          <si><t>Units</t></si>
-          <si><t>Price</t></si>
-          <si><t>Total</t></si>
-          <si><t>Alpha</t></si>
-          <si><t>Beta</t></si>
-          <si><t>Gamma</t></si>
-        </sst>
-        """;
-
-    private const string NonMonotonicUnitsColumnSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>4</v></c><c r="B2"><v>1950</v></c><c r="C2"><v>5</v></c><c r="D2"><v>9750</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>5</v></c><c r="B3"><v>2010</v></c><c r="C3"><v>7</v></c><c r="D3"><v>14070</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>6</v></c><c r="B4"><v>1980</v></c><c r="C4"><v>6</v></c><c r="D4"><v>11880</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // A uniform-stepped forecast row (row 4, mimicking CAGR-driven model output that happens to
-    // step near-uniformly) sits flush under two ordinary data rows, and the column just left of
-    // its run (C) also steps near-uniformly for 3 rows starting below it — the same shape that
-    // seeds a phantom sensitivity matrix. Unlike a standalone matrix, there is no title or blank
-    // row between this "coordinate" run and the table's own data directly above it.
-    private const string EmbeddedForecastRowSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
-          <si><t>Name</t></si>
-          <si><t>Year</t></si>
-          <si><t>Metric0</t></si>
-          <si><t>Metric1</t></si>
-          <si><t>Metric2</t></si>
-          <si><t>Metric3</t></si>
-          <si><t>Metric4</t></si>
-          <si><t>Foo</t></si>
-        </sst>
-        """;
-
-    private const string EmbeddedForecastRowSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c>
-              <c r="D1" t="s"><v>3</v></c><c r="E1" t="s"><v>4</v></c><c r="F1" t="s"><v>5</v></c><c r="G1" t="s"><v>6</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>7</v></c><c r="B2"><v>2020</v></c><c r="C2"><v>200</v></c>
-              <c r="D2"><v>10</v></c><c r="E2"><v>20</v></c><c r="F2"><v>30</v></c><c r="G2"><v>40</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>7</v></c><c r="B3"><v>2021</v></c><c r="C3"><v>210</v></c>
-              <c r="D3"><v>41</v></c><c r="E3"><v>42</v></c><c r="F3"><v>43</v></c><c r="G3"><v>44</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>7</v></c><c r="B4"><v>2022</v></c><c r="C4"><v>463</v></c>
-              <c r="D4"><v>590.4</v></c><c r="E4"><v>670.9</v></c><c r="F4"><v>752.2</v></c><c r="G4"><v>834.9</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>7</v></c><c r="B5"><v>2023</v></c><c r="C5"><v>463</v></c>
-              <c r="D5"><v>111</v></c><c r="E5"><v>112</v></c><c r="F5"><v>113</v></c><c r="G5"><v>114</v></c>
-            </row>
-            <row r="6">
-              <c r="A6" t="s"><v>7</v></c><c r="B6"><v>2024</v></c><c r="C6"><v>1620</v></c>
-              <c r="D6"><v>121</v></c><c r="E6"><v>122</v></c><c r="F6"><v>123</v></c><c r="G6"><v>124</v></c>
-            </row>
-            <row r="7">
-              <c r="A7" t="s"><v>7</v></c><c r="B7"><v>2025</v></c><c r="C7"><v>2786</v></c>
-              <c r="D7"><v>131</v></c><c r="E7"><v>132</v></c><c r="F7"><v>133</v></c><c r="G7"><v>134</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // A lone caption cell ("Growth (%)") sits directly above a text-kind header row (Q1/Q2/Q3);
-    // the header's own cells are plain text, not numeric/date, so only a horizontal axis's
-    // always-probe rule (not the value-kind gate) picks up the caption as a title.
-    private const string CaptionedTextHeaderSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
-          <si><t>Growth (%)</t></si>
-          <si><t>Name</t></si>
-          <si><t>Q1</t></si>
-          <si><t>Q2</t></si>
-          <si><t>Q3</t></si>
-          <si><t>Foo</t></si>
-          <si><t>Bar</t></si>
-          <si><t>Baz</t></si>
-        </sst>
-        """;
-
-    private const string CaptionedTextHeaderSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1"><c r="B1" t="s"><v>0</v></c></row>
-            <row r="2">
-              <c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c><c r="C2" t="s"><v>3</v></c><c r="D2" t="s"><v>4</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>5</v></c><c r="B3"><v>10</v></c><c r="C3"><v>11</v></c><c r="D3"><v>12</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>6</v></c><c r="B4"><v>20</v></c><c r="C4"><v>21</v></c><c r="D4"><v>22</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>7</v></c><c r="B5"><v>30</v></c><c r="C5"><v>31</v></c><c r="D5"><v>32</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // Column A carries row labels for two sections; rows 2 and 6 are section headers with no
-    // data in B:C ("Funding" and "Loans"), each followed by their labeled data rows.
-    private const string AxisSectionsSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
-          <si><t>Funding</t></si>
-          <si><t>Deposits</t></si>
-          <si><t>Savings</t></si>
-          <si><t>Total Funding</t></si>
-          <si><t>Loans</t></si>
-          <si><t>Mortgages</t></si>
-          <si><t>Auto</t></si>
-          <si><t>Total Loans</t></si>
-        </sst>
-        """;
-
-    private const string AxisSectionsSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1"><v>2023</v></c>
-              <c r="C1"><v>2024</v></c>
-            </row>
-            <row r="2"><c r="A2" t="s"><v>0</v></c></row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>100</v></c>
-              <c r="C3"><v>110</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>200</v></c>
-              <c r="C4"><v>210</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>3</v></c>
-              <c r="B5"><v>300</v></c>
-              <c r="C5"><v>320</v></c>
-            </row>
-            <row r="6"><c r="A6" t="s"><v>4</v></c></row>
-            <row r="7">
-              <c r="A7" t="s"><v>5</v></c>
-              <c r="B7"><v>150</v></c>
-              <c r="C7"><v>160</v></c>
-            </row>
-            <row r="8">
-              <c r="A8" t="s"><v>6</v></c>
-              <c r="B8"><v>90</v></c>
-              <c r="C8"><v>95</v></c>
-            </row>
-            <row r="9">
-              <c r="A9" t="s"><v>7</v></c>
-              <c r="B9"><v>240</v></c>
-              <c r="C9"><v>255</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // The right-hand metric block runs two rows longer than the main table. Dense siblings use
-    // the leftmost table as the row-span anchor, so the extra right-side rows remain outside it.
-    private const string SiblingRowsLeftAnchorSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="8">
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-          <si><t>Other income</t></si>
-          <si><t>Other costs</t></si>
-          <si><t>CAGR</t></si>
-          <si><t>Avg</t></si>
-          <si><t>Metric</t></si>
-        </sst>
-        """;
-
-    private const string SiblingRowsLeftAnchorSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1"><v>2023</v></c>
-              <c r="C1"><v>2024</v></c>
-              <c r="E1" t="s"><v>5</v></c>
-              <c r="F1" t="s"><v>6</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>0</v></c>
-              <c r="B2"><v>100</v></c>
-              <c r="C2"><v>110</v></c>
-              <c r="E2"><v>0.1</v></c>
-              <c r="F2"><v>105</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>40</v></c>
-              <c r="C3"><v>44</v></c>
-              <c r="E3"><v>0.1</v></c>
-              <c r="F3"><v>42</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>66</v></c>
-              <c r="E4"><v>0.1</v></c>
-              <c r="F4"><v>63</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>3</v></c>
-              <c r="E5"><v>5</v></c>
-              <c r="F5"><v>6</v></c>
-            </row>
-            <row r="6">
-              <c r="A6" t="s"><v>4</v></c>
-              <c r="E6"><v>7</v></c>
-              <c r="F6"><v>8</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // Two co-extensive panels sit on either side of a shorter table in the gap. The side panels
-    // must not merge across that different-span table, because that would create overlapping fields.
-    private const string InterveningTableSstXml = """
-        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="9">
-          <si><t>Revenue</t></si>
-          <si><t>Costs</t></si>
-          <si><t>EBITDA</t></si>
-          <si><t>Tax</t></si>
-          <si><t>Cash</t></si>
-          <si><t>Current</t></si>
-          <si><t>Prior</t></si>
-          <si><t>Short A</t></si>
-          <si><t>Short B</t></si>
-        </sst>
-        """;
-
-    private const string InterveningTableSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="1">
-              <c r="B1"><v>2023</v></c>
-              <c r="C1"><v>2024</v></c>
-              <c r="F1" t="s"><v>5</v></c>
-              <c r="G1" t="s"><v>6</v></c>
-            </row>
-            <row r="2">
-              <c r="A2" t="s"><v>0</v></c>
-              <c r="B2"><v>100</v></c>
-              <c r="C2"><v>110</v></c>
-              <c r="F2"><v>10</v></c>
-              <c r="G2"><v>11</v></c>
-            </row>
-            <row r="3">
-              <c r="A3" t="s"><v>1</v></c>
-              <c r="B3"><v>40</v></c>
-              <c r="C3"><v>44</v></c>
-              <c r="D3" t="s"><v>7</v></c>
-              <c r="E3" t="s"><v>8</v></c>
-              <c r="F3"><v>20</v></c>
-              <c r="G3"><v>22</v></c>
-            </row>
-            <row r="4">
-              <c r="A4" t="s"><v>2</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>66</v></c>
-              <c r="D4"><v>1</v></c>
-              <c r="E4"><v>2</v></c>
-              <c r="F4"><v>30</v></c>
-              <c r="G4"><v>33</v></c>
-            </row>
-            <row r="5">
-              <c r="A5" t="s"><v>3</v></c>
-              <c r="B5"><v>25</v></c>
-              <c r="C5"><v>28</v></c>
-              <c r="D5"><v>3</v></c>
-              <c r="E5"><v>4</v></c>
-              <c r="F5"><v>40</v></c>
-              <c r="G5"><v>44</v></c>
-            </row>
-            <row r="6">
-              <c r="A6" t="s"><v>4</v></c>
-              <c r="B6"><v>35</v></c>
-              <c r="C6"><v>38</v></c>
-              <c r="F6"><v>50</v></c>
-              <c r="G6"><v>55</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
-
-    // Same shape as NumericMatrixSheetXml, but C3 is a value-less formula (no cached <v>, as
-    // openpyxl always writes formulas) instead of a plain number. The scanner sees an empty
-    // cell at C3 and must not carry the pending formula flag onto D3.
-    private const string ValuelessFormulaSheetXml = """
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <sheetData>
-            <row r="2">
-              <c r="B2"><v>0.01</v></c>
-              <c r="C2"><v>0.015</v></c>
-              <c r="D2"><v>0.02</v></c>
-              <c r="E2"><v>0.025</v></c>
-              <c r="F2"><v>0.03</v></c>
-            </row>
-            <row r="3">
-              <c r="A3"><v>0.04</v></c>
-              <c r="B3"><v>950</v></c>
-              <c r="C3"><f>B3*2</f></c>
-              <c r="D3"><v>956</v></c>
-              <c r="E3"><v>59</v></c>
-              <c r="F3"><v>962</v></c>
-            </row>
-            <row r="4">
-              <c r="A4"><v>0.05</v></c>
-              <c r="B4"><v>60</v></c>
-              <c r="C4"><v>963</v></c>
-              <c r="D4"><v>66</v></c>
-              <c r="E4"><v>969</v></c>
-              <c r="F4"><v>72</v></c>
-            </row>
-            <row r="5">
-              <c r="A5"><v>0.06</v></c>
-              <c r="B5"><v>970</v></c>
-              <c r="C5"><v>73</v></c>
-              <c r="D5"><v>976</v></c>
-              <c r="E5"><v>79</v></c>
-              <c r="F5"><v>982</v></c>
-            </row>
-            <row r="6">
-              <c r="A6"><v>0.07</v></c>
-              <c r="B6"><v>80</v></c>
-              <c r="C6"><v>983</v></c>
-              <c r="D6"><v>86</v></c>
-              <c r="E6"><v>989</v></c>
-              <c r="F6"><v>92</v></c>
-            </row>
-            <row r="7">
-              <c r="A7"><v>0.08</v></c>
-              <c r="B7"><v>990</v></c>
-              <c r="C7"><v>93</v></c>
-              <c r="D7"><v>996</v></c>
-              <c r="E7"><v>99</v></c>
-              <c r="F7"><v>1002</v></c>
-            </row>
-          </sheetData>
-        </worksheet>
-        """;
+    // A shorter table between two panels must prevent merging the panels across it.
+    private static readonly RowSpec[] InterveningTableRows =
+    [
+        Row(1, Number("B", 2023), Number("C", 2024), Text("F", "Current"), Text("G", "Prior")),
+        Row(2, Text("A", "Revenue"), Number("B", 100), Number("C", 110), Number("F", 10), Number("G", 11)),
+        Row(3, Text("A", "Costs"), Number("B", 40), Number("C", 44), Text("D", "Short A"), Text("E", "Short B"), Number("F", 20), Number("G", 22)),
+        Row(4, Text("A", "EBITDA"), Number("B", 60), Number("C", 66), Number("D", 1), Number("E", 2), Number("F", 30), Number("G", 33)),
+        Row(5, Text("A", "Tax"), Number("B", 25), Number("C", 28), Number("D", 3), Number("E", 4), Number("F", 40), Number("G", 44)),
+        Row(6, Text("A", "Cash"), Number("B", 35), Number("C", 38), Number("F", 50), Number("G", 55)),
+    ];
 
     [Fact]
     public void StackedSections_SplitAtReprintedHeaders_WithGroupTitles()
     {
-        SheetLayoutInfo layout = Infer(StackedSectionsSheetXml, StackedSectionsSstXml);
+        SheetLayoutInfo layout = Infer(StackedSectionsRows);
 
         AssertField(layout, "B3:D5", 2);
         AssertField(layout, "B9:D11", 2);
@@ -746,19 +153,17 @@ public sealed class LayoutInferenceSyntheticTests
         AssertAxis(layout, "A9:A11", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
         AssertAxis(layout, "B2:D2", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
         AssertAxis(layout, "B8:D8", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
-
         Assert.Equal(["Income statement", "Balance sheet"], layout.Groups.Select(static group => group.Title));
     }
 
     [Fact]
     public void SiblingFields_ShareRowLabelAxis_AcrossEmptySpacer()
     {
-        SheetLayoutInfo layout = Infer(SiblingFieldsSheetXml, SiblingFieldsSstXml);
+        SheetLayoutInfo layout = Infer(SiblingFieldsRows);
 
         MeasureFieldInfo left = AssertField(layout, "B2:D5", 2);
         MeasureFieldInfo right = AssertField(layout, "F2:G5", 2);
         LayoutAxis labelAxis = AssertAxis(layout, "A2:A5", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
-
         Assert.Contains(labelAxis.Id, left.AxisIds);
         Assert.Contains(labelAxis.Id, right.AxisIds);
     }
@@ -766,7 +171,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void NumericCoordinateMatrix_GetsOwnAxes()
     {
-        SheetLayoutInfo layout = Infer(NumericMatrixSheetXml, EmptySstXml);
+        SheetLayoutInfo layout = Infer(NumericMatrixRows());
 
         MeasureFieldInfo matrix = AssertField(layout, "B3:F7", 2);
         LayoutAxis waccAxis = AssertAxis(layout, "A3:A7", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
@@ -780,7 +185,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void ValuelessFormulaCell_DoesNotMarkNextCellAsFormula()
     {
-        SheetLayoutInfo layout = Infer(ValuelessFormulaSheetXml, EmptySstXml);
+        SheetLayoutInfo layout = Infer(NumericMatrixRows(valueLessFormula: true));
 
         MeasureFieldInfo field = AssertField(layout, "B3:F7", 2);
         Assert.Equal(0, field.Profile.FormulaCount);
@@ -789,7 +194,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void LeadingYearColumn_PeelsIntoContextAxis()
     {
-        SheetLayoutInfo layout = Infer(LeadingYearColumnSheetXml, LeadingYearColumnSstXml);
+        SheetLayoutInfo layout = Infer(LeadingYearColumnRows);
 
         MeasureFieldInfo field = AssertField(layout, "C2:D7", 3);
         LayoutAxis primary = AssertAxis(layout, "A2:A7", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
@@ -801,35 +206,31 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void CalendarGrid_DoesNotBecomePhantomMatrix()
     {
-        SheetLayoutInfo layout = Infer(CalendarGridSheetXml, CalendarGridSstXml);
+        SheetLayoutInfo layout = Infer(CalendarGridRows);
 
-        // The whole grid (day numbers included) stays one dense field under the day-name text
-        // header; no B3:G5 (or any other) matrix carves the day numbers out as coordinates.
         MeasureFieldInfo field = AssertField(layout, "A2:G5", 1);
         LayoutAxis dayNames = AssertAxis(layout, "A1:G1", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
         Assert.Equal(LayoutAxisValueKind.Text, dayNames.ValueKind);
         Assert.Contains(dayNames.Id, field.AxisIds);
-        Assert.DoesNotContain(layout.MeasureFields, static f => f.Range == ExcelRange.Parse("B3:G5"));
+        Assert.DoesNotContain(layout.MeasureFields, static field => field.Range == ExcelRange.Parse("B3:G5"));
     }
 
     [Fact]
     public void PricingTable_UniformFirstRowDoesNotEatTextHeader()
     {
-        SheetLayoutInfo layout = Infer(PricingTableSheetXml, PricingTableSstXml);
+        SheetLayoutInfo layout = Infer(PricingTableRows);
 
-        // The text header row (Quantity, North, South, East) survives intact over the whole
-        // table, including the uniform Quantity column; no B3:D5 matrix eats it.
         MeasureFieldInfo field = AssertField(layout, "A2:D5", 1);
         LayoutAxis header = AssertAxis(layout, "A1:D1", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
         Assert.Equal(LayoutAxisValueKind.Text, header.ValueKind);
         Assert.Contains(header.Id, field.AxisIds);
-        Assert.DoesNotContain(layout.MeasureFields, static f => f.Range == ExcelRange.Parse("B3:D5"));
+        Assert.DoesNotContain(layout.MeasureFields, static field => field.Range == ExcelRange.Parse("B3:D5"));
     }
 
     [Fact]
     public void BandOverYearHeader_YearRowStaysOutOfMeasureField()
     {
-        SheetLayoutInfo layout = Infer(BandOverYearHeaderSheetXml, BandOverYearHeaderSstXml);
+        SheetLayoutInfo layout = Infer(BandOverYearHeaderRows);
 
         MeasureFieldInfo field = AssertField(layout, "B3:E5", 2);
         LayoutAxis years = AssertAxis(layout, "B2:E2", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
@@ -842,7 +243,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void NonMonotonicIntegerColumn_StaysInMeasureField()
     {
-        SheetLayoutInfo layout = Infer(NonMonotonicUnitsColumnSheetXml, NonMonotonicUnitsColumnSstXml);
+        SheetLayoutInfo layout = Infer(NonMonotonicUnitsColumnRows);
 
         AssertField(layout, "B2:D4", 2);
         Assert.DoesNotContain(
@@ -854,20 +255,17 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void EmbeddedForecastRow_DoesNotSeedPhantomMatrix()
     {
-        SheetLayoutInfo layout = Infer(EmbeddedForecastRowSheetXml, EmbeddedForecastRowSstXml);
+        SheetLayoutInfo layout = Infer(EmbeddedForecastRows);
 
-        // The whole table stays one field spanning all six data rows; the uniform-stepped
-        // forecast row (4) and the uniform-stepped coordinate-look-alike column below it (C5:C7)
-        // must not carve out a separate D5:G7 matrix.
         AssertField(layout, "C2:G7", 3);
-        Assert.DoesNotContain(layout.MeasureFields, static f => f.Range == ExcelRange.Parse("D5:G7"));
+        Assert.DoesNotContain(layout.MeasureFields, static field => field.Range == ExcelRange.Parse("D5:G7"));
         Assert.Single(layout.MeasureFields);
     }
 
     [Fact]
     public void HorizontalTextAxis_PicksUpLoneCaptionCellAbove()
     {
-        SheetLayoutInfo layout = Infer(CaptionedTextHeaderSheetXml, CaptionedTextHeaderSstXml);
+        SheetLayoutInfo layout = Infer(CaptionedTextHeaderRows);
 
         LayoutAxis header = AssertAxis(layout, "B2:D2", LayoutAxisOrientation.Horizontal, LayoutAxisRole.Primary);
         Assert.Equal(LayoutAxisValueKind.Text, header.ValueKind);
@@ -877,7 +275,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void AxisSections_FromNoDataHeaderRows()
     {
-        SheetLayoutInfo layout = Infer(AxisSectionsSheetXml, AxisSectionsSstXml);
+        SheetLayoutInfo layout = Infer(AxisSectionRows);
 
         LayoutAxis labelAxis = AssertAxis(layout, "A3:A9", LayoutAxisOrientation.Vertical, LayoutAxisRole.Primary);
         Assert.Contains(labelAxis.Sections, static section =>
@@ -889,7 +287,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void SiblingRows_UseLeftmostFieldAsRowSpanAnchor()
     {
-        SheetLayoutInfo layout = Infer(SiblingRowsLeftAnchorSheetXml, SiblingRowsLeftAnchorSstXml);
+        SheetLayoutInfo layout = Infer(SiblingRowsLeftAnchorRows);
 
         AssertField(layout, "B2:C4", 2);
         AssertField(layout, "E2:F4", 2);
@@ -899,7 +297,7 @@ public sealed class LayoutInferenceSyntheticTests
     [Fact]
     public void MergeColumnAdjacentFields_DoesNotMergeAcrossDifferentSpanTable()
     {
-        SheetLayoutInfo layout = Infer(InterveningTableSheetXml, InterveningTableSstXml);
+        SheetLayoutInfo layout = Infer(InterveningTableRows);
 
         AssertFieldRange(layout, "B2:C6");
         AssertFieldRange(layout, "D4:E5");
@@ -907,9 +305,19 @@ public sealed class LayoutInferenceSyntheticTests
         AssertNoOverlappingFields(layout);
     }
 
-    private static SheetLayoutInfo Infer(string sheetXml, string sstXml)
+    private static RowSpec[] NumericMatrixRows(bool valueLessFormula = false) =>
+    [
+        Row(2, Number("B", 0.01), Number("C", 0.015), Number("D", 0.02), Number("E", 0.025), Number("F", 0.03)),
+        Row(3, Number("A", 0.04), Number("B", 950), valueLessFormula ? Formula("C", "B3*2") : Number("C", 53), Number("D", 956), Number("E", 59), Number("F", 962)),
+        Row(4, Number("A", 0.05), Number("B", 60), Number("C", 963), Number("D", 66), Number("E", 969), Number("F", 72)),
+        Row(5, Number("A", 0.06), Number("B", 970), Number("C", 73), Number("D", 976), Number("E", 79), Number("F", 982)),
+        Row(6, Number("A", 0.07), Number("B", 80), Number("C", 983), Number("D", 86), Number("E", 989), Number("F", 92)),
+        Row(7, Number("A", 0.08), Number("B", 990), Number("C", 93), Number("D", 996), Number("E", 99), Number("F", 1002)),
+    ];
+
+    private static SheetLayoutInfo Infer(RowSpec[] rows)
     {
-        using var ms = LayoutTestWorkbook.Build(sheetXml, sstXml);
+        using var ms = LayoutTestWorkbook.Build(rows);
         using var workbook = ExcelWorkbook.Open(ms);
         return Assert.IsType<SheetAnalysisInferred>(workbook.AnalyzeSheet("Data").Inferred).Layout;
     }
