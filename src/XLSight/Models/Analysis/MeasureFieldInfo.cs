@@ -13,7 +13,7 @@ public sealed class MeasureFieldInfo
     public required IReadOnlyList<string> AxisIds { get; init; }
 
     /// <summary>Gets the dimensional rank, equal to the number of attached axes.</summary>
-    public required int Rank { get; init; }
+    public int Rank => AxisIds.Count;
 
     /// <summary>Gets statistics scoped to the measure field cells.</summary>
     public required MeasureFieldProfile Profile { get; init; }

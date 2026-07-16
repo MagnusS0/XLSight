@@ -13,7 +13,7 @@ internal static class SheetLayoutInference
             return SheetLayoutInfo.Empty;
         }
 
-        var sheet = SheetFacts.From(cells, sharedStrings);
+        var sheet = new SheetFacts(cells, sharedStrings);
         var occupied = new List<ExcelRange>();
 
         List<FieldCandidate> matrices = FindMatrixFields(sheet);
@@ -859,7 +859,6 @@ internal static class SheetLayoutInference
             Id = $"field{id}",
             Range = range,
             AxisIds = axisIds,
-            Rank = axisIds.Length,
             Profile = sheet.BuildProfile(range),
         };
     }
@@ -1224,7 +1223,6 @@ internal static class SheetLayoutInference
                 ValueKind = axis.ValueKind,
                 Role = axis.Role,
                 Range = axis.Range,
-                Coverage = axis.Coverage,
                 Samples = axis.Samples,
                 Sections = sections,
             };
@@ -1272,7 +1270,6 @@ internal static class SheetLayoutInference
                 Role = role,
                 ValueKind = valueKind,
                 Range = range,
-                Coverage = orientation == LayoutAxisOrientation.Vertical ? range.Height : range.Width,
                 Samples = sheet.GetSamples(range),
             };
             _axesByKey.Add(key, axis);
@@ -1324,7 +1321,7 @@ internal static class SheetLayoutInference
         private readonly List<int> _rowNumbers;
         private readonly ISharedStringSource _sharedStrings;
 
-        private SheetFacts(LayoutCellStore store, ISharedStringSource sharedStrings)
+        public SheetFacts(LayoutCellStore store, ISharedStringSource sharedStrings)
         {
             _store = store;
             _rowNumbers = store.RowNumbers;
@@ -1338,9 +1335,6 @@ internal static class SheetLayoutInference
         public int CellCount => _store.Count;
 
         public LayoutCellFact CellAt(int index) => _store[index];
-
-        public static SheetFacts From(LayoutCellStore cells, ISharedStringSource sharedStrings) =>
-            new(cells.IsSorted ? cells : cells.Rebuilt(), sharedStrings);
 
         /// <summary>Cell-index bounds [Lo, Hi) of the row at <paramref name="rowIndex"/> into <see cref="Rows"/>.</summary>
         public (int Lo, int Hi) RowSegment(int rowIndex) =>
@@ -1684,23 +1678,58 @@ internal static class SheetLayoutInference
 
         public MeasureFieldProfile BuildProfile(ExcelRange range)
         {
-            var profile = new ProfileAccumulator();
+            int cellCount = 0;
+            int numericCount = 0;
+            int textCount = 0;
+            int formulaCount = 0;
+            double min = 0;
+            double max = 0;
+            bool hasNumeric = false;
+
             foreach ((int lo, int hi) in GetSegments(range))
             {
                 for (int i = lo; i < hi; i++)
                 {
-                    profile.Add(_store[i]);
+                    LayoutCellFact cell = _store[i];
+                    cellCount++;
+                    if ((cell.KindMask & LayoutKindMask.Text) != LayoutKindMask.None)
+                    {
+                        textCount++;
+                    }
+
+                    if ((cell.KindMask & LayoutKindMask.Formula) != LayoutKindMask.None)
+                    {
+                        formulaCount++;
+                    }
+
+                    if (!cell.HasNumericValue)
+                    {
+                        continue;
+                    }
+
+                    numericCount++;
+                    if (!hasNumeric)
+                    {
+                        min = cell.NumericValue;
+                        max = cell.NumericValue;
+                        hasNumeric = true;
+                    }
+                    else
+                    {
+                        min = Math.Min(min, cell.NumericValue);
+                        max = Math.Max(max, cell.NumericValue);
+                    }
                 }
             }
 
             return new MeasureFieldProfile
             {
-                CellCount = profile.CellCount,
-                NumericCount = profile.NumericCount,
-                TextCount = profile.TextCount,
-                FormulaCount = profile.FormulaCount,
-                MinNumeric = profile.HasNumeric ? profile.Min : null,
-                MaxNumeric = profile.HasNumeric ? profile.Max : null,
+                CellCount = cellCount,
+                NumericCount = numericCount,
+                TextCount = textCount,
+                FormulaCount = formulaCount,
+                MinNumeric = hasNumeric ? min : null,
+                MaxNumeric = hasNumeric ? max : null,
             };
         }
 
@@ -1777,52 +1806,6 @@ internal static class SheetLayoutInference
             }
 
             return samples;
-        }
-
-        [StructLayout(LayoutKind.Auto)]
-        private struct ProfileAccumulator
-        {
-            public int CellCount;
-            public int NumericCount;
-            public int TextCount;
-            public int FormulaCount;
-            public double Min;
-            public double Max;
-            public bool HasNumeric;
-
-            public void Add(LayoutCellFact cell)
-            {
-                CellCount++;
-                if ((cell.KindMask & LayoutKindMask.Text) != LayoutKindMask.None)
-                {
-                    TextCount++;
-                }
-
-                if ((cell.KindMask & LayoutKindMask.Formula) != LayoutKindMask.None)
-                {
-                    FormulaCount++;
-                }
-
-                if (cell.HasNumericValue)
-                {
-                    AddNumeric(cell.NumericValue);
-                }
-            }
-
-            private void AddNumeric(double value)
-            {
-                NumericCount++;
-                if (!HasNumeric)
-                {
-                    Min = value;
-                    Max = value;
-                    HasNumeric = true;
-                    return;
-                }
-
-                Min = Math.Min(Min, value);
-                Max = Math.Max(Max, value);
-            }
         }
     }
 }

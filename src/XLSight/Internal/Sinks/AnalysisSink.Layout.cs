@@ -14,8 +14,14 @@ internal partial struct AnalysisSink
         switch (value.CellType)
         {
             case CellType.Text:
-                (mask, isHeaderLike, sharedStringIndex, inlineText) = CreateTextFact(value, rawIndex);
+            {
+                string text = value.AsText().Trim();
+                mask = LayoutKindMask.Text;
+                isHeaderLike = IsHeaderLikeText(text);
+                sharedStringIndex = rawIndex;
+                inlineText = rawIndex >= 0 ? null : CapText(text);
                 break;
+            }
 
             case CellType.Number:
                 numericValue = value.AsNumber();
@@ -41,15 +47,9 @@ internal partial struct AnalysisSink
                 break;
         }
 
-        if (isFormula)
-        {
-            mask |= LayoutKindMask.Formula;
-        }
+        if (isFormula) { mask |= LayoutKindMask.Formula; }
 
-        if (mask == LayoutKindMask.None)
-        {
-            return;
-        }
+        if (mask == LayoutKindMask.None) { return; }
 
         _layoutCells.Add(new LayoutCellFact(
             _currentRow,
@@ -60,13 +60,6 @@ internal partial struct AnalysisSink
             isHeaderLike,
             sharedStringIndex,
             inlineText));
-    }
-
-    private static (LayoutKindMask Mask, bool IsHeaderLike, int SharedStringIndex, string? InlineText)
-        CreateTextFact(ExcelCellValue value, int rawIndex)
-    {
-        string text = value.AsText().Trim();
-        return (LayoutKindMask.Text, IsHeaderLikeText(text), rawIndex, rawIndex >= 0 ? null : CapText(text));
     }
 
     private static string CapText(string text)
