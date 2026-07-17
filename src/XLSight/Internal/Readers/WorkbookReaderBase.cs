@@ -1,5 +1,5 @@
-using System.Diagnostics.CodeAnalysis;
 using XLSight.Analysis;
+using System.Diagnostics.CodeAnalysis;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Scanning;
@@ -369,12 +369,12 @@ internal abstract class WorkbookReaderBase<
         AnalysisLevel level,
         AnalyzerMetadata metadata,
         List<SheetInfo> sheets) => new()
-        {
-            Level = level,
-            Sheets = sheets,
-            Exact = metadata.WorkbookExact,
-            AnalyzedAtUtc = DateTimeOffset.UtcNow,
-        };
+    {
+        Level = level,
+        Sheets = sheets,
+        Exact = metadata.WorkbookExact,
+        AnalyzedAtUtc = DateTimeOffset.UtcNow,
+    };
 
     private Stream? OpenVbaProjectStream() => package.TryOpenEntryBuffered("xl/vbaProject.bin");
 

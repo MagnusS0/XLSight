@@ -2,8 +2,8 @@ using System.Buffers;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
-using XLSight.Analysis;
 using XLSight.Internal.Analysis;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Sinks;
 
@@ -223,10 +223,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
         bool isFormula = _nextCellIsFormula;
         _nextCellIsFormula = false;
-        if (_level >= AnalysisLevel.Full)
-        {
-            AddRowCell(column, value, isFormula);
-        }
+        if (_level >= AnalysisLevel.Full) { AddRowCell(column, value, isFormula); }
         return true;
     }
 
@@ -271,12 +268,8 @@ internal partial struct AnalysisSink : IByteSheetSink
         {
             return new SheetInfo
             {
-                Level = level,
-                SheetName = sheetName,
-                SheetIndex = sheetIndex,
-                Exact = exact,
-                Observed = null,
-                Inferred = null,
+                Level = level, SheetName = sheetName, SheetIndex = sheetIndex,
+                Exact = exact, Observed = null, Inferred = null,
             };
         }
 
@@ -289,9 +282,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
         return new SheetInfo
         {
-            Level = level,
-            SheetName = sheetName,
-            SheetIndex = sheetIndex,
+            Level = level, SheetName = sheetName, SheetIndex = sheetIndex,
             Exact = exact,
             Observed = observed,
             Inferred = level >= AnalysisLevel.Full ? inferred : null,

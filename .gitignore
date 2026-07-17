@@ -505,5 +505,3 @@ viz/*
 
 # Claude Code agent working directories
 .claude/
-spreadsheet*/
-spreadsheet*.zip

@@ -1,9 +1,9 @@
-using XLSight.Analysis;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Packaging;
 using XLSight.Internal.Scanning;
 using XLSight.Internal.Sinks;
+using XLSight.Analysis;
 
 namespace XLSight.Internal.Readers.Xlsx;
 
