@@ -1,4 +1,4 @@
-namespace XLSight.Analysis.Layout;
+namespace XLSight.Layout;
 
 /// <summary>Describes how a layout axis participates in a measure field.</summary>
 public enum LayoutAxisRole

@@ -1,4 +1,4 @@
-using XLSight.Analysis.Layout;
+using XLSight.Layout;
 using Xunit;
 
 namespace XLSight.Layout.Tests.Analysis;
@@ -61,7 +61,7 @@ public sealed class LayoutApiTests
     public void AnalyzeLayout_XlsmPath_UsesOpenXmlScanSpi()
     {
         string path = Path.Combine(Path.GetTempPath(), $"xlsight-layout-{Guid.NewGuid():N}.xlsm");
-        File.Copy(TestDataFile("complex_workbook.xlsx"), path);
+        File.Copy(TestDataFile("complex_workbook.xlsm"), path);
         try
         {
             using var workbook = ExcelWorkbook.Open(path);

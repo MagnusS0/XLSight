@@ -1,4 +1,4 @@
-namespace XLSight.Analysis.Layout;
+namespace XLSight.Layout;
 
 /// <summary>Identifies labels or coordinates that explain one or more measure fields.</summary>
 public sealed class LayoutAxis

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace XLSight.Analysis.Layout.Internal;
+namespace XLSight.Layout.Internal;
 
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct LayoutCellFact(

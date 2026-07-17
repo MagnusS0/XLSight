@@ -34,6 +34,20 @@ internal static class LayoutTestWorkbook
 
     public static RowSpec Row(int number, params CellSpec[] cells) => new(number, cells);
 
+    public static string ColumnName(int column)
+    {
+        Span<char> buffer = stackalloc char[3];
+        int index = buffer.Length;
+        while (column > 0)
+        {
+            column--;
+            buffer[--index] = (char)('A' + (column % 26));
+            column /= 26;
+        }
+
+        return new string(buffer[index..]);
+    }
+
     public static CellSpec Text(string column, string value) =>
         new(column, CellKind.Text, TextValue: value);
 

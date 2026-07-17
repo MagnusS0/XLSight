@@ -1,4 +1,4 @@
-namespace XLSight.Analysis.Layout.Internal;
+namespace XLSight.Layout.Internal;
 
 /// <summary>
 /// Chunked append-only store for layout cell facts with the CSR row index and numeric prefix

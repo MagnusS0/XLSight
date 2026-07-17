@@ -6,7 +6,7 @@ format-neutral worksheet scan path.
 
 ```csharp
 using XLSight;
-using XLSight.Analysis.Layout;
+using XLSight.Layout;
 
 using var workbook = ExcelWorkbook.Open("model.xlsx");
 SheetLayoutInfo layout = workbook.AnalyzeLayout("Financials");

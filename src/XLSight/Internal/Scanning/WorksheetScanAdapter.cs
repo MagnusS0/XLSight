@@ -25,6 +25,7 @@ internal struct WorksheetScanAdapter<TSink>(
 
     public void OnRowStart(int rowIndex)
     {
+        _cancellationToken.ThrowIfCancellationRequested();
         _currentRow = rowIndex;
         _nextCellIsFormula = false;
     }
@@ -33,7 +34,6 @@ internal struct WorksheetScanAdapter<TSink>(
 
     public bool OnCell(int column, CellDataKind kind, int styleIdx, ExcelCellValue value, int rawIndex)
     {
-        _cancellationToken.ThrowIfCancellationRequested();
         _sink.OnCell(_currentRow, column, in value, _nextCellIsFormula);
         _nextCellIsFormula = false;
         return true;

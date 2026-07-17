@@ -1,4 +1,4 @@
-using XLSight.Analysis.Layout;
+using XLSight.Layout;
 using Xunit;
 using static XLSight.Layout.Tests.Analysis.LayoutTestWorkbook;
 

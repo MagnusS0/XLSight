@@ -1,4 +1,4 @@
-namespace XLSight.Analysis.Layout;
+namespace XLSight.Layout;
 
 /// <summary>Describes a value-bearing field attached to zero or more layout axes.</summary>
 public sealed class MeasureFieldInfo

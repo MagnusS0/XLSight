@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 
-namespace XLSight.Analysis.Layout.Internal;
+namespace XLSight.Layout.Internal;
 
 internal static class SheetLayoutInference
 {
@@ -37,7 +37,7 @@ internal static class SheetLayoutInference
         List<ExcelRange> denseRanges = [.. dense.Select(static candidate => candidate.Range)];
         occupied.AddRange(denseRanges);
 
-        var vector = CoalesceVectorFields(FindVectorFields(sheet, occupied)).ToList();
+        List<FieldCandidate> vector = CoalesceVectorFields(FindVectorFields(sheet, occupied));
 
         var candidates = new List<FieldCandidate>(dense.Count + matrices.Count + vector.Count);
         candidates.AddRange(dense);
@@ -108,6 +108,15 @@ internal static class SheetLayoutInference
             int runStart = lo;
             while (runStart < hi)
             {
+                // A matrix needs a coordinate-column seed just left of its run start; vetting
+                // that cheap precondition before extending keeps a wide rejected uniform run
+                // from re-extending every suffix, which is quadratic in the run's width.
+                if (FindCoordinateFirstRow(sheet, sheet.Rows[rowIndex], sheet.CellAt(runStart).Column - 1) == 0)
+                {
+                    runStart++;
+                    continue;
+                }
+
                 int runEnd = ExtendUniformRun(sheet, runStart, hi);
                 if (runEnd - runStart >= 3 &&
                     TryCreateMatrix(sheet, sheet.Rows[rowIndex], runStart, runEnd, claimed) is { } matrix)
@@ -202,18 +211,7 @@ internal static class SheetLayoutInference
             return null;
         }
 
-        // The row coordinate column starts within a few rows below the header run (a text
-        // label like "Return Rate" may sit between) and must itself be monotonic-uniform.
-        int firstRow = 0;
-        for (int row = headerRow + 1; row <= headerRow + 3; row++)
-        {
-            if (sheet.TryGetCell(row, coordinateCol, out var cell) && SheetFacts.IsMeasureCell(cell))
-            {
-                firstRow = row;
-                break;
-            }
-        }
-
+        int firstRow = FindCoordinateFirstRow(sheet, headerRow, coordinateCol);
         if (firstRow == 0)
         {
             return null;
@@ -226,13 +224,30 @@ internal static class SheetLayoutInference
         }
 
         var range = new ExcelRange(new ExcelAddress(startCol, firstRow), new ExcelAddress(endCol, lastRow));
-        int area = range.Width * range.Height;
-        if (OverlapsAny(range, claimed) || sheet.CountNumericCells(firstRow, lastRow, startCol, endCol) * 2 < area)
+        // Excel-sized ranges (16_384 x 1_048_576) overflow 32-bit area math.
+        long area = (long)range.Width * range.Height;
+        if (OverlapsAny(range, claimed) || sheet.CountNumericCells(firstRow, lastRow, startCol, endCol) * 2L < area)
         {
             return null;
         }
 
         return new FieldCandidate(range, headerRow, startCol, endCol);
+    }
+
+    // First row of the coordinate column's seed cell, or 0 when there is none. The row
+    // coordinate column starts within a few rows below the header run (a text label like
+    // "Return Rate" may sit between) and must itself be monotonic-uniform.
+    private static int FindCoordinateFirstRow(SheetFacts sheet, int headerRow, int coordinateCol)
+    {
+        for (int row = headerRow + 1; row <= headerRow + 3; row++)
+        {
+            if (sheet.TryGetCell(row, coordinateCol, out var cell) && SheetFacts.IsMeasureCell(cell))
+            {
+                return row;
+            }
+        }
+
+        return 0;
     }
 
     private static int ExtendUniformColumnRun(SheetFacts sheet, int col, int firstRow)
@@ -686,38 +701,105 @@ internal static class SheetLayoutInference
     }
 
     // Headerless blocks (e.g. stacked assumption tables) yield one single-column vector per column.
-    // Merge column-adjacent vectors whose row spans overlap back into a single block so a label
-    // column anchors one table instead of N disjoint columns.
-    private static IEnumerable<FieldCandidate> CoalesceVectorFields(IEnumerable<FieldCandidate> vectors)
+    // Vectors whose columns are adjacent and whose row spans overlap belong to one block; grouping
+    // them as connected components (order-independent, transitive across prior connections) and
+    // emitting one bounding range per component lets a label column anchor one table instead of N
+    // disjoint columns, without the leftward misses of a directional greedy merge.
+    private static List<FieldCandidate> CoalesceVectorFields(IEnumerable<FieldCandidate> vectors)
     {
         var pending = vectors
             .OrderBy(static candidate => candidate.Range.TopLeft.Row)
             .ThenBy(static candidate => candidate.Range.TopLeft.Column)
             .ToList();
 
+        int[] root = FindConnectedComponents(pending);
+
+        // The first member in (row, column) order seeds each component, so the emitted
+        // candidate keeps the leftmost-topmost vector's own header column, as before.
+        var componentByRoot = new Dictionary<int, int>();
+        var components = new List<(FieldCandidate Seed, ExcelRange Bounds)>();
         for (int i = 0; i < pending.Count; i++)
         {
-            ExcelRange range = pending[i].Range;
-            for (int j = i + 1; j < pending.Count;)
+            if (componentByRoot.TryGetValue(root[i], out int index))
             {
-                ExcelRange other = pending[j].Range;
-                bool columnAdjacent = other.TopLeft.Column == range.BottomRight.Column + 1;
-                bool rowsOverlap = other.TopLeft.Row <= range.BottomRight.Row && other.BottomRight.Row >= range.TopLeft.Row;
-                if (columnAdjacent && rowsOverlap)
-                {
-                    range = new ExcelRange(
-                        new ExcelAddress(range.TopLeft.Column, Math.Min(range.TopLeft.Row, other.TopLeft.Row)),
-                        new ExcelAddress(other.BottomRight.Column, Math.Max(range.BottomRight.Row, other.BottomRight.Row)));
-                    pending.RemoveAt(j);
-                }
-                else
-                {
-                    j++;
-                }
+                components[index] = (components[index].Seed, Union(components[index].Bounds, pending[i].Range));
+            }
+            else
+            {
+                componentByRoot[root[i]] = components.Count;
+                components.Add((pending[i], pending[i].Range));
+            }
+        }
+
+        MergeOverlappingComponents(components);
+        return [.. components.Select(static component => component.Seed with { Range = component.Bounds })];
+    }
+
+    // Union-find over vector indices; the result maps each vector to its component's root.
+    private static int[] FindConnectedComponents(List<FieldCandidate> pending)
+    {
+        int[] parent = [.. Enumerable.Range(0, pending.Count)];
+
+        int Find(int x)
+        {
+            while (parent[x] != x)
+            {
+                parent[x] = parent[parent[x]];
+                x = parent[x];
             }
 
-            yield return pending[i] with { Range = range };
+            return x;
         }
+
+        for (int i = 0; i < pending.Count; i++)
+        {
+            for (int j = i + 1; j < pending.Count; j++)
+            {
+                if (VectorsConnect(pending[i].Range, pending[j].Range))
+                {
+                    int rootA = Find(i);
+                    int rootB = Find(j);
+                    if (rootA != rootB)
+                    {
+                        parent[rootA] = rootB;
+                    }
+                }
+            }
+        }
+
+        return [.. Enumerable.Range(0, pending.Count).Select(Find)];
+    }
+
+    // A component's bounding range can swallow cells of another component (e.g. an isolated
+    // vector inside the L-shaped hull of its neighbors); merge such collisions so the emitted
+    // vector fields never overlap.
+    private static void MergeOverlappingComponents(List<(FieldCandidate Seed, ExcelRange Bounds)> components)
+    {
+        for (bool merged = true; merged;)
+        {
+            merged = false;
+            for (int i = 0; i < components.Count && !merged; i++)
+            {
+                for (int j = i + 1; j < components.Count; j++)
+                {
+                    if (Overlaps(components[i].Bounds, components[j].Bounds))
+                    {
+                        components[i] = (components[i].Seed, Union(components[i].Bounds, components[j].Bounds));
+                        components.RemoveAt(j);
+                        merged = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool VectorsConnect(ExcelRange left, ExcelRange right)
+    {
+        bool columnsAdjacent = right.TopLeft.Column == left.BottomRight.Column + 1 ||
+            left.TopLeft.Column == right.BottomRight.Column + 1;
+        bool rowsOverlap = right.TopLeft.Row <= left.BottomRight.Row && right.BottomRight.Row >= left.TopLeft.Row;
+        return columnsAdjacent && rowsOverlap;
     }
 
     // One row-major pass with per-column run state: measure cells in a column chain into one

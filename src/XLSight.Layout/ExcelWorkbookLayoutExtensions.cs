@@ -1,6 +1,6 @@
-using XLSight.Analysis.Layout.Internal;
+using XLSight.Layout.Internal;
 
-namespace XLSight.Analysis.Layout;
+namespace XLSight.Layout;
 
 /// <summary>Provides optional worksheet layout analysis for <see cref="ExcelWorkbook"/>.</summary>
 public static class ExcelWorkbookLayoutExtensions

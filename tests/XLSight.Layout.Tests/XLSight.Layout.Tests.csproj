@@ -8,7 +8,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="TestData/**/*">
+    <None Update="TestData/**/*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="../XLSight.Tests/TestData/complex_workbook.xlsx" Link="TestData/complex_workbook.xlsx">

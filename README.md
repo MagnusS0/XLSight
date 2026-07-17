@@ -295,7 +295,7 @@ dotnet add package XLSight.Layout
 ```
 
 ```csharp
-using XLSight.Analysis.Layout;
+using XLSight.Layout;
 
 SheetLayoutInfo layout = workbook.AnalyzeLayout("Financials");
 ```

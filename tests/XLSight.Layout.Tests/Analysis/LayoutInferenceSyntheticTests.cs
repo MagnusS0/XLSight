@@ -1,4 +1,4 @@
-using XLSight.Analysis.Layout;
+using XLSight.Layout;
 using Xunit;
 using static XLSight.Layout.Tests.Analysis.LayoutTestWorkbook;
 
@@ -303,6 +303,23 @@ public sealed class LayoutInferenceSyntheticTests
         AssertFieldRange(layout, "D4:E5");
         AssertFieldRange(layout, "F2:G6");
         AssertNoOverlappingFields(layout);
+    }
+
+    // A wide uniform-stepped row with no coordinate column can never seed a matrix; the scan
+    // must reject the whole failed run (without probing quadratically) and detect nothing.
+    [Fact]
+    public void WideUniformRow_WithoutCoordinateColumn_YieldsNoFields()
+    {
+        var cells = new CellSpec[256];
+        for (int i = 0; i < cells.Length; i++)
+        {
+            cells[i] = Number(ColumnName(i + 1), 10.25 + (0.5 * i));
+        }
+
+        SheetLayoutInfo layout = Infer([Row(1, cells)]);
+
+        Assert.Empty(layout.MeasureFields);
+        Assert.Empty(layout.Axes);
     }
 
     private static RowSpec[] NumericMatrixRows(bool valueLessFormula = false) =>

@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using XLSight.Internal.Scanning;
 
-namespace XLSight.Analysis.Layout.Internal;
+namespace XLSight.Layout.Internal;
 
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct LayoutScanSink : IWorksheetScanSink

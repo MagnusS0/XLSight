@@ -1,4 +1,4 @@
-namespace XLSight.Analysis.Layout;
+namespace XLSight.Layout;
 
 /// <summary>Describes statistics scoped to a single measure field.</summary>
 public sealed class MeasureFieldProfile
