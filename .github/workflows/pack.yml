@@ -25,7 +25,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.1xx'
+          dotnet-version: '10.x'
           cache: true
           cache-dependency-path: '**/packages.lock.json'
 
@@ -36,7 +36,7 @@ jobs:
         run: dotnet build XLSight.slnx --no-restore -c Release -m:1
 
       - name: Test
-        run: dotnet test XLSight.slnx --no-build -c Release -m:1
+        run: dotnet test --solution XLSight.slnx --no-build -c Release --max-parallel-test-modules 1
 
       - name: Pack
         run: |
