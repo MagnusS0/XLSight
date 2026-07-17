@@ -94,10 +94,13 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }
 
-    protected override void ScanWorksheetCore<TSink>(WorkbookMetadata.WorkbookSheetInfo sheet, ref TSink sink)
+    protected override void ScanWorksheetCore<TSink>(
+        WorkbookMetadata.WorkbookSheetInfo sheet,
+        ref TSink sink,
+        CancellationToken ct)
     {
         using var sheetStream = OpenSheetStream(sheet.Path);
-        var adapter = new WorksheetScanAdapter<TSink>(sink);
+        var adapter = new WorksheetScanAdapter<TSink>(sink, ct);
         XlsxSheetScanner.ScanSheet(
             sheetStream,
             SharedStrings,

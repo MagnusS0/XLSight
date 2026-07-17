@@ -22,13 +22,13 @@ jobs:
           cache-dependency-path: '**/packages.lock.json'
 
       - name: Restore
-        run: dotnet restore XLSight.slnx --locked-mode
+        run: dotnet restore XLSight.slnx --locked-mode -m:1
 
       - name: Build
-        run: dotnet build tests/XLSight.Tests/XLSight.Tests.csproj --no-restore -c Release -m
+        run: dotnet build XLSight.slnx --no-restore -c Release -m:1
 
       - name: Test
-        run: dotnet test tests/XLSight.Tests/XLSight.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test --solution XLSight.slnx --no-build -c Release --max-parallel-test-modules 1 --report-xunit-trx --report-xunit-trx-filename test-results.trx
 
       - name: Upload test results
         if: always()

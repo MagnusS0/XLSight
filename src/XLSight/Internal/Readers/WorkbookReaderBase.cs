@@ -134,11 +134,12 @@ internal abstract class WorkbookReaderBase<
         return OpenCursorCore(FindSheet(sheetName).Sheet, range, mode, projection);
     }
 
-    public void ScanWorksheet<TSink>(string sheetName, ref TSink sink)
+    public void ScanWorksheet<TSink>(string sheetName, ref TSink sink, CancellationToken ct = default)
         where TSink : struct, IWorksheetScanSink
     {
+        ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        ScanWorksheetCore(FindSheet(sheetName).Sheet, ref sink);
+        ScanWorksheetCore(FindSheet(sheetName).Sheet, ref sink, ct);
     }
 
     public WorkbookInfo Analyze(
@@ -269,7 +270,7 @@ internal abstract class WorkbookReaderBase<
     protected abstract TSharedStrings LoadSharedStrings();
     protected abstract AnalyzerMetadata BuildAnalyzerMetadata();
     protected abstract IRowCursor OpenCursorCore(TSheet sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null);
-    protected abstract void ScanWorksheetCore<TSink>(TSheet sheet, ref TSink sink)
+    protected abstract void ScanWorksheetCore<TSink>(TSheet sheet, ref TSink sink, CancellationToken ct)
         where TSink : struct, IWorksheetScanSink;
     protected abstract SheetInfo AnalyzeSheetCore(
         TSheet sheet,

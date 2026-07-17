@@ -981,6 +981,33 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
     }
 
+    internal async Task<TSink> ScanWorksheetAsync<TSink>(
+        string sheet,
+        TSink sink,
+        CancellationToken ct = default)
+        where TSink : struct, IWorksheetScanSink
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ct.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+        EnterOperation();
+        try
+        {
+            return await Task.Run(
+                () =>
+                {
+                    var localSink = sink;
+                    _engine.ScanWorksheet(sheet, ref localSink, ct);
+                    return localSink;
+                },
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
     private ExcelSheetReader GetRangeReaderCore(string sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null)
     {
         ThrowIfDisposed();

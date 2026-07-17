@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\XLSight\XLSight.csproj" />
+    <ProjectReference Include="..\..\src\XLSight.Layout\XLSight.Layout.csproj" />
     <ProjectReference Include="..\..\src\XLSight.Query\XLSight.Query.csproj" />
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="MiniExcel" />
