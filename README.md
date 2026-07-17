@@ -286,9 +286,15 @@ SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
 
 ### Infer worksheet layout (XLSight.Layout)
 
-The optional [`XLSight.Layout`](src/XLSight.Layout/README.md) package identifies
-worksheet axes, measure fields, and related layout groups across `.xlsx`, `.xlsm`,
-and `.xlsb` files.
+The optional [`XLSight.Layout`](src/XLSight.Layout/README.md) package runs
+best-effort heuristics that map an unknown worksheet's structure across `.xlsx`,
+`.xlsm`, and `.xlsb` files: the label rows and columns that give data meaning
+(axes, with value kinds, samples, and section bands), the rectangular data
+blocks they describe (measure fields, with value profiles), and fields clustered
+into logical tables (groups, with bounding ranges and titles). It is aimed at
+programmatic consumers that need to orient themselves in a workbook they have
+never seen — for example picking the right range and headers to hand to
+[XLSight.Query](src/XLSight.Query/README.md).
 
 ```bash
 dotnet add package XLSight.Layout
