@@ -60,6 +60,7 @@ internal static partial class XlsxSheetScanner
 
         if (!SeekToSheetData(buf, entryStream, seekHint, out ExcelRange? dimension, out bool emptySheetData))
         {
+            ct.ThrowIfCancellationRequested();
             sink.OnEnd();
             return;
         }
