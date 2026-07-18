@@ -166,13 +166,14 @@ public sealed class SheetQuery
     /// <exception cref="TooManyGroupsException">Thrown when group cardinality exceeds the cap.</exception>
     public async Task<QueryResult> ExecuteAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var scan = CreateScan(distinctColumn: null);
         if (!scan.TryPruneWithStats(_stats))
         {
             await RunScanAsync(scan, ct).ConfigureAwait(false);
         }
 
-        return scan.BuildResult();
+        return scan.BuildResult(ct);
     }
 
     /// <summary>
@@ -211,10 +212,11 @@ public sealed class SheetQuery
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(top);
+        ct.ThrowIfCancellationRequested();
 
         var scan = CreateScan(column);
         await RunScanAsync(scan, ct).ConfigureAwait(false);
-        return scan.BuildDistinctValues(top);
+        return scan.BuildDistinctValues(top, ct);
     }
 
     /// <summary>

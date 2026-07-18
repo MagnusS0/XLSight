@@ -480,8 +480,9 @@ internal sealed class QueryScan
 
     // ── Result building ───────────────────────────────────────────────────────
 
-    public QueryResult BuildResult()
+    public QueryResult BuildResult(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (_pruned || (!_headerBound && _aggregateSpecs.Length == 0))
         {
             return new QueryResult
@@ -595,8 +596,9 @@ internal sealed class QueryScan
         return result;
     }
 
-    public IReadOnlyList<DistinctValueCount> BuildDistinctValues(int top)
+    public IReadOnlyList<DistinctValueCount> BuildDistinctValues(int top, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         // Merge by display string: a numeric 1 and a text "1" both format to "1".
         var merged = new Dictionary<string, int>(_distinctCounts.Count, StringComparer.Ordinal);
         foreach ((ExcelCellValue cell, int count) in _distinctCounts)

@@ -5,7 +5,10 @@ internal static class XlsbWorkbookParser
     private const uint WorkbookScope = uint.MaxValue;
     private const int BrtNameFixedSize = 9;
 
-    internal static XlsbMetadata Parse(Stream workbookStream, Dictionary<string, string> pathsByRelationshipId)
+    internal static XlsbMetadata Parse(
+        Stream workbookStream,
+        Dictionary<string, string> pathsByRelationshipId,
+        CancellationToken ct = default)
     {
         bool date1904 = false;
         var sheets = new List<XlsbSheetInfo>();
@@ -16,6 +19,7 @@ internal static class XlsbWorkbookParser
         using var iter = new XlsbRecordIterator(workbookStream);
         while (iter.TryRead(out XlsbRecord record))
         {
+            ct.ThrowIfCancellationRequested();
             if (record.Type == XlsbRecordType.BrtWbProp)
             {
                 date1904 = record.Payload.Length >= 4 && (XlsbBinary.ReadUInt32(record.Payload, 0) & 1u) != 0;

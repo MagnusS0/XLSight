@@ -161,10 +161,16 @@
       "xlsight": {
         "type": "Project"
       },
+      "xlsight.layout": {
+        "type": "Project",
+        "dependencies": {
+          "XLSight": "[0.8.0, )"
+        }
+      },
       "xlsight.query": {
         "type": "Project",
         "dependencies": {
-          "XLSight": "[0.7.0, )"
+          "XLSight": "[0.8.0, )"
         }
       }
     }

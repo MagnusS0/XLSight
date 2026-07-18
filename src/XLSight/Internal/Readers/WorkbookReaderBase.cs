@@ -17,7 +17,8 @@ internal abstract class WorkbookReaderBase<
     where TSharedStrings : class, IDisposable
 {
     private Lazy<TSharedStrings> _sharedStrings = null!;
-    private Lazy<AnalyzerMetadata> _analyzerMetadata = null!;
+    private readonly SemaphoreSlim _analyzerMetadataGate = new(1, 1);
+    private AnalyzerMetadata? _analyzerMetadata;
     private Lazy<string[]> _sheetNames = null!;
     private volatile bool _disposed;
 
@@ -25,7 +26,7 @@ internal abstract class WorkbookReaderBase<
     protected IReadOnlyList<TSheet> Sheets => sheets;
     protected Lazy<TSharedStrings> SharedStringsLazy => _sharedStrings;
     protected TSharedStrings SharedStrings => _sharedStrings.Value;
-    protected AnalyzerMetadata AnalyzerMetadata => _analyzerMetadata.Value;
+    protected AnalyzerMetadata AnalyzerMetadata => GetAnalyzerMetadata(CancellationToken.None);
 
     public bool IsFileBacked => package.IsFileBacked;
 
@@ -53,9 +54,6 @@ internal abstract class WorkbookReaderBase<
     {
         _sharedStrings = new Lazy<TSharedStrings>(
             () => LoadSharedStrings(),
-            LazyThreadSafetyMode.ExecutionAndPublication);
-        _analyzerMetadata = new Lazy<AnalyzerMetadata>(
-            () => BuildAnalyzerMetadata(),
             LazyThreadSafetyMode.ExecutionAndPublication);
         _sheetNames = new Lazy<string[]>(
             () => sheets.Select(GetSheetName).ToArray(),
@@ -152,7 +150,8 @@ internal abstract class WorkbookReaderBase<
         int dop = ResolveSheetDop(maxDegreeOfParallelism);
         List<SheetInfo> results = package.IsFileBacked && dop > 1
             ? AnalyzeParallel(metadata, level, options, dop)
-            : sheets.Select((sheet, index) => AnalyzeSheetCore(sheet, index, metadata, level, options)).ToList();
+            : sheets.Select((sheet, index) => AnalyzeSheetCore(
+                sheet, index, metadata, level, options, CancellationToken.None)).ToList();
         return BuildWorkbookInfo(level, metadata, results);
     }
 
@@ -160,7 +159,8 @@ internal abstract class WorkbookReaderBase<
     {
         ThrowIfDisposed();
         var (sheet, index) = FindSheet(sheetName);
-        return AnalyzeSheetCore(sheet, index, AnalyzerMetadata, level, options);
+        return AnalyzeSheetCore(
+            sheet, index, AnalyzerMetadata, level, options, CancellationToken.None);
     }
 
     public async Task<WorkbookInfo> AnalyzeAsync(
@@ -171,7 +171,8 @@ internal abstract class WorkbookReaderBase<
     {
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        AnalyzerMetadata metadata = AnalyzerMetadata;
+        AnalyzerMetadata metadata = await Task.Run(
+            () => GetAnalyzerMetadata(ct), ct).ConfigureAwait(false);
         int dop = ResolveSheetDop(maxDegreeOfParallelism);
         List<SheetInfo> results = package.IsFileBacked && dop > 1
             ? await AnalyzeParallelAsync(metadata, level, options, dop, ct).ConfigureAwait(false)
@@ -179,7 +180,7 @@ internal abstract class WorkbookReaderBase<
         return BuildWorkbookInfo(level, metadata, results);
     }
 
-    public Task<SheetInfo> AnalyzeSheetAsync(
+    public async Task<SheetInfo> AnalyzeSheetAsync(
         string sheetName,
         AnalysisLevel level,
         AnalysisOptions? options,
@@ -188,8 +189,13 @@ internal abstract class WorkbookReaderBase<
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
         var (sheet, index) = FindSheet(sheetName);
-        AnalyzerMetadata metadata = AnalyzerMetadata;
-        return Task.Run(() => AnalyzeSheetCore(sheet, index, metadata, level, options), ct);
+        return await Task.Run(
+            () =>
+            {
+                AnalyzerMetadata metadata = GetAnalyzerMetadata(ct);
+                return AnalyzeSheetCore(sheet, index, metadata, level, options, ct);
+            },
+            ct).ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -236,9 +242,13 @@ internal abstract class WorkbookReaderBase<
         CancellationToken ct)
     {
         ExcelCellValue[] buffer = CreateRangeBuffer(range);
-        using IRowCursor cursor = OpenCursorCore(FindSheet(sheetName).Sheet, range, mode);
-        while (!ct.IsCancellationRequested && !cursor.IsSheetDone)
+        TSheet sheet = FindSheet(sheetName).Sheet;
+        using IRowCursor cursor = await Task.Run(
+            () => OpenCursorCore(sheet, range, mode),
+            ct).ConfigureAwait(false);
+        while (!cursor.IsSheetDone)
         {
+            ct.ThrowIfCancellationRequested();
             if (cursor.TryParseNext(out ExcelRow row))
             {
                 CopyRow(row, range, buffer);
@@ -268,7 +278,7 @@ internal abstract class WorkbookReaderBase<
     protected abstract string GetSheetName(TSheet sheet);
     protected abstract bool HasMacrosCore();
     protected abstract TSharedStrings LoadSharedStrings();
-    protected abstract AnalyzerMetadata BuildAnalyzerMetadata();
+    protected abstract AnalyzerMetadata BuildAnalyzerMetadata(CancellationToken ct);
     protected abstract IRowCursor OpenCursorCore(TSheet sheet, ExcelRange range, ReadMode mode, RowProjection? projection = null);
     protected abstract void ScanWorksheetCore<TSink>(TSheet sheet, ref TSink sink, CancellationToken ct)
         where TSink : struct, IWorksheetScanSink;
@@ -277,7 +287,8 @@ internal abstract class WorkbookReaderBase<
         int sheetIndex,
         AnalyzerMetadata metadata,
         AnalysisLevel level,
-        AnalysisOptions? options);
+        AnalysisOptions? options,
+        CancellationToken ct);
 
     private List<SheetInfo> AnalyzeParallel(
         AnalyzerMetadata metadata,
@@ -290,7 +301,8 @@ internal abstract class WorkbookReaderBase<
             0,
             sheets.Count,
             new ParallelOptions { MaxDegreeOfParallelism = dop },
-            i => results[i] = AnalyzeSheetCore(sheets[i], i, metadata, level, options));
+            i => results[i] = AnalyzeSheetCore(
+                sheets[i], i, metadata, level, options, CancellationToken.None));
         return [.. results];
     }
 
@@ -305,9 +317,11 @@ internal abstract class WorkbookReaderBase<
         await Parallel.ForEachAsync(
             Enumerable.Range(0, sheets.Count),
             new ParallelOptions { MaxDegreeOfParallelism = dop, CancellationToken = ct },
-            async (i, innerCt) => results[i] = await Task.Run(
-                () => AnalyzeSheetCore(sheets[i], i, metadata, level, options),
-                innerCt).ConfigureAwait(false)).ConfigureAwait(false);
+            (i, innerCt) =>
+            {
+                results[i] = AnalyzeSheetCore(sheets[i], i, metadata, level, options, innerCt);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
         return [.. results];
     }
 
@@ -323,7 +337,7 @@ internal abstract class WorkbookReaderBase<
             ct.ThrowIfCancellationRequested();
             int index = i;
             results.Add(await Task.Run(
-                () => AnalyzeSheetCore(sheets[index], index, metadata, level, options),
+                () => AnalyzeSheetCore(sheets[index], index, metadata, level, options, ct),
                 ct).ConfigureAwait(false));
         }
 
@@ -352,6 +366,32 @@ internal abstract class WorkbookReaderBase<
         for (int column = range.TopLeft.Column; column <= range.BottomRight.Column; column++)
         {
             buffer[rowOffset + column - range.TopLeft.Column] = row.GetCell(column);
+        }
+    }
+
+    private AnalyzerMetadata GetAnalyzerMetadata(CancellationToken ct)
+    {
+        AnalyzerMetadata? cached = Volatile.Read(ref _analyzerMetadata);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        _analyzerMetadataGate.Wait(ct);
+        try
+        {
+            cached = _analyzerMetadata;
+            if (cached is null)
+            {
+                cached = BuildAnalyzerMetadata(ct);
+                Volatile.Write(ref _analyzerMetadata, cached);
+            }
+
+            return cached;
+        }
+        finally
+        {
+            _analyzerMetadataGate.Release();
         }
     }
 

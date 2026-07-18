@@ -92,7 +92,9 @@ public static class ExcelWorkbookQueryExtensions
         string queryText,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(workbook);
         ArgumentNullException.ThrowIfNull(queryText);
+        ct.ThrowIfCancellationRequested();
         return ExecuteQueryAsync(workbook, SheetQuerySpec.Parse(queryText), ct);
     }
 
@@ -107,19 +109,26 @@ public static class ExcelWorkbookQueryExtensions
         SheetQuerySpec spec,
         CancellationToken ct = default)
     {
-        SheetQuery query = BuildSheetQuery(workbook, spec);
-        return query.ExecuteAsync(ct);
+        ArgumentNullException.ThrowIfNull(workbook);
+        ArgumentNullException.ThrowIfNull(spec);
+        ct.ThrowIfCancellationRequested();
+        return ExecuteQueryCoreAsync(workbook, spec, ct);
+    }
+
+    private static async Task<QueryResult> ExecuteQueryCoreAsync(
+        ExcelWorkbook workbook,
+        SheetQuerySpec spec,
+        CancellationToken ct)
+    {
+        SheetQuery query = await BuildSheetQueryAsync(workbook, spec, ct).ConfigureAwait(false);
+        return await query.ExecuteAsync(ct).ConfigureAwait(false);
     }
 
     private static SheetQuery BuildSheetQuery(ExcelWorkbook workbook, SheetQuerySpec spec)
     {
         ArgumentNullException.ThrowIfNull(workbook);
         ArgumentNullException.ThrowIfNull(spec);
-
-        if (spec.Header.Kind == SheetQueryHeaderKind.Column)
-        {
-            throw new NotSupportedException("HEADER COLUMN is reserved for transposed tables and is not supported by the row-oriented query engine.");
-        }
+        ValidateSupportedHeader(spec);
 
         int headerRow;
         if (spec.Header.Kind == SheetQueryHeaderKind.Row)
@@ -136,6 +145,46 @@ public static class ExcelWorkbookQueryExtensions
             headerRow = 0;
         }
 
+        return ConfigureSheetQuery(workbook, spec, headerRow);
+    }
+
+    private static async Task<SheetQuery> BuildSheetQueryAsync(
+        ExcelWorkbook workbook,
+        SheetQuerySpec spec,
+        CancellationToken ct)
+    {
+        ValidateSupportedHeader(spec);
+
+        int headerRow;
+        if (spec.Header.Kind == SheetQueryHeaderKind.Row)
+        {
+            headerRow = spec.Header.Row;
+        }
+        else if (spec.Header.Kind == SheetQueryHeaderKind.Auto)
+        {
+            SheetInfo info = await workbook
+                .AnalyzeSheetAsync(spec.Sheet, AnalysisLevel.Full, options: null, ct)
+                .ConfigureAwait(false);
+            headerRow = ResolveAutoHeaderRow(info, spec.Range);
+        }
+        else
+        {
+            headerRow = 0;
+        }
+
+        return ConfigureSheetQuery(workbook, spec, headerRow);
+    }
+
+    private static void ValidateSupportedHeader(SheetQuerySpec spec)
+    {
+        if (spec.Header.Kind == SheetQueryHeaderKind.Column)
+        {
+            throw new NotSupportedException("HEADER COLUMN is reserved for transposed tables and is not supported by the row-oriented query engine.");
+        }
+    }
+
+    private static SheetQuery ConfigureSheetQuery(ExcelWorkbook workbook, SheetQuerySpec spec, int headerRow)
+    {
         SheetQuery query = workbook.QueryRange(spec.Sheet, spec.Range, headerRow);
 
         foreach (SheetQueryPredicate predicate in spec.Predicates)

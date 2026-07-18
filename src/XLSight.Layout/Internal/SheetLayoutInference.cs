@@ -5,7 +5,7 @@ namespace XLSight.Layout.Internal;
 
 internal static class SheetLayoutInference
 {
-    public static SheetLayoutInfo Infer(LayoutCellStore cells)
+    public static SheetLayoutInfo Infer(LayoutCellStore cells, CancellationToken ct = default)
     {
         if (cells.Count == 0)
         {
@@ -15,8 +15,11 @@ internal static class SheetLayoutInference
         var sheet = new SheetFacts(cells);
         var occupied = new List<ExcelRange>();
 
+        // Cancellation is checked once per inference phase, not inside the per-cell
+        // loops — each phase is in-memory work bounded by the scanned cell count.
         List<FieldCandidate> matrices = FindMatrixFields(sheet);
         AddMatrixZones(matrices, occupied);
+        ct.ThrowIfCancellationRequested();
 
         var dense = new List<FieldCandidate>();
         foreach (var candidate in FindDenseFields(sheet, matrices))
@@ -28,6 +31,8 @@ internal static class SheetLayoutInference
             }
         }
 
+        ct.ThrowIfCancellationRequested();
+
         // Spacer columns inside one wide table (a missing header cell, or a sparse separator)
         // split it into co-extensive side-by-side fields. Re-join them across data-bearing gaps;
         // a fully empty gap column is a real boundary and is left alone.
@@ -38,6 +43,7 @@ internal static class SheetLayoutInference
         occupied.AddRange(denseRanges);
 
         List<FieldCandidate> vector = CoalesceVectorFields(FindVectorFields(sheet, occupied));
+        ct.ThrowIfCancellationRequested();
 
         var candidates = new List<FieldCandidate>(dense.Count + matrices.Count + vector.Count);
         candidates.AddRange(dense);
@@ -204,7 +210,7 @@ internal static class SheetLayoutInference
         // step near-uniformly) sits flush under that table's own data instead. If the row above
         // already carries real measure cells across the run's full span — including the
         // corner/coordinate column — this isn't a fresh matrix start, so reject it.
-        // ponytail: flush-stacked matrices (no title/blank row between two tables) are a known
+        // Flush-stacked matrices (no title/blank row between two tables) are a known
         // ceiling this heuristic can't resolve; it only catches the separator-row signal's absence.
         if (headerRow - 1 >= 1 && sheet.ScanRowContent(headerRow - 1, coordinateCol, endCol).HasMeasure)
         {

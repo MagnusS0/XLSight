@@ -174,19 +174,56 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
     private static async Task<ExcelWorkbook> OpenAsyncCore(Stream stream, CancellationToken ct)
     {
         XLSightEventSource.Log.WorkbookOpened("stream");
-        var package = await XlsxPackage.OpenAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-        return CreateFromPackageSync(package);
+        XlsxPackage? package = null;
+        try
+        {
+            package = await XlsxPackage.OpenAsync(
+                stream, cancellationToken: ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            ExcelWorkbook workbook = CreateFromPackageSync(package, ct: ct);
+            // The parse above is synchronous stream I/O; observe cancellation once after it.
+            ct.ThrowIfCancellationRequested();
+            package = null; // Ownership transferred to the workbook reader.
+            return workbook;
+        }
+        finally
+        {
+            if (package is not null)
+            {
+                await package.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     private static async Task<ExcelWorkbook> OpenFileAsyncCore(string filePath, CancellationToken ct)
     {
         XLSightEventSource.Log.WorkbookOpened(filePath);
         WorkbookFormat format = GetFormatFromPath(filePath);
-        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var package = await XlsxPackage.OpenAsync(fileStream, ownsStream: true, ct).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-        return CreateFromPackageSync(package, format);
+        FileStream? fileStream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        XlsxPackage? package = null;
+        try
+        {
+            package = await XlsxPackage.OpenAsync(
+                fileStream, ownsStream: true, ct).ConfigureAwait(false);
+            fileStream = null; // Ownership transferred to the package.
+            ct.ThrowIfCancellationRequested();
+            ExcelWorkbook workbook = CreateFromPackageSync(package, format, ct);
+            // The parse above is synchronous stream I/O; observe cancellation once after it.
+            ct.ThrowIfCancellationRequested();
+            package = null; // Ownership transferred to the workbook reader.
+            return workbook;
+        }
+        finally
+        {
+            if (package is not null)
+            {
+                await package.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (fileStream is not null)
+            {
+                await fileStream.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     private static ExcelWorkbook Create(
@@ -200,19 +237,20 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
 
     private static ExcelWorkbook CreateFromPackageSync(
         XlsxPackage package,
-        WorkbookFormat format = WorkbookFormat.Xlsx)
+        WorkbookFormat format = WorkbookFormat.Xlsx,
+        CancellationToken ct = default)
     {
         WorkbookFormat effectiveFormat = DetectPackageFormat(package, format);
         if (effectiveFormat == WorkbookFormat.Xlsb)
         {
-            return CreateXlsbFromPackage(package);
+            return CreateXlsbFromPackage(package, ct);
         }
 
         using var workbookStream = package.GetEntry("xl/workbook.xml")!.OpenBuffered();
         using var relsStream = package.GetEntry("xl/_rels/workbook.xml.rels")!.OpenBuffered();
         bool hasMacros = package.GetEntry("xl/vbaProject.bin") is not null;
-        var def = WorkbookParser.Parse(workbookStream, hasMacros);
-        var metadata = RelationshipsParser.Parse(relsStream, def);
+        var def = WorkbookParser.Parse(workbookStream, hasMacros, ct);
+        var metadata = RelationshipsParser.Parse(relsStream, def, ct);
 
         // SST and styles are loaded lazily inside the engine on first use.
         var engine = new XlsxWorkbookReader(package, metadata, effectiveFormat);
@@ -247,7 +285,7 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         return WorkbookFormat.Xlsx;
     }
 
-    private static ExcelWorkbook CreateXlsbFromPackage(XlsxPackage package)
+    private static ExcelWorkbook CreateXlsbFromPackage(XlsxPackage package, CancellationToken ct = default)
     {
         var workbookEntry = package.GetEntry("xl/workbook.bin")
             ?? throw new MalformedWorkbookException("XLSB workbook metadata entry 'xl/workbook.bin' was not found.");
@@ -258,12 +296,12 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         // so OpenBuffered() would add a redundant heap allocation.
         using Stream workbookStream = workbookEntry.Open();
         using Stream relsStream = relsEntry.Open();
-        var rels = PackageRelationshipReader.Read(relsStream, "xl/workbook.bin");
+        var rels = PackageRelationshipReader.Read(relsStream, "xl/workbook.bin", ct);
         var relationshipPaths = rels.ToDictionary(
             kvp => kvp.Key,
             kvp => kvp.Value.Target,
             StringComparer.Ordinal);
-        var metadata = XlsbWorkbookParser.Parse(workbookStream, relationshipPaths);
+        var metadata = XlsbWorkbookParser.Parse(workbookStream, relationshipPaths, ct);
         return new ExcelWorkbook(new XlsbWorkbookReader(package, metadata));
     }
 
@@ -734,8 +772,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        return new(GetSheetReader(sheet, mode));
+        ArgumentNullException.ThrowIfNull(sheet);
+        return GetRangeReaderAsyncCore(sheet, ExcelRange.Unbounded, mode, projection: null, ct: ct);
     }
 
     /// <summary>Opens a borrowed row reader for the specified range.</summary>
@@ -745,8 +783,9 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        return new(GetRangeReader(sheet, range, mode));
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(range);
+        return GetRangeReaderAsyncCore(sheet, ExcelRange.Parse(range), mode, projection: null, ct: ct);
     }
 
     /// <summary>Opens a borrowed row reader for the specified typed range.</summary>
@@ -756,8 +795,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         ReadMode mode = ReadMode.Values,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        return new(GetRangeReader(sheet, range, mode));
+        ArgumentNullException.ThrowIfNull(sheet);
+        return GetRangeReaderAsyncCore(sheet, range, mode, projection: null, ct: ct);
     }
 
     // ── StreamSheetAsync / StreamRangeAsync ──────────────────────────────────
@@ -961,8 +1000,8 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         RowProjection? projection,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        return new(GetRangeReader(sheet, range, mode, projection));
+        ArgumentNullException.ThrowIfNull(sheet);
+        return GetRangeReaderAsyncCore(sheet, range, mode, projection, ct);
     }
 
     internal void ScanWorksheet<TSink>(string sheet, ref TSink sink)
@@ -1018,6 +1057,35 @@ public sealed class ExcelWorkbook : IDisposable, IAsyncDisposable
         }
         catch
         {
+            ExitOperation();
+            throw;
+        }
+    }
+
+    private async ValueTask<ExcelSheetReader> GetRangeReaderAsyncCore(
+        string sheet,
+        ExcelRange range,
+        ReadMode mode,
+        RowProjection? projection,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+        EnterOperation();
+        IRowCursor? cursor = null;
+        try
+        {
+            cursor = await Task.Run(
+                () => _engine.OpenCursor(sheet, range, mode, projection),
+                ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            var reader = new ExcelSheetReader(cursor, ExitOperation);
+            cursor = null;
+            return reader;
+        }
+        catch
+        {
+            cursor?.Dispose();
             ExitOperation();
             throw;
         }

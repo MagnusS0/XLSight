@@ -29,7 +29,7 @@ internal partial struct AnalysisSink
 
     private void AddRowCell(int column, ExcelCellValue value, bool isFormula)
     {
-        // ponytail: per-cell in Full only; restrict to candidate header rows if profiled hot
+        // Runs per cell in Full only; restrict to candidate header rows if profiled hot.
         if (_pendingRowSpans.Count == 0 || column > _pendingRowSpans[^1].EndCol + 1)
         {
             _pendingRowSpans.Add(new RowSpanState

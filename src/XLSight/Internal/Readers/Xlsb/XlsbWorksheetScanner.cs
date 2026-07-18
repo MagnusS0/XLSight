@@ -15,7 +15,8 @@ internal static class XlsbWorksheetScanner
         ExcelRange range,
         ref TSink sink,
         XlsbFormulaContext? formulaContext = null,
-        bool includePostSheetMetadata = true)
+        bool includePostSheetMetadata = true,
+        CancellationToken ct = default)
         where TSink : struct, IByteSheetSink
     {
         using var iterator = new XlsbRecordIterator(worksheetStream);
@@ -64,9 +65,11 @@ internal static class XlsbWorksheetScanner
             if (TryHandleRowHeader(record, range, ref currentRowIndex, ref sink, out bool stop))
             {
                 if (stop) { break; }
+                ct.ThrowIfCancellationRequested();
             }
         }
 
+        ct.ThrowIfCancellationRequested();
         sink.OnEnd();
     }
 

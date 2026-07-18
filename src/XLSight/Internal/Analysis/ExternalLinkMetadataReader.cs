@@ -16,10 +16,11 @@ internal static class ExternalLinkMetadataReader
 
     internal static IReadOnlyList<ExternalWorkbookLinkInfo> Read(
         XlsxPackage package,
-        string workbookPath)
+        string workbookPath,
+        CancellationToken ct = default)
     {
         IReadOnlyList<PackageRelationshipReader.RelationshipInfo> workbookRelationships =
-            AnalyzerMetadataReader.ReadRelationships(package, workbookPath);
+            AnalyzerMetadataReader.ReadRelationships(package, workbookPath, ct);
         var links = new List<ExternalWorkbookLinkInfo>();
 
         foreach (PackageRelationshipReader.RelationshipInfo relationship in workbookRelationships)
@@ -30,7 +31,7 @@ internal static class ExternalLinkMetadataReader
                 continue;
             }
 
-            ExternalWorkbookLinkInfo? link = ReadLink(package, relationship.Target);
+            ExternalWorkbookLinkInfo? link = ReadLink(package, relationship.Target, ct);
             if (link is not null)
             {
                 links.Add(link);
@@ -40,10 +41,13 @@ internal static class ExternalLinkMetadataReader
         return links;
     }
 
-    private static ExternalWorkbookLinkInfo? ReadLink(XlsxPackage package, string linkPartPath)
+    private static ExternalWorkbookLinkInfo? ReadLink(
+        XlsxPackage package,
+        string linkPartPath,
+        CancellationToken ct)
     {
         IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships =
-            AnalyzerMetadataReader.ReadRelationships(package, linkPartPath);
+            AnalyzerMetadataReader.ReadRelationships(package, linkPartPath, ct);
         PackageRelationshipReader.RelationshipInfo? targetRelationship = relationships.FirstOrDefault(
             static relationship => relationship.IsExternal &&
                 relationship.Type.EndsWith(ExternalLinkPathRelationshipSuffix, StringComparison.Ordinal));
@@ -59,7 +63,7 @@ internal static class ExternalLinkMetadataReader
         {
             try
             {
-                ReadXmlMetadata(package, linkPartPath, sheetNames, definedNames);
+                ReadXmlMetadata(package, linkPartPath, sheetNames, definedNames, ct);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException)
             {
@@ -80,8 +84,10 @@ internal static class ExternalLinkMetadataReader
         XlsxPackage package,
         string linkPartPath,
         List<string> sheetNames,
-        List<string> definedNames)
+        List<string> definedNames,
+        CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         using Stream? stream = package.TryOpenEntryBuffered(linkPartPath);
         if (stream is null)
         {
@@ -90,6 +96,7 @@ internal static class ExternalLinkMetadataReader
 
         using var ms = new MemoryStream();
         stream.CopyTo(ms);
+        ct.ThrowIfCancellationRequested();
         ReadOnlySpan<byte> content = ms.GetBuffer().AsSpan(0, (int)ms.Length);
 
         ScanTagAttribute(content, TagSheetName, ValAttr, sheetNames);

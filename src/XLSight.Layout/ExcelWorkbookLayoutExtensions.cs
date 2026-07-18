@@ -60,6 +60,7 @@ public static class ExcelWorkbookLayoutExtensions
         LayoutScanSink sink = await workbook
             .ScanWorksheetAsync(sheet, new LayoutScanSink(), ct)
             .ConfigureAwait(false);
-        return SheetLayoutInference.Infer(sink.Cells);
+        ct.ThrowIfCancellationRequested();
+        return SheetLayoutInference.Infer(sink.Cells, ct);
     }
 }

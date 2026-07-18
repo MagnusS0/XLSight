@@ -77,21 +77,23 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
         return XlsbStylesParser.Parse(stream);
     }
 
-    protected override AnalyzerMetadata BuildAnalyzerMetadata()
+    protected override AnalyzerMetadata BuildAnalyzerMetadata(CancellationToken ct)
     {
         var sheetsByPath = new Dictionary<string, SheetExactMetadata>(StringComparer.OrdinalIgnoreCase);
         var allTables = new List<TableInfo>();
         var allPivotTables = new List<PivotTableInfo>();
         var allCharts = new List<ChartInfo>();
-        Dictionary<uint, string> workbookCachePaths = ReadWorkbookPivotCacheDefinitionPaths();
+        Dictionary<uint, string> workbookCachePaths = ReadWorkbookPivotCacheDefinitionPaths(ct);
         foreach (XlsbSheetInfo sheet in _metadata.Sheets)
         {
+            ct.ThrowIfCancellationRequested();
             sheetsByPath[sheet.Path] = ReadSheetMetadata(
                 sheet,
                 workbookCachePaths,
                 allTables,
                 allPivotTables,
-                allCharts);
+                allCharts,
+                ct);
         }
 
         var warnings = new List<AnalysisWarning>();
@@ -110,7 +112,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
                 Tables = allTables,
                 PivotTables = allPivotTables,
                 Charts = allCharts,
-                ExternalLinks = ExternalLinkMetadataReader.Read(Package, "xl/workbook.bin"),
+                ExternalLinks = ExternalLinkMetadataReader.Read(Package, "xl/workbook.bin", ct),
                 HasMacros = HasMacros,
                 VbaProject = vbaProject,
                 IsDate1904 = _metadata.UsesDate1904,
@@ -125,14 +127,16 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
         IReadOnlyDictionary<uint, string> workbookCachePaths,
         List<TableInfo> allTables,
         List<PivotTableInfo> allPivots,
-        List<ChartInfo> allCharts)
+        List<ChartInfo> allCharts,
+        CancellationToken ct)
     {
         var tables = new List<TableInfo>();
         var pivots = new List<PivotTableInfo>();
         var drawingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int commentCount = 0;
-        foreach (PackageRelationshipReader.RelationshipInfo relationship in ReadRelationships(sheet.Path))
+        foreach (PackageRelationshipReader.RelationshipInfo relationship in ReadRelationships(sheet.Path, ct))
         {
+            ct.ThrowIfCancellationRequested();
             switch (relationship.Type)
             {
                 case TableRelationshipType:
@@ -144,7 +148,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
                     break;
 
                 case PivotTableRelationshipType:
-                    PivotTableInfo? pivot = ReadPivot(sheet.Name, relationship.Target, workbookCachePaths);
+                    PivotTableInfo? pivot = ReadPivot(sheet.Name, relationship.Target, workbookCachePaths, ct);
                     if (pivot is not null) { pivots.Add(pivot); }
                     break;
 
@@ -161,7 +165,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
             }
         }
 
-        List<ChartInfo> charts = ChartMetadataReader.ReadCharts(Package, sheet.Name, [.. drawingPaths]);
+        List<ChartInfo> charts = ChartMetadataReader.ReadCharts(Package, sheet.Name, [.. drawingPaths], ct);
         allTables.AddRange(tables);
         allPivots.AddRange(pivots);
         allCharts.AddRange(charts);
@@ -187,7 +191,8 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
     private PivotTableInfo? ReadPivot(
         string sheetName,
         string pivotPath,
-        IReadOnlyDictionary<uint, string> workbookCachePaths)
+        IReadOnlyDictionary<uint, string> workbookCachePaths,
+        CancellationToken ct)
     {
         try
         {
@@ -203,7 +208,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
                 Name = metadata.Name ?? Path.GetFileNameWithoutExtension(pivotPath),
                 Sheet = sheetName,
                 Range = metadata.Range,
-                SourceReference = ReadPivotSource(pivotPath, metadata.CacheId, workbookCachePaths)
+                SourceReference = ReadPivotSource(pivotPath, metadata.CacheId, workbookCachePaths, ct)
                     ?? metadata.CacheId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
             };
         }
@@ -216,9 +221,10 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
     private string? ReadPivotSource(
         string pivotPath,
         uint? cacheId,
-        IReadOnlyDictionary<uint, string> workbookCachePaths)
+        IReadOnlyDictionary<uint, string> workbookCachePaths,
+        CancellationToken ct)
     {
-        string? cachePath = ReadPivotCacheDefinitionPathFromPivotRelationships(pivotPath);
+        string? cachePath = ReadPivotCacheDefinitionPathFromPivotRelationships(pivotPath, ct);
         if (cachePath is null && cacheId is not null)
         {
             workbookCachePaths.TryGetValue(cacheId.Value, out cachePath);
@@ -240,18 +246,21 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
         }
     }
 
-    private string? ReadPivotCacheDefinitionPathFromPivotRelationships(string pivotPath)
+    private string? ReadPivotCacheDefinitionPathFromPivotRelationships(
+        string pivotPath,
+        CancellationToken ct)
     {
-        IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships = ReadRelationships(pivotPath);
+        IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships = ReadRelationships(pivotPath, ct);
         return relationships
             .FirstOrDefault(rel => string.Equals(rel.Type, PivotCacheDefinitionRelationshipType, StringComparison.Ordinal))
             ?.Target;
     }
 
-    private Dictionary<uint, string> ReadWorkbookPivotCacheDefinitionPaths()
+    private Dictionary<uint, string> ReadWorkbookPivotCacheDefinitionPaths(CancellationToken ct)
     {
         try
         {
+            ct.ThrowIfCancellationRequested();
             using Stream? stream = Package.TryOpenEntryBuffered("xl/workbook.bin");
             if (stream is null)
             {
@@ -264,7 +273,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
                 return relIdsByCacheId;
             }
 
-            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships = ReadRelationships("xl/workbook.bin");
+            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> relationships = ReadRelationships("xl/workbook.bin", ct);
             var pathsByCacheId = new Dictionary<uint, string>();
             foreach ((uint cacheId, string relationshipId) in relIdsByCacheId)
             {
@@ -285,7 +294,9 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
         }
     }
 
-    private IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(string ownerPath)
+    private IReadOnlyList<PackageRelationshipReader.RelationshipInfo> ReadRelationships(
+        string ownerPath,
+        CancellationToken ct = default)
     {
         string relationshipPath = XlsxPackage.BuildRelationshipsPath(ownerPath);
         using Stream? stream = Package.TryOpenEntryBuffered(relationshipPath);
@@ -294,7 +305,7 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
             return [];
         }
 
-        return [.. PackageRelationshipReader.Read(stream, ownerPath).Values];
+        return [.. PackageRelationshipReader.Read(stream, ownerPath, ct).Values];
     }
 
     private VbaProjectInfo? TryReadVbaProject(List<AnalysisWarning> warnings)
@@ -324,8 +335,10 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
         int sheetIndex,
         AnalyzerMetadata analysisMetadata,
         AnalysisLevel level,
-        AnalysisOptions? options)
+        AnalysisOptions? options,
+        CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         using Stream sheetStream = OpenConcurrentSheetStream(sheet.Path);
         var sink = new AnalysisSink(SharedStrings, sheet.Name, level, options);
         XlsbWorksheetScanner.ScanSheet(
@@ -336,7 +349,8 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
             ReadMode.Values,
             ExcelRange.Unbounded,
             ref sink,
-            _metadata.FormulaContext);
+            _metadata.FormulaContext,
+            ct: ct);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }
 
@@ -356,7 +370,8 @@ internal sealed class XlsbWorkbookReader : WorkbookReaderBase<XlsbSheetInfo, Xls
             ExcelRange.Unbounded,
             ref adapter,
             _metadata.FormulaContext,
-            includePostSheetMetadata: false);
+            includePostSheetMetadata: false,
+            ct: ct);
         sink = adapter.Sink;
     }
 

@@ -51,9 +51,9 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
         return StylesParser.Parse(stream);
     }
 
-    protected override AnalyzerMetadata BuildAnalyzerMetadata() => Package.IsFileBacked
-        ? AnalyzerMetadataReader.ReadParallel(Package, _metadata)
-        : AnalyzerMetadataReader.Read(Package, _metadata);
+    protected override AnalyzerMetadata BuildAnalyzerMetadata(CancellationToken ct) => Package.IsFileBacked
+        ? AnalyzerMetadataReader.ReadParallel(Package, _metadata, ct)
+        : AnalyzerMetadataReader.Read(Package, _metadata, ct);
 
     protected override IRowCursor OpenCursorCore(
         WorkbookMetadata.WorkbookSheetInfo sheet,
@@ -86,11 +86,21 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
         int sheetIndex,
         AnalyzerMetadata analysisMetadata,
         AnalysisLevel level,
-        AnalysisOptions? options)
+        AnalysisOptions? options,
+        CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         using var sheetStream = OpenSheetStream(sheet.Path);
         var sink = new AnalysisSink(SharedStrings, sheet.Name, level, options);
-        XlsxSheetScanner.ScanSheet(sheetStream, SharedStrings, _styles.Value, _metadata.UsesDate1904, ReadMode.Values, ExcelRange.Unbounded, ref sink);
+        XlsxSheetScanner.ScanSheet(
+            sheetStream,
+            SharedStrings,
+            _styles.Value,
+            _metadata.UsesDate1904,
+            ReadMode.Values,
+            ExcelRange.Unbounded,
+            ref sink,
+            ct: ct);
         return sink.Build(sheet.Name, sheetIndex, analysisMetadata.SheetsByPath[sheet.Path], level);
     }
 
@@ -109,7 +119,8 @@ internal sealed class XlsxWorkbookReader : WorkbookReaderBase<WorkbookMetadata.W
             ReadMode.Values,
             ExcelRange.Unbounded,
             ref adapter,
-            includePostSheetMetadata: false);
+            includePostSheetMetadata: false,
+            ct: ct);
         sink = adapter.Sink;
     }
 

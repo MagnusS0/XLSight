@@ -11,15 +11,21 @@ internal static class ChartMetadataReader
 
     private static ReadOnlySpan<byte> TagFormula => "f"u8;
 
-    internal static List<ChartInfo> ReadCharts(XlsxPackage package, string sheetName, IReadOnlyList<string> drawingPaths)
+    internal static List<ChartInfo> ReadCharts(
+        XlsxPackage package,
+        string sheetName,
+        IReadOnlyList<string> drawingPaths,
+        CancellationToken ct = default)
     {
         var charts = new List<ChartInfo>();
         foreach (string drawingPath in drawingPaths)
         {
-            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> rels = AnalyzerMetadataReader.ReadRelationships(package, drawingPath);
+            ct.ThrowIfCancellationRequested();
+            IReadOnlyList<PackageRelationshipReader.RelationshipInfo> rels =
+                AnalyzerMetadataReader.ReadRelationships(package, drawingPath, ct);
             foreach (var rel in rels.Where(rel => string.Equals(rel.Type, ChartRelationshipType, StringComparison.Ordinal)))
             {
-                ChartInfo? chart = ReadChart(package, sheetName, rel.Target);
+                ChartInfo? chart = ReadChart(package, sheetName, rel.Target, ct);
                 if (chart is not null)
                 {
                     charts.Add(chart);
@@ -30,7 +36,11 @@ internal static class ChartMetadataReader
         return charts;
     }
 
-    private static ChartInfo? ReadChart(XlsxPackage package, string sheetName, string chartPath)
+    private static ChartInfo? ReadChart(
+        XlsxPackage package,
+        string sheetName,
+        string chartPath,
+        CancellationToken ct)
     {
         using Stream? stream = package.TryOpenEntryBuffered(chartPath);
         if (stream is null)
@@ -43,6 +53,7 @@ internal static class ChartMetadataReader
 
         while (true)
         {
+            ct.ThrowIfCancellationRequested();
             var span = buf.Span;
             var status = XmlByteReader.TryFindStartTag(span, TagFormula, out var match, out int partialIndex);
             if (status == TagSearchResult.NotFound)
