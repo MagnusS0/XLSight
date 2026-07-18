@@ -62,8 +62,9 @@ public sealed class ExcelSheetReader : IDisposable, IAsyncDisposable
     {
         ThrowIfDisposed();
 
-        while (!ct.IsCancellationRequested)
+        while (true)
         {
+            ct.ThrowIfCancellationRequested();
             if (_cursor.TryParseNext(out _))
             {
                 _hasCurrent = true;
@@ -83,10 +84,6 @@ public sealed class ExcelSheetReader : IDisposable, IAsyncDisposable
                 return false;
             }
         }
-
-        ct.ThrowIfCancellationRequested();
-        _hasCurrent = false;
-        return false;
     }
 
     /// <inheritdoc />

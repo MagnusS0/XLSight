@@ -9,7 +9,10 @@ internal static class WorkbookParser
     private const string RelationshipsNamespace =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-    public static ParsedWorkbookDefinition Parse(Stream stream, bool hasMacros = false)
+    public static ParsedWorkbookDefinition Parse(
+        Stream stream,
+        bool hasMacros = false,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -22,6 +25,7 @@ internal static class WorkbookParser
 
             while (reader.Read())
             {
+                ct.ThrowIfCancellationRequested();
                 if (reader.NodeType != XmlNodeType.Element)
                 {
                     continue;
@@ -41,7 +45,7 @@ internal static class WorkbookParser
 
                 if (string.Equals(reader.LocalName, "definedNames", StringComparison.Ordinal))
                 {
-                    ReadDefinedNames(reader, sheets, namedRanges);
+                    ReadDefinedNames(reader, sheets, namedRanges, ct);
                 }
             }
 
@@ -109,11 +113,13 @@ internal static class WorkbookParser
     private static void ReadDefinedNames(
         XmlReader reader,
         List<SheetDefinition> sheets,
-        List<WorkbookMetadata.WorkbookNamedRange> namedRanges)
+        List<WorkbookMetadata.WorkbookNamedRange> namedRanges,
+        CancellationToken ct)
     {
         using var subtreeReader = reader.ReadSubtree();
         while (subtreeReader.Read())
         {
+            ct.ThrowIfCancellationRequested();
             if (subtreeReader.NodeType != XmlNodeType.Element ||
                 !string.Equals(subtreeReader.LocalName, "definedName", StringComparison.Ordinal))
             {

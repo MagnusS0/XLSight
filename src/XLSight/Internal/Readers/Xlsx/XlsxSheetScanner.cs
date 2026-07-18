@@ -52,13 +52,15 @@ internal static partial class XlsxSheetScanner
         ExcelRange range,
         ref TSink sink,
         long seekHint = -1,
-        bool includePostSheetMetadata = true)
+        bool includePostSheetMetadata = true,
+        CancellationToken ct = default)
         where TSink : struct, IByteSheetSink
     {
         using var buf = new ScanBuffer(entryStream);
 
         if (!SeekToSheetData(buf, entryStream, seekHint, out ExcelRange? dimension, out bool emptySheetData))
         {
+            ct.ThrowIfCancellationRequested();
             sink.OnEnd();
             return;
         }
@@ -72,6 +74,7 @@ internal static partial class XlsxSheetScanner
 
         while (!emptySheetData)
         {
+            ct.ThrowIfCancellationRequested();
             if (!TryReadRowStart(buf, ref lastRow, out bool emptyRow)) { break; }
             if (emptyRow) { continue; }
 
@@ -97,9 +100,10 @@ internal static partial class XlsxSheetScanner
         // Only relevant for analysis sinks (range.IsUnbounded); RangeSink no-ops these callbacks.
         if (range.IsUnbounded && includePostSheetMetadata)
         {
-            TryScanPostSheetData(buf, ref sink);
+            TryScanPostSheetData(buf, ref sink, ct);
         }
 
+        ct.ThrowIfCancellationRequested();
         sink.OnEnd();
     }
 
@@ -440,13 +444,17 @@ internal static partial class XlsxSheetScanner
     /// Scans bytes remaining after <c>&lt;/sheetData&gt;</c> for merge cells, conditional
     /// formatting, data validations, and hyperlinks, calling the appropriate sink callbacks.
     /// </summary>
-    private static void TryScanPostSheetData<TSink>(ScanBuffer buf, ref TSink sink)
+    private static void TryScanPostSheetData<TSink>(
+        ScanBuffer buf,
+        ref TSink sink,
+        CancellationToken ct)
         where TSink : struct, IByteSheetSink
     {
         Span<char> refCharBuf = stackalloc char[32];
 
         while (true)
         {
+            ct.ThrowIfCancellationRequested();
             var span = buf.Span;
 
             var mergeStatus = TryFindStartTag(span, TagMergeCell, out var mergeMatch, out int mergePartial);

@@ -8,7 +8,8 @@ internal static class RelationshipsParser
 
     public static WorkbookMetadata Parse(
         Stream stream,
-        WorkbookParser.ParsedWorkbookDefinition workbook)
+        WorkbookParser.ParsedWorkbookDefinition workbook,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(workbook);
@@ -20,6 +21,7 @@ internal static class RelationshipsParser
 
             while (reader.Read())
             {
+                ct.ThrowIfCancellationRequested();
                 if (reader.NodeType != XmlNodeType.Element ||
                     !string.Equals(reader.LocalName, "Relationship", StringComparison.Ordinal))
                 {

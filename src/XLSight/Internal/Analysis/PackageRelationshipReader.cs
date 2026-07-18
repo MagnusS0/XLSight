@@ -14,7 +14,10 @@ internal static class PackageRelationshipReader
 
     internal sealed record RelationshipInfo(string Id, string Type, string Target, bool IsExternal);
 
-    internal static IReadOnlyDictionary<string, RelationshipInfo> Read(Stream stream, string ownerPath)
+    internal static IReadOnlyDictionary<string, RelationshipInfo> Read(
+        Stream stream,
+        string ownerPath,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -25,6 +28,7 @@ internal static class PackageRelationshipReader
 
             while (true)
             {
+                ct.ThrowIfCancellationRequested();
                 var span = buf.Span;
                 var status = XmlByteReader.TryFindStartTag(span, TagRelationship, out var match, out int partialIndex);
                 if (status == TagSearchResult.NotFound)
@@ -69,7 +73,8 @@ internal static class PackageRelationshipReader
 
             return relationships;
         }
-        catch (Exception exception) when (exception is not MalformedWorkbookException)
+        catch (Exception exception) when (
+            exception is not (MalformedWorkbookException or OperationCanceledException))
         {
             throw new MalformedWorkbookException($"Relationship part '{ownerPath}' is corrupt.", exception);
         }
