@@ -114,6 +114,7 @@ public sealed class SheetQuery
     /// separate methods avoids an overload-resolution trap.
     /// </summary>
     /// <param name="columns">The column names (from the header row) to include, in result order. Duplicates are allowed.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="columns"/> is empty or contains a blank name.</exception>
     /// <exception cref="InvalidOperationException">Thrown at <see cref="Execute"/> time when combined with <see cref="Select"/> aggregates.</exception>
     public SheetQuery Project(params string[] columns)
     {
@@ -121,6 +122,11 @@ public sealed class SheetQuery
         if (columns.Length == 0)
         {
             throw new ArgumentException("At least one column is required.", nameof(columns));
+        }
+
+        foreach (string column in columns)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(column, nameof(columns));
         }
 
         _projectedColumns.AddRange(columns);

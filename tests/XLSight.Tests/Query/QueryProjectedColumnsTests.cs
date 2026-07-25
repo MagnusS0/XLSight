@@ -185,6 +185,23 @@ public sealed class QueryProjectedColumnsTests
             async.Rows.Select(r => string.Join("|", r.Values.ToArray())));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void FluentProject_BlankColumnName_ThrowsAtCallTime(string? column)
+    {
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        SheetQuery query = workbook.QueryRange(SalesWorkbook.SheetName, Range);
+
+        // Must fail on the offending argument, not survive to Execute() and resurface as a
+        // "column not found" error listing the whole header. ThrowsAny because null yields
+        // ArgumentNullException while blank yields ArgumentException.
+        Assert.ThrowsAny<ArgumentException>(() => query.Project("Region", column!));
+    }
+
     [Fact]
     public void FluentProject_MatchesDslProjection()
     {
