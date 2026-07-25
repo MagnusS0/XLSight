@@ -20,6 +20,7 @@ public sealed class SheetQuery
     private readonly int _headerRow;
     private readonly List<FilterSpec> _filters = [];
     private readonly List<AggregateSpec> _aggregates = [];
+    private readonly List<string> _projectedColumns = [];
     private string? _groupBy;
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
@@ -104,6 +105,25 @@ public sealed class SheetQuery
         }
 
         _aggregates.AddRange(aggregates);
+        return this;
+    }
+
+    /// <summary>
+    /// Restricts a row result to exactly these columns, in this order. Not a <see cref="Select"/>
+    /// overload — projected columns and aggregates are mutually exclusive, so keeping them on
+    /// separate methods avoids an overload-resolution trap.
+    /// </summary>
+    /// <param name="columns">The column names (from the header row) to include, in result order. Duplicates are allowed.</param>
+    /// <exception cref="InvalidOperationException">Thrown at <see cref="Execute"/> time when combined with <see cref="Select"/> aggregates.</exception>
+    public SheetQuery Project(params string[] columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        if (columns.Length == 0)
+        {
+            throw new ArgumentException("At least one column is required.", nameof(columns));
+        }
+
+        _projectedColumns.AddRange(columns);
         return this;
     }
 
@@ -402,12 +422,19 @@ public sealed class SheetQuery
                 "GroupBy requires at least one Select aggregate. Use DistinctValues(column) to enumerate a column's values.");
         }
 
+        if (_projectedColumns.Count > 0 && _aggregates.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Project cannot be combined with Select aggregates — a query must either project raw columns or aggregate, not mix the two.");
+        }
+
         return new QueryScan(
             _range,
             _headerRow,
             _filters,
             _groupBy,
             _aggregates,
+            _projectedColumns,
             distinctColumn,
             _limit,
             _maxGroups);

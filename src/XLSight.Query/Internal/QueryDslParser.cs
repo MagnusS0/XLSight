@@ -32,7 +32,7 @@ internal static class QueryDslParser
             (string rangeAddress, ExcelRange range) = ParseBoundedRange();
 
             SheetQueryHeader header = ParseHeader();
-            (bool selectAll, IReadOnlyList<AggregateSpec> aggregates) = ParseSelect();
+            (bool selectAll, IReadOnlyList<AggregateSpec> aggregates, IReadOnlyList<string> columns) = ParseSelect();
             List<SheetQueryPredicate> predicates = TryConsumeKeyword("WHERE")
                 ? ParseWhere()
                 : [];
@@ -61,6 +61,11 @@ internal static class QueryDslParser
                 throw Error("GROUP BY is not valid with SELECT *. Select aggregate functions instead.");
             }
 
+            if (groupBy is not null && columns.Count > 0)
+            {
+                throw Error("GROUP BY requires aggregate selections. Raw column projections cannot be grouped.");
+            }
+
             return new SheetQuerySpec(
                 sheet,
                 rangeAddress,
@@ -68,6 +73,7 @@ internal static class QueryDslParser
                 header,
                 selectAll,
                 aggregates,
+                columns,
                 predicates,
                 groupBy,
                 limit);
@@ -101,19 +107,27 @@ internal static class QueryDslParser
             throw Error("Expected HEADER ROW <number>, HEADER AUTO, or HEADER COLUMN <column> after range.");
         }
 
-        private (bool SelectAll, IReadOnlyList<AggregateSpec> Aggregates) ParseSelect()
+        private (bool SelectAll, IReadOnlyList<AggregateSpec> Aggregates, IReadOnlyList<string> Columns) ParseSelect()
         {
             ExpectKeyword("SELECT");
 
             if (TryConsume(TokenKind.Star))
             {
-                return (true, []);
+                return (true, [], []);
             }
 
             var aggregates = new List<AggregateSpec>();
+            var columns = new List<string>();
             while (true)
             {
-                aggregates.Add(ParseAggregate());
+                if (_tokens.Current.IsIdentifier && _tokens.Peek().Kind is TokenKind.OpenParen)
+                {
+                    aggregates.Add(ParseAggregate());
+                }
+                else
+                {
+                    columns.Add(ParseIdentifierLike("SELECT column"));
+                }
 
                 if (!TryConsume(TokenKind.Comma))
                 {
@@ -121,17 +135,17 @@ internal static class QueryDslParser
                 }
             }
 
-            return (false, aggregates);
+            if (aggregates.Count > 0 && columns.Count > 0)
+            {
+                throw Error("Cannot mix raw columns and aggregates in one SELECT. Select raw columns, SELECT *, or aggregates only.");
+            }
+
+            return (false, aggregates, columns);
         }
 
         private AggregateSpec ParseAggregate()
         {
             string function = ParseBareToken("aggregate function");
-            if (_tokens.Current.Kind is not TokenKind.OpenParen)
-            {
-                throw Error("Projected row columns are not supported. Use SELECT * or aggregate functions.");
-            }
-
             Expect(TokenKind.OpenParen, $"Expected '(' after aggregate '{function}'.");
 
             if (string.Equals(function, "COUNT", StringComparison.OrdinalIgnoreCase))

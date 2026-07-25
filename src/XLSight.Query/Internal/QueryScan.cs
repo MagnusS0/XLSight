@@ -18,6 +18,7 @@ internal sealed class QueryScan
     private readonly FilterSpec[] _filterSpecs;
     private readonly string? _groupByColumn;
     private readonly AggregateSpec[] _aggregateSpecs;
+    private readonly string[] _projectedColumnNames;
     private readonly string? _distinctColumn;
     private readonly int _limit;
     private readonly int _maxGroups;
@@ -27,6 +28,11 @@ internal sealed class QueryScan
     private int _boundHeaderRow;
     private string[] _columnNames = [];
     private int[] _columnIndices = [];
+
+    // Result-shaped column set for row queries: the full header for SELECT *
+    // (same arrays, by reference — no copy), or the SELECT-order projection otherwise.
+    private int[] _resultColumnIndices = [];
+    private string[] _resultColumnNames = [];
     private ResolvedFilter[] _filters = [];
     private int _groupColumnIndex;
     private string _groupColumnName = "";
@@ -70,6 +76,7 @@ internal sealed class QueryScan
         List<FilterSpec> filters,
         string? groupBy,
         List<AggregateSpec> aggregates,
+        List<string> projectedColumns,
         string? distinctColumn,
         int limit,
         int maxGroups)
@@ -79,6 +86,7 @@ internal sealed class QueryScan
         _filterSpecs = [.. filters];
         _groupByColumn = groupBy;
         _aggregateSpecs = [.. aggregates];
+        _projectedColumnNames = [.. projectedColumns];
         _distinctColumn = distinctColumn;
         _limit = limit;
         _maxGroups = maxGroups;
@@ -91,9 +99,11 @@ internal sealed class QueryScan
 
     /// <summary>
     /// Aggregate, grouped, and distinct queries read a fixed set of columns, so the data
-    /// scan can skip materializing every other in-range cell. Row queries return all columns.
+    /// scan can skip materializing every other in-range cell. A projected row query
+    /// (<c>SELECT col[, col...]</c>) is likewise fixed; only <c>SELECT *</c> reads every column.
     /// </summary>
-    public bool SupportsProjection => _distinctColumn is not null || _aggregateSpecs.Length > 0;
+    public bool SupportsProjection =>
+        _distinctColumn is not null || _aggregateSpecs.Length > 0 || _projectedColumnNames.Length > 0;
 
     /// <summary>
     /// The remaining data rows of <paramref name="range"/> after the bound header row, clamped to
@@ -115,7 +125,7 @@ internal sealed class QueryScan
     /// <summary>The projection covering exactly the columns the query reads.</summary>
     public RowProjection BuildProjection()
     {
-        var columns = new List<int>(_filters.Length + _resolvedAggregates.Length + 2);
+        var columns = new List<int>(_filters.Length + _resolvedAggregates.Length + _resultColumnIndices.Length + 2);
         foreach (ResolvedFilter filter in _filters)
         {
             columns.Add(filter.ColumnIndex);
@@ -128,6 +138,7 @@ internal sealed class QueryScan
 
         if (_groupByColumn is not null) { columns.Add(_groupColumnIndex); }
         if (_distinctColumn is not null) { columns.Add(_distinctColumnIndex); }
+        if (_projectedColumnNames.Length > 0) { columns.AddRange(_resultColumnIndices); }
         return new RowProjection(CollectionsMarshal.AsSpan(columns));
     }
 
@@ -255,9 +266,9 @@ internal sealed class QueryScan
     private bool CollectRow(in ExcelRow row)
     {
         int start = _rowBuffer.Count;
-        for (int i = 0; i < _columnIndices.Length; i++)
+        for (int i = 0; i < _resultColumnIndices.Length; i++)
         {
-            _rowBuffer.Add(row.GetCell(_columnIndices[i]));
+            _rowBuffer.Add(row.GetCell(_resultColumnIndices[i]));
         }
 
         _rows.Add(new QueryResultRow { SourceRowIndex = row.RowIndex, ValuesStart = start });
@@ -381,7 +392,7 @@ internal sealed class QueryScan
             _columnNames[i] = name.Length > 0 ? name : ColumnLabel(column);
         }
 
-        _rowWidth = _columnIndices.Length;
+        BindProjection();
         _filters = new ResolvedFilter[_filterSpecs.Length];
         for (int i = 0; i < _filterSpecs.Length; i++)
         {
@@ -412,6 +423,33 @@ internal sealed class QueryScan
         _boundHeaderRow = row.RowIndex;
         _headerBound = true;
         _mode = ResolveMode();
+    }
+
+    /// <summary>
+    /// Resolves the result-shaped column set: the full header (by reference, no copy) for
+    /// <c>SELECT *</c>, or the SELECT-order projection otherwise. Duplicates are preserved —
+    /// selecting a column twice yields two identical result columns.
+    /// </summary>
+    private void BindProjection()
+    {
+        if (_projectedColumnNames.Length == 0)
+        {
+            _resultColumnIndices = _columnIndices;
+            _resultColumnNames = _columnNames;
+        }
+        else
+        {
+            _resultColumnIndices = new int[_projectedColumnNames.Length];
+            _resultColumnNames = new string[_projectedColumnNames.Length];
+            for (int i = 0; i < _projectedColumnNames.Length; i++)
+            {
+                int columnIndex = ResolveColumn(_projectedColumnNames[i]);
+                _resultColumnIndices[i] = columnIndex;
+                _resultColumnNames[i] = _columnNames[Array.IndexOf(_columnIndices, columnIndex)];
+            }
+        }
+
+        _rowWidth = _resultColumnIndices.Length;
     }
 
     private ScanMode ResolveMode()
@@ -497,7 +535,7 @@ internal sealed class QueryScan
 
         if (_aggregateSpecs.Length == 0)
         {
-            return NewResult(_columnNames, ResolveRowValues());
+            return NewResult(_resultColumnNames, ResolveRowValues());
         }
 
         return _groupByColumn is null ? BuildGlobalResult() : BuildGroupedResult();

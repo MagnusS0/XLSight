@@ -277,7 +277,6 @@ public sealed class QueryDslTests
     }
 
     [Theory]
-    [InlineData("A1:F11", "SELECT Region", "Projected row columns are not supported")]
     [InlineData("A1:F11", "SELECT TOTAL(Units)", "Unknown aggregate 'TOTAL'")]
     [InlineData("A1:F11", "SELECT * GROUP BY Region", "GROUP BY is not valid with SELECT *")]
     [InlineData("A1:F11", "SELECT COUNT() WHERE Region = \"EMEA\" OR Region = \"APAC\"", "OR is not supported")]

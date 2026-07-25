@@ -193,6 +193,11 @@ public static class ExcelWorkbookQueryExtensions
             query.WhereCell(predicate.Column, predicate.Op, predicate.Literal);
         }
 
+        if (spec.Columns.Count > 0)
+        {
+            query.Project([.. spec.Columns]);
+        }
+
         if (spec.GroupBy is { } groupBy)
         {
             query.GroupBy(groupBy);
