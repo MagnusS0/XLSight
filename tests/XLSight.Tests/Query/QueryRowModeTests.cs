@@ -112,12 +112,29 @@ public sealed class QueryRowModeTests
     }
 
     [Fact]
-    public void HeaderRow_OutsideRange_Throws()
+    public void HeaderRow_AboveRange_BindsExternalHeaderInsteadOfThrowing()
+    {
+        // A header row above the queried range is a valid "external header" (see
+        // QueryExternalHeaderTests) — it no longer throws. Only a header below the range's
+        // bottom is rejected; that case is covered by HeaderRow_BelowRangeBottom_Throws below.
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook
+            .QueryRange(SalesWorkbook.SheetName, "A2:F11", headerRow: 1)
+            .Execute();
+
+        Assert.Equal(SalesWorkbook.Headers, result.Columns);
+        Assert.Equal(SalesWorkbook.Data.Length, result.RowsScanned);
+    }
+
+    [Fact]
+    public void HeaderRow_BelowRangeBottom_Throws()
     {
         using var ms = SalesWorkbook.Build();
         using var workbook = ExcelWorkbook.Open(ms);
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => workbook.QueryRange(SalesWorkbook.SheetName, "A2:F11", headerRow: 1));
+            () => workbook.QueryRange(SalesWorkbook.SheetName, "A2:F11", headerRow: 12));
     }
 }

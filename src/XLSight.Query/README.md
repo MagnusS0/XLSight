@@ -78,13 +78,36 @@ LIMIT 100
 Supported DSL features:
 
 - `FROM <sheet>!<bounded-range>` with bare or quoted sheet names.
-- `HEADER AUTO` or `HEADER ROW <number>`.
+- `HEADER AUTO` or `HEADER ROW <number>`; the header row may sit above the `FROM` range's
+  top row, but not below its bottom row.
 - `SELECT *` for row results.
 - `SELECT COUNT()`, `SUM(column)`, `AVG(column)`, `MIN(column)`, `MAX(column)` for aggregate results.
 - `WHERE` predicates joined by `AND`, using `=`, `!=`, `<`, `<=`, `>`, `>=`.
 - Text, number, `DATE "yyyy-MM-dd"`, and boolean literals.
 - One `GROUP BY` column.
 - Optional positive integer `LIMIT`.
+
+`FROM` selects the data window that gets scanned; `HEADER ROW n` only selects where
+column names are read from, and the header row does not need to fall inside that window.
+When the header sits above the range's top row, every row inside `FROM` is treated as
+data — the rows between the header and the range top are never scanned, counted in
+`RowsScanned`, or returned. This binds a header that lives above a data block without
+widening the range to include it:
+
+```sql
+FROM "Sheet1"!B20:O35 HEADER ROW 4
+SELECT *
+```
+
+When the header row sits inside the range, behavior is unchanged: rows before it are
+ignored and data starts on the row after it. A header row below the range's bottom row
+is rejected with `ArgumentOutOfRangeException`; a header row with no cells raises
+`InvalidOperationException`.
+
+`HEADER AUTO` benefits the same way: header inference now recognizes when a region's
+header lives above the queried sub-range and binds that header, instead of falling back
+to the first non-empty row inside `FROM`, which previously risked treating a data row as
+column names.
 
 For lower-level host validation, parse without executing:
 
@@ -149,7 +172,8 @@ static string QuerySheet(
     [Description(
         "XLSight Query DSL. Examples:\n" +
         "  FROM Sales!A1:F500 HEADER AUTO SELECT SUM(Revenue), COUNT() WHERE Region = \"EMEA\" GROUP BY Month\n" +
-        "  FROM Sheet1!A1:D200 HEADER ROW 1 SELECT * WHERE Status = \"Open\" LIMIT 50")]
+        "  FROM Sheet1!A1:D200 HEADER ROW 1 SELECT * WHERE Status = \"Open\" LIMIT 50\n" +
+        "  FROM Sheet1!B20:O35 HEADER ROW 4 SELECT * LIMIT 50")]
     string query)
 {
     using var wb = ExcelWorkbook.Open(path);

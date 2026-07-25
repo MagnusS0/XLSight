@@ -95,16 +95,20 @@ internal sealed class QueryScan
     /// </summary>
     public bool SupportsProjection => _distinctColumn is not null || _aggregateSpecs.Length > 0;
 
-    /// <summary>The remaining data rows of <paramref name="range"/> after the bound header row, or null when none.</summary>
+    /// <summary>
+    /// The remaining data rows of <paramref name="range"/> after the bound header row, clamped to
+    /// the range top (an external header above the range never widens the scan), or null when none.
+    /// </summary>
     public ExcelRange? DataRangeAfterHeader(ExcelRange range)
     {
-        if (_boundHeaderRow >= range.BottomRight.Row)
+        int firstDataRow = Math.Max(_boundHeaderRow + 1, range.TopLeft.Row);
+        if (firstDataRow > range.BottomRight.Row)
         {
             return null;
         }
 
         return new ExcelRange(
-            new ExcelAddress(range.TopLeft.Column, _boundHeaderRow + 1),
+            new ExcelAddress(range.TopLeft.Column, firstDataRow),
             range.BottomRight);
     }
 
