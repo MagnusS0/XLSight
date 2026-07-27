@@ -12,6 +12,7 @@ public sealed class SheetQuerySpec
         SheetQueryHeader header,
         bool selectAll,
         IReadOnlyList<AggregateSpec> aggregates,
+        IReadOnlyList<string> columns,
         IReadOnlyList<SheetQueryPredicate> predicates,
         string? groupBy,
         int? limit)
@@ -22,6 +23,7 @@ public sealed class SheetQuerySpec
         Header = header;
         SelectAll = selectAll;
         Aggregates = aggregates.ToArray();
+        Columns = columns.ToArray();
         Predicates = predicates.ToArray();
         GroupBy = groupBy;
         Limit = limit;
@@ -44,6 +46,9 @@ public sealed class SheetQuerySpec
 
     /// <summary>Gets the aggregate functions selected by the statement.</summary>
     public IReadOnlyList<AggregateSpec> Aggregates { get; }
+
+    /// <summary>Gets the raw projected column names in <c>SELECT</c> order (empty for <c>SELECT *</c> or aggregate queries).</summary>
+    public IReadOnlyList<string> Columns { get; }
 
     /// <summary>Gets the <c>WHERE</c> predicates, combined by <c>AND</c>.</summary>
     public IReadOnlyList<SheetQueryPredicate> Predicates { get; }

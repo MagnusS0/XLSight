@@ -15,12 +15,13 @@ public static class ExcelWorkbookQueryExtensions
     /// <param name="range">The range address, e.g. "A6:F2410". Case-insensitive.</param>
     /// <param name="headerRow">
     /// The 1-based sheet row containing the column headers, or 0 to use the first
-    /// non-empty row of the range. Data rows start after the header row.
+    /// non-empty row of the range. May sit above the range (an "external" header), in which
+    /// case every row inside the range is a data row. Must not sit below the range's bottom.
     /// </param>
     /// <returns>A query builder.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is null.</exception>
     /// <exception cref="InvalidAddressException">Thrown when the range cannot be parsed.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="headerRow"/> is negative or outside the range.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="headerRow"/> is negative or below the range.</exception>
     public static SheetQuery QueryRange(this ExcelWorkbook workbook, string sheet, string range, int headerRow = 0)
     {
         ArgumentNullException.ThrowIfNull(range);
@@ -37,21 +38,21 @@ public static class ExcelWorkbookQueryExtensions
     /// <param name="range">The range to query.</param>
     /// <param name="headerRow">
     /// The 1-based sheet row containing the column headers, or 0 to use the first
-    /// non-empty row of the range. Data rows start after the header row.
+    /// non-empty row of the range. May sit above the range (an "external" header), in which
+    /// case every row inside the range is a data row. Must not sit below the range's bottom.
     /// </param>
     /// <returns>A query builder.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="headerRow"/> is negative or outside the range.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="headerRow"/> is negative or below the range.</exception>
     public static SheetQuery QueryRange(this ExcelWorkbook workbook, string sheet, ExcelRange range, int headerRow = 0)
     {
         ArgumentNullException.ThrowIfNull(workbook);
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentOutOfRangeException.ThrowIfNegative(headerRow);
-        if (headerRow > 0 && !range.IsUnbounded
-            && (headerRow < range.TopLeft.Row || headerRow > range.BottomRight.Row))
+        if (headerRow > 0 && !range.IsUnbounded && headerRow > range.BottomRight.Row)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(headerRow), headerRow, $"Header row must lie within the queried range rows {range.TopLeft.Row}-{range.BottomRight.Row}.");
+                nameof(headerRow), headerRow, $"Header row must not lie below the queried range's bottom row {range.BottomRight.Row}.");
         }
 
         return new SheetQuery(workbook, sheet, range, headerRow);
@@ -192,6 +193,11 @@ public static class ExcelWorkbookQueryExtensions
             query.WhereCell(predicate.Column, predicate.Op, predicate.Literal);
         }
 
+        if (spec.Columns.Count > 0)
+        {
+            query.Project([.. spec.Columns]);
+        }
+
         if (spec.GroupBy is { } groupBy)
         {
             query.GroupBy(groupBy);
@@ -249,12 +255,10 @@ public static class ExcelWorkbookQueryExtensions
 
             if (rowsOverlap && colsOverlap)
             {
-                int headerRow = region.HeaderRows[0];
-
-                // The region's header can sit above a sub-range that deliberately excludes it.
-                // Returning an out-of-range header would make QueryRange throw, so fall back to
-                // first-non-empty-row binding instead.
-                return headerRow >= queryTop && headerRow <= queryBottom ? headerRow : 0;
+                // A region's header row is its own top row, which the overlap test already
+                // bounds above by queryBottom. Headers above queryTop are bound as external
+                // headers, so the row needs no further clamping here.
+                return region.HeaderRows[0];
             }
         }
 

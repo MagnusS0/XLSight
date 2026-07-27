@@ -277,7 +277,6 @@ public sealed class QueryDslTests
     }
 
     [Theory]
-    [InlineData("A1:F11", "SELECT Region", "Projected row columns are not supported")]
     [InlineData("A1:F11", "SELECT TOTAL(Units)", "Unknown aggregate 'TOTAL'")]
     [InlineData("A1:F11", "SELECT * GROUP BY Region", "GROUP BY is not valid with SELECT *")]
     [InlineData("A1:F11", "SELECT COUNT() WHERE Region = \"EMEA\" OR Region = \"APAC\"", "OR is not supported")]
@@ -361,19 +360,25 @@ public sealed class QueryDslTests
         Assert.Equal(400, result.Rows[0].Values.Span[0].AsNumber());
     }
 
+    /// <summary>
+    /// A8:B10 covers table 2's data rows only; its header (row 7) sits above the range.
+    /// External headers are now legal, so HEADER AUTO must bind that inferred header rather
+    /// than falling back to binding a data row as the header.
+    /// </summary>
     [Fact]
-    public void HeaderAuto_RegionHeaderAboveSubRange_FallsBackWithoutThrowing()
+    public void HeaderAuto_RegionHeaderAboveSubRange_BindsInferredHeader()
     {
         using var ms = BuildMinimalWorkbook("Data", TwoTableSheetXml, TwoTableSstXml);
         using var workbook = ExcelWorkbook.Open(ms);
 
-        // A8:B10 covers table 2's data rows only; its header (row 7) sits above the range.
-        // HEADER AUTO must not return that out-of-range header (QueryRange would throw) — it
-        // falls back to first-non-empty-row binding within the range instead.
-        Exception? ex = Record.Exception(() =>
-            workbook.ExecuteQuery("FROM Data!A8:B10 HEADER AUTO SELECT *"));
+        QueryResult result = workbook.ExecuteQuery("""
+            FROM Data!A8:B10 HEADER AUTO
+            SELECT SUM(Revenue)
+            WHERE Product = "Widget"
+            """);
 
-        Assert.Null(ex);
+        // Widget appears in rows 8 (100) and 10 (300); SUM = 400.
+        Assert.Equal(400, result.Rows[0].Values.Span[0].AsNumber());
     }
 
     private static MemoryStream BuildMinimalWorkbook(string sheetName, string sheetXml, string sstXml)

@@ -20,6 +20,7 @@ public sealed class SheetQuery
     private readonly int _headerRow;
     private readonly List<FilterSpec> _filters = [];
     private readonly List<AggregateSpec> _aggregates = [];
+    private readonly List<string> _projectedColumns = [];
     private string? _groupBy;
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
@@ -104,6 +105,31 @@ public sealed class SheetQuery
         }
 
         _aggregates.AddRange(aggregates);
+        return this;
+    }
+
+    /// <summary>
+    /// Restricts a row result to exactly these columns, in this order. Not a <see cref="Select"/>
+    /// overload — projected columns and aggregates are mutually exclusive, so keeping them on
+    /// separate methods avoids an overload-resolution trap.
+    /// </summary>
+    /// <param name="columns">The column names (from the header row) to include, in result order. Duplicates are allowed.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="columns"/> is empty or contains a blank name.</exception>
+    /// <exception cref="InvalidOperationException">Thrown at <see cref="Execute"/> time when combined with <see cref="Select"/> aggregates.</exception>
+    public SheetQuery Project(params string[] columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        if (columns.Length == 0)
+        {
+            throw new ArgumentException("At least one column is required.", nameof(columns));
+        }
+
+        foreach (string column in columns)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(column, nameof(columns));
+        }
+
+        _projectedColumns.AddRange(columns);
         return this;
     }
 
@@ -219,15 +245,29 @@ public sealed class SheetQuery
         return scan.BuildDistinctValues(top, ct);
     }
 
+    /// <summary>The header row sits above the queried range, so every range row is a data row.</summary>
+    private bool HasExternalHeader =>
+        _headerRow > 0 && !_range.IsUnbounded && _headerRow < _range.TopLeft.Row;
+
+    private ExcelRange HeaderRowRange() => new(
+        new ExcelAddress(_range.TopLeft.Column, _headerRow),
+        new ExcelAddress(_range.BottomRight.Column, _headerRow));
+
     /// <summary>
-    /// Drives the scan. Aggregate-shaped queries over a bounded range first probe for the
-    /// header row, then re-open the data rows with a column projection so cells the query
-    /// never reads are not materialized (no shared-string resolution, no number parsing).
-    /// Row queries return every column and use a single unprojected pass.
+    /// Drives the scan: bind the header row, then scan the data range in one shared pass.
+    /// An external header (above the range) is bound from its own row first, so it never widens
+    /// the data scan. Otherwise, aggregate-shaped queries over a bounded range probe the range
+    /// itself for the header, then re-open the data rows with a column projection so cells the
+    /// query never reads are not materialized. Row queries fall back to a single unprojected pass
+    /// that binds and scans together, which is cheaper when no projection is possible.
     /// </summary>
     private void RunScan(QueryScan scan)
     {
-        if (scan.SupportsProjection && !_range.IsUnbounded)
+        if (HasExternalHeader)
+        {
+            BindExternalHeader(scan);
+        }
+        else if (scan.SupportsProjection && !_range.IsUnbounded)
         {
             using (var probe = _workbook.GetRangeReader(_sheet, _range))
             {
@@ -237,28 +277,70 @@ public sealed class SheetQuery
                 }
             }
 
-            if (!scan.HeaderBound || scan.DataRangeAfterHeader(_range) is not { } dataRange)
+            if (!scan.HeaderBound)
             {
                 return;
             }
-
-            using var reader = _workbook.GetRangeReader(_sheet, dataRange, ReadMode.Values, scan.BuildProjection());
-            while (reader.Read() && scan.ProcessRow(reader.Current))
+        }
+        else
+        {
+            using var fullReader = _workbook.GetRangeReader(_sheet, _range);
+            while (fullReader.Read() && scan.ProcessRow(fullReader.Current))
             {
             }
 
             return;
         }
 
-        using var fullReader = _workbook.GetRangeReader(_sheet, _range);
-        while (fullReader.Read() && scan.ProcessRow(fullReader.Current))
+        if (scan.DataRangeAfterHeader(_range) is not { } dataRange)
         {
+            return;
+        }
+
+        ScanDataRange(scan, dataRange);
+    }
+
+    private void BindExternalHeader(QueryScan scan)
+    {
+        using (var probe = _workbook.GetRangeReader(_sheet, HeaderRowRange()))
+        {
+            while (!scan.HeaderBound && probe.Read())
+            {
+                scan.ProcessRow(probe.Current);
+            }
+        }
+
+        if (!scan.HeaderBound)
+        {
+            throw new InvalidOperationException($"Header row {_headerRow} contains no cells.");
+        }
+    }
+
+    private void ScanDataRange(QueryScan scan, ExcelRange dataRange)
+    {
+        if (scan.SupportsProjection)
+        {
+            using var reader = _workbook.GetRangeReader(_sheet, dataRange, ReadMode.Values, scan.BuildProjection());
+            while (reader.Read() && scan.ProcessRow(reader.Current))
+            {
+            }
+        }
+        else
+        {
+            using var reader = _workbook.GetRangeReader(_sheet, dataRange);
+            while (reader.Read() && scan.ProcessRow(reader.Current))
+            {
+            }
         }
     }
 
     private async Task RunScanAsync(QueryScan scan, CancellationToken ct)
     {
-        if (scan.SupportsProjection && !_range.IsUnbounded)
+        if (HasExternalHeader)
+        {
+            await BindExternalHeaderAsync(scan, ct).ConfigureAwait(false);
+        }
+        else if (scan.SupportsProjection && !_range.IsUnbounded)
         {
             var probe = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
             await using (probe.ConfigureAwait(false))
@@ -269,11 +351,53 @@ public sealed class SheetQuery
                 }
             }
 
-            if (!scan.HeaderBound || scan.DataRangeAfterHeader(_range) is not { } dataRange)
+            if (!scan.HeaderBound)
             {
                 return;
             }
+        }
+        else
+        {
+            var fullReader = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
+            await using (fullReader.ConfigureAwait(false))
+            {
+                while (await fullReader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(fullReader.Current))
+                {
+                }
+            }
 
+            return;
+        }
+
+        if (scan.DataRangeAfterHeader(_range) is not { } dataRange)
+        {
+            return;
+        }
+
+        await ScanDataRangeAsync(scan, dataRange, ct).ConfigureAwait(false);
+    }
+
+    private async Task BindExternalHeaderAsync(QueryScan scan, CancellationToken ct)
+    {
+        var probe = await _workbook.GetRangeReaderAsync(_sheet, HeaderRowRange(), ct: ct).ConfigureAwait(false);
+        await using (probe.ConfigureAwait(false))
+        {
+            while (!scan.HeaderBound && await probe.ReadAsync(ct).ConfigureAwait(false))
+            {
+                scan.ProcessRow(probe.Current);
+            }
+        }
+
+        if (!scan.HeaderBound)
+        {
+            throw new InvalidOperationException($"Header row {_headerRow} contains no cells.");
+        }
+    }
+
+    private async Task ScanDataRangeAsync(QueryScan scan, ExcelRange dataRange, CancellationToken ct)
+    {
+        if (scan.SupportsProjection)
+        {
             var reader = await _workbook
                 .GetRangeReaderAsync(_sheet, dataRange, ReadMode.Values, scan.BuildProjection(), ct)
                 .ConfigureAwait(false);
@@ -283,15 +407,15 @@ public sealed class SheetQuery
                 {
                 }
             }
-
-            return;
         }
-
-        var fullReader = await _workbook.GetRangeReaderAsync(_sheet, _range, ct: ct).ConfigureAwait(false);
-        await using (fullReader.ConfigureAwait(false))
+        else
         {
-            while (await fullReader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(fullReader.Current))
+            var reader = await _workbook.GetRangeReaderAsync(_sheet, dataRange, ct: ct).ConfigureAwait(false);
+            await using (reader.ConfigureAwait(false))
             {
+                while (await reader.ReadAsync(ct).ConfigureAwait(false) && scan.ProcessRow(reader.Current))
+                {
+                }
             }
         }
     }
@@ -304,12 +428,19 @@ public sealed class SheetQuery
                 "GroupBy requires at least one Select aggregate. Use DistinctValues(column) to enumerate a column's values.");
         }
 
+        if (_projectedColumns.Count > 0 && _aggregates.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Project cannot be combined with Select aggregates — a query must either project raw columns or aggregate, not mix the two.");
+        }
+
         return new QueryScan(
             _range,
             _headerRow,
             _filters,
             _groupBy,
             _aggregates,
+            _projectedColumns,
             distinctColumn,
             _limit,
             _maxGroups);
