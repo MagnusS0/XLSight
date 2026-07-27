@@ -154,7 +154,11 @@ The key is either the `GROUP BY` column or one of the selected aggregates — ma
 function and column, so `ORDER BY AVG(NetSales)` resolves against a `SELECT AVG(NetSales)`
 even though its result column is labeled `Average(NetSales)`. Empty aggregate results
 (a group with no aggregatable cells) always sort last, in both `ASC` and `DESC` — an empty
-result is never treated as the largest value. Ties break by first-seen group order, the
+result is never treated as the largest value. Values of different types follow a fixed rank
+— numbers and dates, then booleans, then text, then errors — and that rank does not flip with
+`DESC`, so a stray `"n/a"` in a numeric column always sorts behind every real number in both
+directions. `DESC` reverses magnitude within a type, not the type order itself, which means it
+is not the exact mirror of `ASC` on a mixed-type column. Ties break by first-seen group order, the
 same order `LIMIT` uses without `ORDER BY`. `ORDER BY` does not raise the group cap:
 a query that would exceed it still throws `TooManyGroupsException`, since a partial
 aggregate can't be discarded before its group's last row is seen. `ORDER BY` on a global
