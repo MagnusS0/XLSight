@@ -187,6 +187,28 @@ public sealed class QueryGroupedOrderByTests
     }
 
     [Fact]
+    public void GroupedOrderBy_MixedTypeGroupKeysDescending_KeepsTextAndEmptyBehindEveryNumber()
+    {
+        // DESC reverses magnitude within the numeric keys, but must NOT promote the dirty "n/a"
+        // text key or the empty key ahead of real numbers — the cross-type rank is fixed and only
+        // the same-type comparison inverts. Otherwise ORDER BY <numeric column> DESC LIMIT n would
+        // return nothing but garbage cells.
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook.ExecuteQuery("""
+            FROM Sales!A1:F11 HEADER AUTO
+            SELECT COUNT()
+            GROUP BY NetSales
+            ORDER BY NetSales DESC
+            """);
+
+        string[] keys = [.. result.Rows.Select(r => r.Values.Span[0].ToString())];
+
+        Assert.Equal(["300", "200.25", "100.5", "75", "60", "50", "25.75", "10", "n/a", "Empty"], keys);
+    }
+
+    [Fact]
     public void GroupedOrderBy_UnknownKey_ThrowsWithValidKeysListed()
     {
         var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse("""
