@@ -208,6 +208,18 @@ public static class ExcelWorkbookQueryExtensions
             query.Select([.. spec.Aggregates]);
         }
 
+        if (spec.OrderIndex >= 0)
+        {
+            if (spec.OrderIndex == 0)
+            {
+                query.OrderBy(spec.GroupBy!, spec.OrderDescending);
+            }
+            else
+            {
+                query.OrderBy(spec.Aggregates[spec.OrderIndex - 1], spec.OrderDescending);
+            }
+        }
+
         if (spec.Limit is { } limit)
         {
             query.Take(limit);

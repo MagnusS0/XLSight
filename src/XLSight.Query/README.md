@@ -87,6 +87,8 @@ Supported DSL features:
 - `WHERE` predicates joined by `AND`, using `=`, `!=`, `<`, `<=`, `>`, `>=`.
 - Text, number, `DATE "yyyy-MM-dd"`, and boolean literals.
 - One `GROUP BY` column.
+- One `ORDER BY <key> [ASC|DESC]` on grouped results (the `GROUP BY` column or a selected
+  aggregate); `ASC` is the default.
 - Optional positive integer `LIMIT`.
 
 `FROM` selects the data window that gets scanned; `HEADER ROW n` only selects where
@@ -135,6 +137,28 @@ parse time with `QueryDslException` ("Cannot mix raw columns and aggregates in o
 SELECT. Select raw columns, SELECT *, or aggregates only."). Raw columns combined with
 `GROUP BY` are rejected the same way ("GROUP BY requires aggregate selections. Raw
 column projections cannot be grouped.").
+
+`ORDER BY` sorts the materialized groups of a `GROUP BY` query before `LIMIT` truncates,
+so the kept rows are the top (or bottom) *N* by the ordering key, not the first *N* seen:
+
+```sql
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+SELECT SUM(NetSales), COUNT()
+GROUP BY Region
+ORDER BY SUM(NetSales) DESC
+LIMIT 10
+```
+
+The key is either the `GROUP BY` column or one of the selected aggregates — matched by
+function and column, so `ORDER BY AVG(NetSales)` resolves against a `SELECT AVG(NetSales)`
+even though its result column is labeled `Average(NetSales)`. Empty aggregate results
+(a group with no aggregatable cells) always sort last, in both `ASC` and `DESC` — an empty
+result is never treated as the largest value. Ties break by first-seen group order, the
+same order `LIMIT` uses without `ORDER BY`. `ORDER BY` does not raise the group cap:
+a query that would exceed it still throws `TooManyGroupsException`, since a partial
+aggregate can't be discarded before its group's last row is seen. `ORDER BY` on a raw-row
+result (`SELECT *` or a raw column projection) or a global aggregate without `GROUP BY`
+is rejected with `QueryDslException`.
 
 For lower-level host validation, parse without executing:
 

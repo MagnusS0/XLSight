@@ -22,6 +22,8 @@ internal sealed class QueryScan
     private readonly string? _distinctColumn;
     private readonly int _limit;
     private readonly int _maxGroups;
+    private readonly int _orderIndex;
+    private readonly bool _orderDescending;
 
     // ── Bound at the header row ───────────────────────────────────────────────
     private bool _headerBound;
@@ -79,7 +81,9 @@ internal sealed class QueryScan
         List<string> projectedColumns,
         string? distinctColumn,
         int limit,
-        int maxGroups)
+        int maxGroups,
+        int orderIndex = -1,
+        bool orderDescending = false)
     {
         _range = range;
         _headerRowParam = headerRow;
@@ -90,6 +94,8 @@ internal sealed class QueryScan
         _distinctColumn = distinctColumn;
         _limit = limit;
         _maxGroups = maxGroups;
+        _orderIndex = orderIndex;
+        _orderDescending = orderDescending;
     }
 
     // ── Projection support ────────────────────────────────────────────────────
@@ -585,9 +591,9 @@ internal sealed class QueryScan
             columns[i + 1] = _aggregateSpecs[i].Label;
         }
 
-        int rowCount = _limit < 0 ? _groupOrder.Count : Math.Min(_limit, _groupOrder.Count);
-        var rows = new List<QueryResultRow>(rowCount);
-        for (int g = 0; g < rowCount; g++)
+        int groupCount = _groupOrder.Count;
+        var groupRows = new List<GroupRow>(groupCount);
+        for (int g = 0; g < groupCount; g++)
         {
             ExcelCellValue key = _groupOrder[g];
             AggregateAccumulator[] accumulators = _groups[key];
@@ -598,11 +604,40 @@ internal sealed class QueryScan
                 values[i + 1] = accumulators[i].Result(_aggregateSpecs[i].Kind);
             }
 
-            rows.Add(new QueryResultRow { Values = values.AsMemory() });
+            groupRows.Add(new GroupRow(values, g));
+        }
+
+        if (_orderIndex >= 0)
+        {
+            ExcelCellValueComparer comparer = _orderDescending
+                ? ExcelCellValueComparer.Descending
+                : ExcelCellValueComparer.Ascending;
+            int orderIndex = _orderIndex;
+
+            // List<T>.Sort is unstable (introsort); tie-break on first-seen order so equal
+            // keys keep today's deterministic ordering instead of varying with group count.
+            groupRows.Sort((a, b) =>
+            {
+                int cmp = comparer.Compare(a.Values[orderIndex], b.Values[orderIndex]);
+                return cmp != 0 ? cmp : a.FirstSeenIndex.CompareTo(b.FirstSeenIndex);
+            });
+        }
+
+        if (_limit >= 0 && groupRows.Count > _limit)
+        {
+            groupRows.RemoveRange(_limit, groupRows.Count - _limit);
+        }
+
+        var rows = new List<QueryResultRow>(groupRows.Count);
+        foreach (GroupRow row in groupRows)
+        {
+            rows.Add(new QueryResultRow { Values = row.Values.AsMemory() });
         }
 
         return NewResult(columns, rows);
     }
+
+    private readonly record struct GroupRow(ExcelCellValue[] Values, int FirstSeenIndex);
 
     private QueryResult NewResult(IReadOnlyList<string> columns, IReadOnlyList<QueryResultRow> rows)
     {

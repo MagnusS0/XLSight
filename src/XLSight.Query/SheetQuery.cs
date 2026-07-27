@@ -22,6 +22,11 @@ public sealed class SheetQuery
     private readonly List<AggregateSpec> _aggregates = [];
     private readonly List<string> _projectedColumns = [];
     private string? _groupBy;
+    private bool _hasOrderBy;
+    private string? _orderByColumn;
+    private AggregateKind? _orderByAggregateKind;
+    private string? _orderByAggregateColumn;
+    private bool _orderByDescending;
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
     private IReadOnlyList<ColumnProfile>? _stats;
@@ -94,6 +99,48 @@ public sealed class SheetQuery
         return this;
     }
 
+    /// <summary>
+    /// Sorts grouped results by the <see cref="GroupBy"/> column before <c>Take</c> truncates.
+    /// Requires <see cref="GroupBy"/> — ordering raw row results is not yet supported.
+    /// </summary>
+    /// <param name="column">The group-by column name.</param>
+    /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
+    /// <exception cref="InvalidOperationException">Thrown when <c>OrderBy</c> was already called.</exception>
+    public SheetQuery OrderBy(string column, bool descending = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(column);
+        if (_hasOrderBy)
+        {
+            throw new InvalidOperationException("OrderBy was already called. A query supports a single ordering key.");
+        }
+
+        _hasOrderBy = true;
+        _orderByColumn = column;
+        _orderByDescending = descending;
+        return this;
+    }
+
+    /// <summary>
+    /// Sorts grouped results by a selected aggregate before <c>Take</c> truncates.
+    /// Requires <see cref="GroupBy"/> — ordering raw row results is not yet supported.
+    /// </summary>
+    /// <param name="aggregate">One of the aggregates passed to <see cref="Select"/>.</param>
+    /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
+    /// <exception cref="InvalidOperationException">Thrown when <c>OrderBy</c> was already called.</exception>
+    public SheetQuery OrderBy(AggregateSpec aggregate, bool descending = false)
+    {
+        if (_hasOrderBy)
+        {
+            throw new InvalidOperationException("OrderBy was already called. A query supports a single ordering key.");
+        }
+
+        _hasOrderBy = true;
+        _orderByAggregateKind = aggregate.Kind;
+        _orderByAggregateColumn = aggregate.Column;
+        _orderByDescending = descending;
+        return this;
+    }
+
     /// <summary>Selects aggregate projections to compute, e.g. <c>QueryAggregates.Sum("NetSales"), QueryAggregates.Count()</c>.</summary>
     /// <param name="aggregates">The aggregate projections to compute.</param>
     public SheetQuery Select(params AggregateSpec[] aggregates)
@@ -136,7 +183,9 @@ public sealed class SheetQuery
     /// <summary>
     /// Caps the number of result rows. For row queries (no aggregates) the scan stops as soon
     /// as the first <paramref name="count"/> matching rows are found; for grouped queries the
-    /// first <paramref name="count"/> groups in first-seen order are returned after a full scan.
+    /// first <paramref name="count"/> groups in first-seen order are returned after a full scan
+    /// — or, with <see cref="OrderBy(string, bool)"/>/<see cref="OrderBy(AggregateSpec, bool)"/>,
+    /// the top <paramref name="count"/> groups by that ordering instead of first-seen order.
     /// </summary>
     /// <param name="count">The maximum number of result rows.</param>
     public SheetQuery Take(int count)
@@ -434,6 +483,26 @@ public sealed class SheetQuery
                 "Project cannot be combined with Select aggregates — a query must either project raw columns or aggregate, not mix the two.");
         }
 
+        int orderIndex = -1;
+        if (_hasOrderBy)
+        {
+            if (_groupBy is null)
+            {
+                throw new InvalidOperationException(
+                    "ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
+            }
+
+            orderIndex = _orderByColumn is not null
+                ? OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, aggregateKind: null)
+                : OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByAggregateColumn, _orderByAggregateKind);
+
+            if (orderIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
+            }
+        }
+
         return new QueryScan(
             _range,
             _headerRow,
@@ -443,7 +512,9 @@ public sealed class SheetQuery
             _projectedColumns,
             distinctColumn,
             _limit,
-            _maxGroups);
+            _maxGroups,
+            orderIndex,
+            _orderByDescending);
     }
 
     internal SheetQuery WhereCell(string column, QueryOperator op, ExcelCellValue literal)

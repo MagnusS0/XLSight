@@ -45,6 +45,8 @@ internal static class QueryDslParser
                 groupBy = ParseIdentifierLike("GROUP BY column");
             }
 
+            (string? orderByColumn, AggregateKind? orderByAggregateKind, string? orderByAggregateColumn, string? orderByText, bool orderDescending) = ParseOrderBy();
+
             int? limit = null;
             if (TryConsumeKeyword("LIMIT"))
             {
@@ -53,7 +55,7 @@ internal static class QueryDslParser
 
             if (!_tokens.Current.IsEnd)
             {
-                throw Error($"Unexpected token '{_tokens.CurrentDisplay}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, LIMIT.");
+                throw Error($"Unexpected token '{_tokens.CurrentDisplay}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, ORDER BY, LIMIT.");
             }
 
             if (groupBy is not null && selectAll)
@@ -66,6 +68,8 @@ internal static class QueryDslParser
                 throw Error("GROUP BY requires aggregate selections. Raw column projections cannot be grouped.");
             }
 
+            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByAggregateColumn, orderByText);
+
             return new SheetQuerySpec(
                 sheet,
                 rangeAddress,
@@ -76,7 +80,77 @@ internal static class QueryDslParser
                 columns,
                 predicates,
                 groupBy,
+                orderByText,
+                orderDescending,
+                orderIndex,
                 limit);
+        }
+
+        private int ResolveOrderIndex(
+            string? groupBy,
+            IReadOnlyList<AggregateSpec> aggregates,
+            string? orderByColumn,
+            AggregateKind? orderByAggregateKind,
+            string? orderByAggregateColumn,
+            string? orderByText)
+        {
+            if (orderByText is null)
+            {
+                return -1;
+            }
+
+            if (groupBy is null)
+            {
+                throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
+            }
+
+            int orderIndex = OrderByKeyResolver.Resolve(groupBy, aggregates, orderByColumn ?? orderByAggregateColumn, orderByAggregateKind);
+            if (orderIndex < 0)
+            {
+                throw Error($"Unknown ORDER BY key '{orderByText}'. Valid keys: {OrderByKeyResolver.DescribeValidKeys(groupBy, aggregates)}.");
+            }
+
+            return orderIndex;
+        }
+
+        private (string? Column, AggregateKind? AggregateKind, string? AggregateColumn, string? Text, bool Descending) ParseOrderBy()
+        {
+            if (!_tokens.CurrentIsKeyword("ORDER") || !_tokens.PeekIsKeyword("BY"))
+            {
+                return (null, null, null, null, false);
+            }
+
+            _tokens.MoveNext(); // consume ORDER
+            _tokens.MoveNext(); // consume BY
+
+            string? column = null;
+            AggregateKind? aggregateKind = null;
+            string? aggregateColumn = null;
+            string text;
+            if (_tokens.Current.IsIdentifier && _tokens.Peek().Kind is TokenKind.OpenParen)
+            {
+                AggregateSpec keyAggregate = ParseAggregate();
+                aggregateKind = keyAggregate.Kind;
+                aggregateColumn = keyAggregate.Column;
+                text = keyAggregate.Label;
+            }
+            else
+            {
+                column = ParseIdentifierLike("ORDER BY key");
+                text = column;
+            }
+
+            bool descending = false;
+            if (TryConsumeKeyword("DESC"))
+            {
+                descending = true;
+            }
+            else
+            {
+                TryConsumeKeyword("ASC");
+            }
+
+            return (column, aggregateKind, aggregateColumn, text, descending);
         }
 
         private SheetQueryHeader ParseHeader()

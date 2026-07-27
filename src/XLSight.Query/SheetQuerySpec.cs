@@ -15,6 +15,9 @@ public sealed class SheetQuerySpec
         IReadOnlyList<string> columns,
         IReadOnlyList<SheetQueryPredicate> predicates,
         string? groupBy,
+        string? orderBy,
+        bool orderDescending,
+        int orderIndex,
         int? limit)
     {
         Sheet = sheet;
@@ -26,6 +29,9 @@ public sealed class SheetQuerySpec
         Columns = columns.ToArray();
         Predicates = predicates.ToArray();
         GroupBy = groupBy;
+        OrderBy = orderBy;
+        OrderDescending = orderDescending;
+        OrderIndex = orderIndex;
         Limit = limit;
     }
 
@@ -56,8 +62,17 @@ public sealed class SheetQuerySpec
     /// <summary>Gets the optional <c>GROUP BY</c> column.</summary>
     public string? GroupBy { get; }
 
+    /// <summary>Gets the optional <c>ORDER BY</c> key, as written (a column name or an aggregate call).</summary>
+    public string? OrderBy { get; }
+
+    /// <summary>Gets a value indicating whether <see cref="OrderBy"/> sorts descending. Ascending when no <c>ORDER BY</c> is present.</summary>
+    public bool OrderDescending { get; }
+
     /// <summary>Gets the optional positive <c>LIMIT</c> value.</summary>
     public int? Limit { get; }
+
+    /// <summary>The resolved result-column index for <see cref="OrderBy"/> (0 = group key, i + 1 = aggregate i), or -1 when unset.</summary>
+    internal int OrderIndex { get; }
 
     /// <summary>Parses Query DSL text into a structured query specification.</summary>
     /// <param name="queryText">The Query DSL text.</param>
