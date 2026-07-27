@@ -24,6 +24,7 @@ internal sealed class QueryScan
     private readonly int _maxGroups;
     private readonly int _orderIndex;
     private readonly bool _orderDescending;
+    private readonly string? _rowOrderColumn;
 
     // ── Bound at the header row ───────────────────────────────────────────────
     private bool _headerBound;
@@ -40,6 +41,8 @@ internal sealed class QueryScan
     private string _groupColumnName = "";
     private ResolvedAggregate[] _resolvedAggregates = [];
     private int _distinctColumnIndex;
+    private int _orderColumnIndex = -1;
+    private ExcelCellValueComparer? _rowOrderComparer;
 
     // ── Accumulation ──────────────────────────────────────────────────────────
     private int _rowsScanned;
@@ -48,6 +51,13 @@ internal sealed class QueryScan
     private readonly List<QueryResultRow> _rows = [];
     private readonly List<ExcelCellValue> _rowBuffer = [];
     private int _rowWidth;
+
+    // Top-N ordered row results: a fixed arena sized k * rowWidth, allocated once at header-bind
+    // time. The min-priority-queue tracks the weakest survivor's slot so a strictly better row
+    // can evict and recycle it in place — no growth, no compaction, O(LIMIT) memory throughout.
+    private ExcelCellValue[] _topNArena = [];
+    private int[] _topNSourceRows = [];
+    private PriorityQueue<int, ExcelCellValue>? _topN;
     private AggregateAccumulator[]? _globalAggregates;
     private ExcelCellValue _lastGroupKey;
     private AggregateAccumulator[]? _lastGroupAccumulators;
@@ -57,7 +67,7 @@ internal sealed class QueryScan
     private readonly Dictionary<string, DirtyColumn> _dirtyColumns = new(StringComparer.Ordinal);
     private readonly List<string> _dirtyOrder = [];
 
-    private enum ScanMode { Row, GlobalAggregate, GroupedAggregate, Distinct }
+    private enum ScanMode { Row, OrderedRow, GlobalAggregate, GroupedAggregate, Distinct }
     private ScanMode _mode;
 
     [StructLayout(LayoutKind.Auto)]
@@ -83,7 +93,8 @@ internal sealed class QueryScan
         int limit,
         int maxGroups,
         int orderIndex = -1,
-        bool orderDescending = false)
+        bool orderDescending = false,
+        string? rowOrderColumn = null)
     {
         _range = range;
         _headerRowParam = headerRow;
@@ -96,6 +107,7 @@ internal sealed class QueryScan
         _maxGroups = maxGroups;
         _orderIndex = orderIndex;
         _orderDescending = orderDescending;
+        _rowOrderColumn = rowOrderColumn;
     }
 
     // ── Projection support ────────────────────────────────────────────────────
@@ -131,7 +143,7 @@ internal sealed class QueryScan
     /// <summary>The projection covering exactly the columns the query reads.</summary>
     public RowProjection BuildProjection()
     {
-        var columns = new List<int>(_filters.Length + _resolvedAggregates.Length + _resultColumnIndices.Length + 2);
+        var columns = new List<int>(_filters.Length + _resolvedAggregates.Length + _resultColumnIndices.Length + 3);
         foreach (ResolvedFilter filter in _filters)
         {
             columns.Add(filter.ColumnIndex);
@@ -144,6 +156,7 @@ internal sealed class QueryScan
 
         if (_groupByColumn is not null) { columns.Add(_groupColumnIndex); }
         if (_distinctColumn is not null) { columns.Add(_distinctColumnIndex); }
+        if (_rowOrderColumn is not null) { columns.Add(_orderColumnIndex); }
         if (_projectedColumnNames.Length > 0) { columns.AddRange(_resultColumnIndices); }
         return new RowProjection(CollectionsMarshal.AsSpan(columns));
     }
@@ -247,6 +260,10 @@ internal sealed class QueryScan
                 return true;
             case ScanMode.Row:
                 return CollectRow(row);
+            case ScanMode.OrderedRow:
+                // No early exit: the true top-N can't be known until every row is ranked.
+                CollectOrderedRow(row);
+                return true;
             case ScanMode.GroupedAggregate:
                 AccumulateGroup(row);
                 return true;
@@ -279,6 +296,43 @@ internal sealed class QueryScan
 
         _rows.Add(new QueryResultRow { SourceRowIndex = row.RowIndex, ValuesStart = start });
         return _limit < 0 || _rows.Count < _limit;
+    }
+
+    /// <summary>
+    /// Bounded top-N selection: below capacity every row claims the next free arena slot; at
+    /// capacity a row is compared against the current weakest survivor (the priority queue's
+    /// root) and, only if it ranks strictly better, evicts and recycles that survivor's slot.
+    /// The 99% case — a row that doesn't make the cut — costs one comparison and no allocation.
+    /// </summary>
+    private void CollectOrderedRow(in ExcelRow row)
+    {
+        PriorityQueue<int, ExcelCellValue> topN = _topN!;
+        ExcelCellValue key = row.GetCell(_orderColumnIndex);
+
+        int slotIndex;
+        if (topN.Count < _limit)
+        {
+            slotIndex = topN.Count;
+        }
+        else
+        {
+            topN.TryPeek(out _, out ExcelCellValue worstKey);
+            if (_rowOrderComparer!.Compare(key, worstKey) >= 0)
+            {
+                return; // Not strictly better than the weakest survivor — discard.
+            }
+
+            slotIndex = topN.Dequeue(); // Evict the weakest survivor, recycle its slot.
+        }
+
+        int arenaOffset = slotIndex * _rowWidth;
+        for (int i = 0; i < _resultColumnIndices.Length; i++)
+        {
+            _topNArena[arenaOffset + i] = row.GetCell(_resultColumnIndices[i]);
+        }
+
+        _topNSourceRows[slotIndex] = row.RowIndex;
+        topN.Enqueue(slotIndex, key);
     }
 
     private void AccumulateGroup(in ExcelRow row)
@@ -371,7 +425,7 @@ internal sealed class QueryScan
 
     // ── Header binding ────────────────────────────────────────────────────────
 
-    private void BindHeader(in ExcelRow row)
+    private void BindColumnNames(in ExcelRow row)
     {
         int startColumn;
         int endColumn;
@@ -397,8 +451,10 @@ internal sealed class QueryScan
             string name = cell.IsEmpty ? "" : NormalizeHeaderName(cell.ToString());
             _columnNames[i] = name.Length > 0 ? name : ColumnLabel(column);
         }
+    }
 
-        BindProjection();
+    private void BindFiltersAndAggregates()
+    {
         _filters = new ResolvedFilter[_filterSpecs.Length];
         for (int i = 0; i < _filterSpecs.Length; i++)
         {
@@ -414,6 +470,13 @@ internal sealed class QueryScan
                 spec.Kind,
                 spec.Column is { } column ? ResolveColumn(column) : -1);
         }
+    }
+
+    private void BindHeader(in ExcelRow row)
+    {
+        BindColumnNames(row);
+        BindProjection();
+        BindFiltersAndAggregates();
 
         if (_groupByColumn is not null)
         {
@@ -426,9 +489,38 @@ internal sealed class QueryScan
             _distinctColumnIndex = ResolveColumn(_distinctColumn);
         }
 
+        if (_rowOrderColumn is not null)
+        {
+            BindRowOrder();
+        }
+
         _boundHeaderRow = row.RowIndex;
         _headerBound = true;
         _mode = ResolveMode();
+    }
+
+    /// <summary>
+    /// Resolves the raw-row ORDER BY column and allocates the fixed top-N arena (sized
+    /// <c>limit * rowWidth</c>) once, up front, so the bounded-memory property holds for the
+    /// whole scan. The priority queue must surface the weakest survivor at its root so a
+    /// strictly better row can find and evict it in one comparison — that means inverting the
+    /// requested-direction comparer, since <see cref="PriorityQueue{TElement,TPriority}"/> is a
+    /// min-heap and the weakest survivor is whichever key sorts *last* under that direction.
+    /// </summary>
+    private void BindRowOrder()
+    {
+        _orderColumnIndex = ResolveColumn(_rowOrderColumn!);
+        ExcelCellValueComparer keepComparer = _orderDescending
+            ? ExcelCellValueComparer.Descending
+            : ExcelCellValueComparer.Ascending;
+        _rowOrderComparer = keepComparer;
+
+        IComparer<ExcelCellValue> evictionComparer =
+            Comparer<ExcelCellValue>.Create((x, y) => -keepComparer.Compare(x, y));
+
+        _topNArena = new ExcelCellValue[_limit * _rowWidth];
+        _topNSourceRows = new int[_limit];
+        _topN = new PriorityQueue<int, ExcelCellValue>(_limit, evictionComparer);
     }
 
     /// <summary>
@@ -467,7 +559,7 @@ internal sealed class QueryScan
 
         if (_aggregateSpecs.Length == 0)
         {
-            return ScanMode.Row;
+            return _rowOrderColumn is not null ? ScanMode.OrderedRow : ScanMode.Row;
         }
 
         return _groupByColumn is null ? ScanMode.GlobalAggregate : ScanMode.GroupedAggregate;
@@ -541,10 +633,43 @@ internal sealed class QueryScan
 
         if (_aggregateSpecs.Length == 0)
         {
-            return NewResult(_resultColumnNames, ResolveRowValues());
+            return NewResult(_resultColumnNames, _mode == ScanMode.OrderedRow ? BuildOrderedRows() : ResolveRowValues());
         }
 
         return _groupByColumn is null ? BuildGlobalResult() : BuildGroupedResult();
+    }
+
+    /// <summary>Drains the top-N heap and sorts the ≤k survivors into the requested order.</summary>
+    private List<QueryResultRow> BuildOrderedRows()
+    {
+        PriorityQueue<int, ExcelCellValue> topN = _topN!;
+        int count = topN.Count;
+        var survivors = new (int SlotIndex, ExcelCellValue Key)[count];
+        int idx = 0;
+        while (topN.TryDequeue(out int slotIndex, out ExcelCellValue key))
+        {
+            survivors[idx++] = (slotIndex, key);
+        }
+
+        // Tie-break on source row so equal keys keep sheet order, matching the grouped path's
+        // first-seen tiebreak precedent.
+        Array.Sort(survivors, (a, b) =>
+        {
+            int cmp = _rowOrderComparer!.Compare(a.Key, b.Key);
+            return cmp != 0 ? cmp : _topNSourceRows[a.SlotIndex].CompareTo(_topNSourceRows[b.SlotIndex]);
+        });
+
+        var rows = new List<QueryResultRow>(count);
+        foreach ((int slotIndex, _) in survivors)
+        {
+            rows.Add(new QueryResultRow
+            {
+                SourceRowIndex = _topNSourceRows[slotIndex],
+                Values = _topNArena.AsMemory(slotIndex * _rowWidth, _rowWidth),
+            });
+        }
+
+        return rows;
     }
 
     private List<QueryResultRow> ResolveRowValues()

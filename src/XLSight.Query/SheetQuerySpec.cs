@@ -71,7 +71,11 @@ public sealed class SheetQuerySpec
     /// <summary>Gets the optional positive <c>LIMIT</c> value.</summary>
     public int? Limit { get; }
 
-    /// <summary>The resolved result-column index for <see cref="OrderBy"/> (0 = group key, i + 1 = aggregate i), or -1 when unset.</summary>
+    /// <summary>
+    /// The resolved result-column index for <see cref="OrderBy"/>: 0 = group key, i + 1 =
+    /// aggregate i, -1 when unset, or <see cref="Internal.OrderByKeyResolver.RowOrderIndex"/> for
+    /// raw-row top-N ordering (in which case <see cref="OrderBy"/> holds the raw column name).
+    /// </summary>
     internal int OrderIndex { get; }
 
     /// <summary>Parses Query DSL text into a structured query specification.</summary>

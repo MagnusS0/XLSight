@@ -10,6 +10,13 @@ namespace XLSight.Query.Internal;
 /// </summary>
 internal static class OrderByKeyResolver
 {
+    /// <summary>
+    /// Sentinel <c>SheetQuerySpec.OrderIndex</c> value for raw-row top-N ordering: the key is a
+    /// plain column (not a group key or aggregate), resolved at header-bind time like a filter
+    /// column, so <c>OrderBy</c> holds the raw column name rather than a result-column index.
+    /// </summary>
+    internal const int RowOrderIndex = -2;
+
     /// <summary>Resolves the key to a result-column index, or -1 when it matches neither.</summary>
     public static int Resolve(
         string? groupBy,

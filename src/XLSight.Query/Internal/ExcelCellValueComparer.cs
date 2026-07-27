@@ -12,8 +12,11 @@ namespace XLSight.Query.Internal;
 /// Non-empty values rank by <see cref="CellType"/> first, so the order stays total across a
 /// mixed-type column: Number and Date share a rank and compare numerically against each other
 /// (Date via its tick value); then Boolean (false before true); then Text (ordinal, matching
-/// <see cref="FilterEvaluator"/>'s comparison policy); then Error/Formula. Direction inverts the
-/// non-empty comparison only — the empty-last rule applies outside that inversion.
+/// <see cref="FilterEvaluator"/>'s comparison policy); then Error/Formula. That type hierarchy is
+/// fixed regardless of direction — a stray text cell must never outrank a real number just
+/// because the query sorts <c>DESC</c> — so direction inverts only the same-type comparison
+/// (numeric magnitude, boolean, or ordinal text), never the cross-type rank. The empty-last rule
+/// applies outside both.
 /// </remarks>
 internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
 {
@@ -35,12 +38,9 @@ internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
             return x.IsEmpty ? 1 : -1;
         }
 
-        int cmp = CompareNonEmpty(x, y);
-        return _descending ? -cmp : cmp;
-    }
-
-    private static int CompareNonEmpty(ExcelCellValue x, ExcelCellValue y)
-    {
+        // The cross-type rank is fixed regardless of direction; only the same-type comparison
+        // inverts with DESC. Otherwise a stray text cell would outrank every real number once a
+        // query sorts descending, which defeats the point of ranking a numeric column at all.
         int rankX = Rank(x.CellType);
         int rankY = Rank(y.CellType);
         if (rankX != rankY)
@@ -48,14 +48,17 @@ internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
             return rankX.CompareTo(rankY);
         }
 
-        return x.CellType switch
-        {
-            CellType.Number or CellType.Date => NumericValue(x).CompareTo(NumericValue(y)),
-            CellType.Boolean => x.AsBoolean().CompareTo(y.AsBoolean()),
-            CellType.Text => string.CompareOrdinal(x.AsText(), y.AsText()),
-            _ => string.CompareOrdinal(x.ToString(), y.ToString()),
-        };
+        int cmp = CompareSameRank(x, y);
+        return _descending ? -cmp : cmp;
     }
+
+    private static int CompareSameRank(ExcelCellValue x, ExcelCellValue y) => x.CellType switch
+    {
+        CellType.Number or CellType.Date => NumericValue(x).CompareTo(NumericValue(y)),
+        CellType.Boolean => x.AsBoolean().CompareTo(y.AsBoolean()),
+        CellType.Text => string.CompareOrdinal(x.AsText(), y.AsText()),
+        _ => string.CompareOrdinal(x.ToString(), y.ToString()),
+    };
 
     /// <summary>Number/Date first, then Boolean, then Text, then Error/Formula.</summary>
     private static int Rank(CellType type) => type switch

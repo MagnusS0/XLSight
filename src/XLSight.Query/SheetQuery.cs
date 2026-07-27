@@ -100,10 +100,13 @@ public sealed class SheetQuery
     }
 
     /// <summary>
-    /// Sorts grouped results by the <see cref="GroupBy"/> column before <c>Take</c> truncates.
-    /// Requires <see cref="GroupBy"/> — ordering raw row results is not yet supported.
+    /// Sorts results by <paramref name="column"/> before <c>Take</c> truncates. With
+    /// <see cref="GroupBy"/>, sorts the materialized groups by the group column. Without
+    /// <see cref="GroupBy"/>, ranks raw rows against this column and requires <see cref="Take"/>:
+    /// a bounded top-N selection keeps the best <c>Take</c> rows, evaluating every matching row
+    /// rather than stopping early once enough rows are found.
     /// </summary>
-    /// <param name="column">The group-by column name.</param>
+    /// <param name="column">The group-by column, or (without <see cref="GroupBy"/>) any column to rank raw rows by.</param>
     /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
     /// <exception cref="InvalidOperationException">Thrown when <c>OrderBy</c> was already called.</exception>
     public SheetQuery OrderBy(string column, bool descending = false)
@@ -122,7 +125,7 @@ public sealed class SheetQuery
 
     /// <summary>
     /// Sorts grouped results by a selected aggregate before <c>Take</c> truncates.
-    /// Requires <see cref="GroupBy"/> — ordering raw row results is not yet supported.
+    /// Requires <see cref="GroupBy"/> — an aggregate has no meaning as a raw-row ordering key.
     /// </summary>
     /// <param name="aggregate">One of the aggregates passed to <see cref="Select"/>.</param>
     /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
@@ -181,11 +184,15 @@ public sealed class SheetQuery
     }
 
     /// <summary>
-    /// Caps the number of result rows. For row queries (no aggregates) the scan stops as soon
-    /// as the first <paramref name="count"/> matching rows are found; for grouped queries the
-    /// first <paramref name="count"/> groups in first-seen order are returned after a full scan
-    /// — or, with <see cref="OrderBy(string, bool)"/>/<see cref="OrderBy(AggregateSpec, bool)"/>,
-    /// the top <paramref name="count"/> groups by that ordering instead of first-seen order.
+    /// Caps the number of result rows. For row queries (no aggregates, no <c>OrderBy</c>) the
+    /// scan stops as soon as the first <paramref name="count"/> matching rows are found; for
+    /// grouped queries the first <paramref name="count"/> groups in first-seen order are returned
+    /// after a full scan — or, with <see cref="OrderBy(string, bool)"/>/
+    /// <see cref="OrderBy(AggregateSpec, bool)"/>, the top <paramref name="count"/> groups by
+    /// that ordering instead of first-seen order. With <see cref="OrderBy(string, bool)"/> and no
+    /// <see cref="GroupBy"/>, this is the required bound for a bounded top-N row selection: every
+    /// matching row is ranked against the ordering key, so the early exit above does not apply —
+    /// the scan always reads every matching row to find the true top <paramref name="count"/>.
     /// </summary>
     /// <param name="count">The maximum number of result rows.</param>
     public SheetQuery Take(int count)
@@ -484,22 +491,31 @@ public sealed class SheetQuery
         }
 
         int orderIndex = -1;
+        string? rowOrderColumn = null;
         if (_hasOrderBy)
         {
-            if (_groupBy is null)
+            if (_groupBy is not null)
+            {
+                orderIndex = _orderByColumn is not null
+                    ? OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, aggregateKind: null)
+                    : OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByAggregateColumn, _orderByAggregateKind);
+
+                if (orderIndex < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
+                }
+            }
+            else if (_aggregates.Count == 0 && _limit >= 0 && _orderByColumn is not null)
+            {
+                // Raw-row top-N ordering: the key is a plain column, resolved at header-bind
+                // time exactly like a filter column, so it need not be selected.
+                rowOrderColumn = _orderByColumn;
+            }
+            else
             {
                 throw new InvalidOperationException(
                     "ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
-            }
-
-            orderIndex = _orderByColumn is not null
-                ? OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, aggregateKind: null)
-                : OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByAggregateColumn, _orderByAggregateKind);
-
-            if (orderIndex < 0)
-            {
-                throw new InvalidOperationException(
-                    $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
             }
         }
 
@@ -514,7 +530,8 @@ public sealed class SheetQuery
             _limit,
             _maxGroups,
             orderIndex,
-            _orderByDescending);
+            _orderByDescending,
+            rowOrderColumn);
     }
 
     internal SheetQuery WhereCell(string column, QueryOperator op, ExcelCellValue literal)

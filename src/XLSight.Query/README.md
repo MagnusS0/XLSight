@@ -88,7 +88,8 @@ Supported DSL features:
 - Text, number, `DATE "yyyy-MM-dd"`, and boolean literals.
 - One `GROUP BY` column.
 - One `ORDER BY <key> [ASC|DESC]` on grouped results (the `GROUP BY` column or a selected
-  aggregate); `ASC` is the default.
+  aggregate), or on raw-row results (`SELECT *` or a raw column projection) when combined with
+  `LIMIT`; `ASC` is the default.
 - Optional positive integer `LIMIT`.
 
 `FROM` selects the data window that gets scanned; `HEADER ROW n` only selects where
@@ -156,9 +157,29 @@ even though its result column is labeled `Average(NetSales)`. Empty aggregate re
 result is never treated as the largest value. Ties break by first-seen group order, the
 same order `LIMIT` uses without `ORDER BY`. `ORDER BY` does not raise the group cap:
 a query that would exceed it still throws `TooManyGroupsException`, since a partial
-aggregate can't be discarded before its group's last row is seen. `ORDER BY` on a raw-row
-result (`SELECT *` or a raw column projection) or a global aggregate without `GROUP BY`
-is rejected with `QueryDslException`.
+aggregate can't be discarded before its group's last row is seen. `ORDER BY` on a global
+aggregate without `GROUP BY` is rejected with `QueryDslException`.
+
+`ORDER BY` also works on raw-row results (`SELECT *` or a raw column projection), but only
+together with `LIMIT`:
+
+```sql
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+SELECT *
+ORDER BY NetSales DESC
+LIMIT 10
+```
+
+Without `GROUP BY`, `LIMIT` is what bounds the memory a sort would otherwise need, so
+`ORDER BY` on a raw-row result with no `LIMIT` is rejected the same way as the grouped case,
+with the same message. The ordering column need not be selected — `SELECT Region ORDER BY
+NetSales DESC LIMIT 10` is legal, ranking rows by `NetSales` while returning only `Region`.
+This is a bounded top-N selection, not a full sort: memory is `O(LIMIT)`, the same cost
+`LIMIT` already has without `ORDER BY`. The trade-off is that the early exit an unordered
+`LIMIT` uses (stop once enough rows match) does not apply here — every matching row has to
+be ranked against the ordering key to find the true top *N*, so `RowsScanned` covers every
+matching row rather than stopping at `LIMIT`. Empties-last and the tie-break rule apply the
+same as the grouped case, breaking ties by sheet row order instead of first-seen group order.
 
 For lower-level host validation, parse without executing:
 

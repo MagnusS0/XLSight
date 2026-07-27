@@ -68,7 +68,7 @@ internal static class QueryDslParser
                 throw Error("GROUP BY requires aggregate selections. Raw column projections cannot be grouped.");
             }
 
-            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByAggregateColumn, orderByText);
+            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByAggregateColumn, orderByText, limit);
 
             return new SheetQuerySpec(
                 sheet,
@@ -92,7 +92,8 @@ internal static class QueryDslParser
             string? orderByColumn,
             AggregateKind? orderByAggregateKind,
             string? orderByAggregateColumn,
-            string? orderByText)
+            string? orderByText,
+            int? limit)
         {
             if (orderByText is null)
             {
@@ -101,6 +102,13 @@ internal static class QueryDslParser
 
             if (groupBy is null)
             {
+                // Raw-row top-N ordering: legal only with LIMIT, and only for a plain column key
+                // (an aggregate call has no meaning without GROUP BY or a SELECT aggregate).
+                if (aggregates.Count == 0 && limit is not null && orderByColumn is not null)
+                {
+                    return OrderByKeyResolver.RowOrderIndex;
+                }
+
                 throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
             }
 
