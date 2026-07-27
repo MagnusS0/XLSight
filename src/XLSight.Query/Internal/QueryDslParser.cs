@@ -45,7 +45,7 @@ internal static class QueryDslParser
                 groupBy = ParseIdentifierLike("GROUP BY column");
             }
 
-            (string? orderByColumn, AggregateKind? orderByAggregateKind, string? orderByAggregateColumn, string? orderByText, bool orderDescending) = ParseOrderBy();
+            (string? orderByColumn, AggregateKind? orderByAggregateKind, string? orderByText, bool orderDescending) = ParseOrderBy();
 
             int? limit = null;
             if (TryConsumeKeyword("LIMIT"))
@@ -68,7 +68,7 @@ internal static class QueryDslParser
                 throw Error("GROUP BY requires aggregate selections. Raw column projections cannot be grouped.");
             }
 
-            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByAggregateColumn, orderByText, limit);
+            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByText, limit);
 
             return new SheetQuerySpec(
                 sheet,
@@ -91,7 +91,6 @@ internal static class QueryDslParser
             IReadOnlyList<AggregateSpec> aggregates,
             string? orderByColumn,
             AggregateKind? orderByAggregateKind,
-            string? orderByAggregateColumn,
             string? orderByText,
             int? limit)
         {
@@ -104,7 +103,7 @@ internal static class QueryDslParser
             {
                 // Raw-row top-N ordering: legal only with LIMIT, and only for a plain column key
                 // (an aggregate call has no meaning without GROUP BY or a SELECT aggregate).
-                if (aggregates.Count == 0 && limit is not null && orderByColumn is not null)
+                if (aggregates.Count == 0 && limit is not null && orderByAggregateKind is null)
                 {
                     return OrderByKeyResolver.RowOrderIndex;
                 }
@@ -112,7 +111,7 @@ internal static class QueryDslParser
                 throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
             }
 
-            int orderIndex = OrderByKeyResolver.Resolve(groupBy, aggregates, orderByColumn ?? orderByAggregateColumn, orderByAggregateKind);
+            int orderIndex = OrderByKeyResolver.Resolve(groupBy, aggregates, orderByColumn, orderByAggregateKind);
             if (orderIndex < 0)
             {
                 throw Error($"Unknown ORDER BY key '{orderByText}'. Valid keys: {OrderByKeyResolver.DescribeValidKeys(groupBy, aggregates)}.");
@@ -121,25 +120,29 @@ internal static class QueryDslParser
             return orderIndex;
         }
 
-        private (string? Column, AggregateKind? AggregateKind, string? AggregateColumn, string? Text, bool Descending) ParseOrderBy()
+        /// <summary>
+        /// Parses <c>ORDER BY &lt;column|aggregate(column)&gt; [ASC|DESC]</c>. <c>Column</c> carries
+        /// the key's column either way; a non-null <c>AggregateKind</c> is what marks it as an
+        /// aggregate key.
+        /// </summary>
+        private (string? Column, AggregateKind? AggregateKind, string? Text, bool Descending) ParseOrderBy()
         {
             if (!_tokens.CurrentIsKeyword("ORDER") || !_tokens.PeekIsKeyword("BY"))
             {
-                return (null, null, null, null, false);
+                return (null, null, null, false);
             }
 
             _tokens.MoveNext(); // consume ORDER
             _tokens.MoveNext(); // consume BY
 
-            string? column = null;
+            string? column;
             AggregateKind? aggregateKind = null;
-            string? aggregateColumn = null;
             string text;
             if (_tokens.Current.IsIdentifier && _tokens.Peek().Kind is TokenKind.OpenParen)
             {
                 AggregateSpec keyAggregate = ParseAggregate();
                 aggregateKind = keyAggregate.Kind;
-                aggregateColumn = keyAggregate.Column;
+                column = keyAggregate.Column;
                 text = keyAggregate.Label;
             }
             else
@@ -148,17 +151,13 @@ internal static class QueryDslParser
                 text = column;
             }
 
-            bool descending = false;
-            if (TryConsumeKeyword("DESC"))
-            {
-                descending = true;
-            }
-            else
+            bool descending = TryConsumeKeyword("DESC");
+            if (!descending)
             {
                 TryConsumeKeyword("ASC");
             }
 
-            return (column, aggregateKind, aggregateColumn, text, descending);
+            return (column, aggregateKind, text, descending);
         }
 
         private SheetQueryHeader ParseHeader()

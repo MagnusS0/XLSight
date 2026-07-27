@@ -6,17 +6,11 @@ namespace XLSight.Query.Internal;
 /// span mixed types within one column.
 /// </summary>
 /// <remarks>
-/// <see cref="CellType.Empty"/> always sorts last, in both ascending and descending order — it is
-/// never treated as "largest" the way SQL engines like Postgres treat <c>NULL</c>. An <c>ORDER BY
-/// SUM(x) DESC LIMIT 10</c> must never surface ten groups whose column held no numeric data.
-/// Non-empty values rank by <see cref="CellType"/> first, so the order stays total across a
-/// mixed-type column: Number and Date share a rank and compare numerically against each other
-/// (Date via its tick value); then Boolean (false before true); then Text (ordinal, matching
-/// <see cref="FilterEvaluator"/>'s comparison policy); then Error/Formula. That type hierarchy is
-/// fixed regardless of direction — a stray text cell must never outrank a real number just
-/// because the query sorts <c>DESC</c> — so direction inverts only the same-type comparison
-/// (numeric magnitude, boolean, or ordinal text), never the cross-type rank. The empty-last rule
-/// applies outside both.
+/// Two rules survive a direction flip. <see cref="CellType.Empty"/> always sorts last, never
+/// "largest" the way SQL treats <c>NULL</c> — <c>ORDER BY SUM(x) DESC LIMIT 10</c> must not
+/// surface ten groups whose column held no numeric data. And the cross-type rank from
+/// <see cref="Rank"/> is fixed, so a stray text cell never outranks a real number just because the
+/// query sorts <c>DESC</c>. Direction inverts only the same-type comparison.
 /// </remarks>
 internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
 {
@@ -38,9 +32,6 @@ internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
             return x.IsEmpty ? 1 : -1;
         }
 
-        // The cross-type rank is fixed regardless of direction; only the same-type comparison
-        // inverts with DESC. Otherwise a stray text cell would outrank every real number once a
-        // query sorts descending, which defeats the point of ranking a numeric column at all.
         int rankX = Rank(x.CellType);
         int rankY = Rank(y.CellType);
         if (rankX != rankY)

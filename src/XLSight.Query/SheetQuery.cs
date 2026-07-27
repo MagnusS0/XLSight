@@ -25,7 +25,6 @@ public sealed class SheetQuery
     private bool _hasOrderBy;
     private string? _orderByColumn;
     private AggregateKind? _orderByAggregateKind;
-    private string? _orderByAggregateColumn;
     private bool _orderByDescending;
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
@@ -139,7 +138,7 @@ public sealed class SheetQuery
 
         _hasOrderBy = true;
         _orderByAggregateKind = aggregate.Kind;
-        _orderByAggregateColumn = aggregate.Column;
+        _orderByColumn = aggregate.Column;
         _orderByDescending = descending;
         return this;
     }
@@ -187,12 +186,9 @@ public sealed class SheetQuery
     /// Caps the number of result rows. For row queries (no aggregates, no <c>OrderBy</c>) the
     /// scan stops as soon as the first <paramref name="count"/> matching rows are found; for
     /// grouped queries the first <paramref name="count"/> groups in first-seen order are returned
-    /// after a full scan — or, with <see cref="OrderBy(string, bool)"/>/
-    /// <see cref="OrderBy(AggregateSpec, bool)"/>, the top <paramref name="count"/> groups by
-    /// that ordering instead of first-seen order. With <see cref="OrderBy(string, bool)"/> and no
-    /// <see cref="GroupBy"/>, this is the required bound for a bounded top-N row selection: every
-    /// matching row is ranked against the ordering key, so the early exit above does not apply —
-    /// the scan always reads every matching row to find the true top <paramref name="count"/>.
+    /// after a full scan. With an <c>OrderBy</c> the top <paramref name="count"/> by that ordering
+    /// are returned instead, and the early exit no longer applies — every matching row has to be
+    /// ranked to find the true top <paramref name="count"/>.
     /// </summary>
     /// <param name="count">The maximum number of result rows.</param>
     public SheetQuery Take(int count)
@@ -496,17 +492,14 @@ public sealed class SheetQuery
         {
             if (_groupBy is not null)
             {
-                orderIndex = _orderByColumn is not null
-                    ? OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, aggregateKind: null)
-                    : OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByAggregateColumn, _orderByAggregateKind);
-
+                orderIndex = OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, _orderByAggregateKind);
                 if (orderIndex < 0)
                 {
                     throw new InvalidOperationException(
                         $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
                 }
             }
-            else if (_aggregates.Count == 0 && _limit >= 0 && _orderByColumn is not null)
+            else if (_aggregates.Count == 0 && _limit >= 0 && _orderByAggregateKind is null)
             {
                 // Raw-row top-N ordering: the key is a plain column, resolved at header-bind
                 // time exactly like a filter column, so it need not be selected.

@@ -42,7 +42,9 @@ internal sealed class QueryScan
     private ResolvedAggregate[] _resolvedAggregates = [];
     private int _distinctColumnIndex;
     private int _orderColumnIndex = -1;
-    private ExcelCellValueComparer? _rowOrderComparer;
+
+    private ExcelCellValueComparer OrderComparer =>
+        _orderDescending ? ExcelCellValueComparer.Descending : ExcelCellValueComparer.Ascending;
 
     // ── Accumulation ──────────────────────────────────────────────────────────
     private int _rowsScanned;
@@ -299,10 +301,9 @@ internal sealed class QueryScan
     }
 
     /// <summary>
-    /// Bounded top-N selection: below capacity every row claims the next free arena slot; at
-    /// capacity a row is compared against the current weakest survivor (the priority queue's
-    /// root) and, only if it ranks strictly better, evicts and recycles that survivor's slot.
-    /// The 99% case — a row that doesn't make the cut — costs one comparison and no allocation.
+    /// Bounded top-N selection: below capacity a row claims the next free arena slot; at capacity
+    /// it must beat the weakest survivor (the heap root) to evict and recycle that slot. A row
+    /// that doesn't make the cut costs one comparison and no allocation.
     /// </summary>
     private void CollectOrderedRow(in ExcelRow row)
     {
@@ -317,7 +318,7 @@ internal sealed class QueryScan
         else
         {
             topN.TryPeek(out _, out ExcelCellValue worstKey);
-            if (_rowOrderComparer!.Compare(key, worstKey) >= 0)
+            if (OrderComparer.Compare(key, worstKey) >= 0)
             {
                 return; // Not strictly better than the weakest survivor — discard.
             }
@@ -500,27 +501,21 @@ internal sealed class QueryScan
     }
 
     /// <summary>
-    /// Resolves the raw-row ORDER BY column and allocates the fixed top-N arena (sized
-    /// <c>limit * rowWidth</c>) once, up front, so the bounded-memory property holds for the
-    /// whole scan. The priority queue must surface the weakest survivor at its root so a
-    /// strictly better row can find and evict it in one comparison — that means inverting the
-    /// requested-direction comparer, since <see cref="PriorityQueue{TElement,TPriority}"/> is a
-    /// min-heap and the weakest survivor is whichever key sorts *last* under that direction.
+    /// Resolves the raw-row ORDER BY column and allocates the fixed top-N arena up front, so the
+    /// bounded-memory property holds for the whole scan. <see cref="PriorityQueue{TElement,TPriority}"/>
+    /// is a min-heap, so the comparer is inverted: the root then holds the weakest survivor, which
+    /// is what an incoming row has to beat.
     /// </summary>
     private void BindRowOrder()
     {
         _orderColumnIndex = ResolveColumn(_rowOrderColumn!);
-        ExcelCellValueComparer keepComparer = _orderDescending
-            ? ExcelCellValueComparer.Descending
-            : ExcelCellValueComparer.Ascending;
-        _rowOrderComparer = keepComparer;
-
-        IComparer<ExcelCellValue> evictionComparer =
-            Comparer<ExcelCellValue>.Create((x, y) => -keepComparer.Compare(x, y));
+        ExcelCellValueComparer keepComparer = OrderComparer;
 
         _topNArena = new ExcelCellValue[_limit * _rowWidth];
         _topNSourceRows = new int[_limit];
-        _topN = new PriorityQueue<int, ExcelCellValue>(_limit, evictionComparer);
+        _topN = new PriorityQueue<int, ExcelCellValue>(
+            _limit,
+            Comparer<ExcelCellValue>.Create((x, y) => -keepComparer.Compare(x, y)));
     }
 
     /// <summary>
@@ -653,9 +648,10 @@ internal sealed class QueryScan
 
         // Tie-break on source row so equal keys keep sheet order, matching the grouped path's
         // first-seen tiebreak precedent.
+        ExcelCellValueComparer comparer = OrderComparer;
         Array.Sort(survivors, (a, b) =>
         {
-            int cmp = _rowOrderComparer!.Compare(a.Key, b.Key);
+            int cmp = comparer.Compare(a.Key, b.Key);
             return cmp != 0 ? cmp : _topNSourceRows[a.SlotIndex].CompareTo(_topNSourceRows[b.SlotIndex]);
         });
 
@@ -734,9 +730,7 @@ internal sealed class QueryScan
 
         if (_orderIndex >= 0)
         {
-            ExcelCellValueComparer comparer = _orderDescending
-                ? ExcelCellValueComparer.Descending
-                : ExcelCellValueComparer.Ascending;
+            ExcelCellValueComparer comparer = OrderComparer;
             int orderIndex = _orderIndex;
 
             // List<T>.Sort is unstable (introsort); tie-break on first-seen order so equal

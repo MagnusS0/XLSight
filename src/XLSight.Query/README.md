@@ -152,20 +152,14 @@ LIMIT 10
 
 The key is either the `GROUP BY` column or one of the selected aggregates — matched by
 function and column, so `ORDER BY AVG(NetSales)` resolves against a `SELECT AVG(NetSales)`
-even though its result column is labeled `Average(NetSales)`. Empty aggregate results
-(a group with no aggregatable cells) always sort last, in both `ASC` and `DESC` — an empty
-result is never treated as the largest value. Values of different types follow a fixed rank
-— numbers and dates, then booleans, then text, then errors — and that rank does not flip with
-`DESC`, so a stray `"n/a"` in a numeric column always sorts behind every real number in both
-directions. `DESC` reverses magnitude within a type, not the type order itself, which means it
-is not the exact mirror of `ASC` on a mixed-type column. Ties break by first-seen group order, the
-same order `LIMIT` uses without `ORDER BY`. `ORDER BY` does not raise the group cap:
-a query that would exceed it still throws `TooManyGroupsException`, since a partial
+even though its result column is labeled `Average(NetSales)`. `ORDER BY` does not raise the
+group cap: a query that would exceed it still throws `TooManyGroupsException`, since a partial
 aggregate can't be discarded before its group's last row is seen. `ORDER BY` on a global
 aggregate without `GROUP BY` is rejected with `QueryDslException`.
 
 `ORDER BY` also works on raw-row results (`SELECT *` or a raw column projection), but only
-together with `LIMIT`:
+together with `LIMIT` — without `GROUP BY`, `LIMIT` is what bounds the memory a sort would
+otherwise need:
 
 ```sql
 FROM "Sheet1"!A6:F2410 HEADER ROW 6
@@ -174,16 +168,22 @@ ORDER BY NetSales DESC
 LIMIT 10
 ```
 
-Without `GROUP BY`, `LIMIT` is what bounds the memory a sort would otherwise need, so
-`ORDER BY` on a raw-row result with no `LIMIT` is rejected the same way as the grouped case,
-with the same message. The ordering column need not be selected — `SELECT Region ORDER BY
-NetSales DESC LIMIT 10` is legal, ranking rows by `NetSales` while returning only `Region`.
-This is a bounded top-N selection, not a full sort: memory is `O(LIMIT)`, the same cost
-`LIMIT` already has without `ORDER BY`. The trade-off is that the early exit an unordered
-`LIMIT` uses (stop once enough rows match) does not apply here — every matching row has to
-be ranked against the ordering key to find the true top *N*, so `RowsScanned` covers every
-matching row rather than stopping at `LIMIT`. Empties-last and the tie-break rule apply the
-same as the grouped case, breaking ties by sheet row order instead of first-seen group order.
+The ordering column need not be selected — `SELECT Region ORDER BY NetSales DESC LIMIT 10` is
+legal, ranking rows by `NetSales` while returning only `Region`. This is a bounded top-N
+selection, not a full sort: memory is `O(LIMIT)`, the same cost `LIMIT` already has on its own.
+The trade-off is that the row-mode early exit (stop once enough rows match) does not apply —
+every matching row has to be ranked to find the true top *N*, so `RowsScanned` covers all of
+them rather than stopping at `LIMIT`.
+
+Both forms sort by the same total order over cell values:
+
+- Empty always sorts last, in both `ASC` and `DESC` — never "largest" the way SQL treats `NULL`.
+- Types rank numbers and dates, then booleans, then text, then errors. That rank is fixed, so a
+  stray `"n/a"` in a numeric column sorts behind every real number in both directions. `DESC`
+  reverses magnitude *within* a type, which means it is not the exact mirror of `ASC` on a
+  mixed-type column.
+- Ties break by first-seen group order (grouped) or sheet row order (raw rows), matching the
+  order `LIMIT` uses on its own.
 
 For lower-level host validation, parse without executing:
 
