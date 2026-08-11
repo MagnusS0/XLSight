@@ -6,9 +6,11 @@ namespace XLSight.Query.Tests;
 
 /// <summary>
 /// Covers <c>ORDER BY</c> on grouped (<c>GROUP BY</c>) results: the materialized groups are
-/// sorted on the group column or a selected aggregate before <c>LIMIT</c> truncates. Ordering
-/// a raw-row result (<c>SELECT *</c> or a raw column projection) or a global aggregate without
-/// <c>GROUP BY</c> is rejected — top-N ordering on raw rows lands in a later commit.
+/// sorted on the group column or a selected aggregate before <c>LIMIT</c> truncates. Also covers
+/// the keys this shape rejects — an unknown key, and a global aggregate, which returns a single
+/// row and so has nothing to order. Ordering a raw-row result (<c>SELECT *</c> or a raw column
+/// projection) is supported but requires <c>LIMIT</c>; <see cref="QueryRowOrderByTests"/> covers
+/// that bounded top-N path.
 /// </summary>
 public sealed class QueryGroupedOrderByTests
 {
