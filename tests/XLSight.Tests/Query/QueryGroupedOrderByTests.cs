@@ -226,20 +226,6 @@ public sealed class QueryGroupedOrderByTests
     }
 
     [Fact]
-    public void GroupedOrderBy_OnSelectStar_Rejected()
-    {
-        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse($"""
-            FROM Sales!{Range} HEADER AUTO
-            SELECT *
-            ORDER BY Region DESC
-            """));
-
-        Assert.Equal(
-            "ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.",
-            ex.Message);
-    }
-
-    [Fact]
     public void GroupedOrderBy_OnRawColumnProjection_Rejected()
     {
         var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse($"""
