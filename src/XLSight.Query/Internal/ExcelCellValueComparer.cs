@@ -45,21 +45,24 @@ internal sealed class ExcelCellValueComparer : IComparer<ExcelCellValue>
 
     private static int CompareSameRank(ExcelCellValue x, ExcelCellValue y) => x.CellType switch
     {
-        CellType.Number or CellType.Date => NumericValue(x).CompareTo(NumericValue(y)),
+        CellType.Number => x.AsNumber().CompareTo(y.AsNumber()),
+        CellType.Date => x.AsDate().CompareTo(y.AsDate()),
         CellType.Boolean => x.AsBoolean().CompareTo(y.AsBoolean()),
         CellType.Text => string.CompareOrdinal(x.AsText(), y.AsText()),
         _ => string.CompareOrdinal(x.ToString(), y.ToString()),
     };
 
-    /// <summary>Number/Date first, then Boolean, then Text, then Error/Formula.</summary>
+    /// <summary>
+    /// Number first, then Date, then Boolean, then Text, then Error/Formula. Date is its own rank
+    /// rather than sharing Number's: a serial number and a date are not commensurable, so a column
+    /// holding both groups all dates after all numbers instead of interleaving them by tick value.
+    /// </summary>
     private static int Rank(CellType type) => type switch
     {
-        CellType.Number or CellType.Date => 0,
-        CellType.Boolean => 1,
-        CellType.Text => 2,
-        _ => 3, // Error, Formula
+        CellType.Number => 0,
+        CellType.Date => 1,
+        CellType.Boolean => 2,
+        CellType.Text => 3,
+        _ => 4, // Error, Formula
     };
-
-    private static double NumericValue(ExcelCellValue value) =>
-        value.CellType == CellType.Date ? value.AsDate().Ticks : value.AsNumber();
 }

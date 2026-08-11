@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.IO.Compression;
+using System.Text;
 using Xunit;
 
 namespace XLSight.Query.Tests;
@@ -200,5 +203,104 @@ public sealed class QueryRowOrderByTests
         Assert.Equal(
             dsl.Rows.Select(r => string.Join("|", r.Values.ToArray())),
             fluent.Rows.Select(r => string.Join("|", r.Values.ToArray())));
+    }
+
+    [Fact]
+    public void RowOrderBy_NumbersAndDatesInOneColumn_GroupNumbersBeforeDates()
+    {
+        using var ms = BuildMixedNumberDateWorkbook();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook.ExecuteQuery("""
+            FROM Sheet1!A1:A5 HEADER ROW 1
+            SELECT *
+            ORDER BY Key ASC
+            LIMIT 10
+            """);
+
+        // A serial number and a date are not commensurable, so all numbers rank ahead of all
+        // dates rather than interleaving by tick value.
+        Assert.Equal(
+            [CellType.Number, CellType.Number, CellType.Date, CellType.Date],
+            result.Rows.Select(r => r.Values.Span[0].CellType));
+        Assert.Equal([5d, 100d], result.Rows.Take(2).Select(r => r.Values.Span[0].AsNumber()));
+        Assert.Equal(
+            [new DateTime(2024, 1, 15), new DateTime(2024, 3, 5)],
+            result.Rows.Skip(2).Select(r => r.Values.Span[0].AsDate()));
+    }
+
+    /// <summary>A "Key" column mixing plain numbers with date-formatted cells.</summary>
+    private static MemoryStream BuildMixedNumberDateWorkbook()
+    {
+        double marchSerial = (new DateTime(2024, 3, 5) - new DateTime(1899, 12, 30)).TotalDays;
+        double januarySerial = (new DateTime(2024, 1, 15) - new DateTime(1899, 12, 30)).TotalDays;
+
+        string sheetXml = string.Create(CultureInfo.InvariantCulture, $"""
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                <row r="2"><c r="A2"><v>100</v></c></row>
+                <row r="3"><c r="A3" s="1"><v>{marchSerial}</v></c></row>
+                <row r="4"><c r="A4"><v>5</v></c></row>
+                <row r="5"><c r="A5" s="1"><v>{januarySerial}</v></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        return BuildWorkbook(sheetXml);
+    }
+
+    private static MemoryStream BuildWorkbook(string sheetXml)
+    {
+        const string workbookXml = """
+            <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <sheets>
+                <sheet name="Sheet1" sheetId="1" r:id="rId1" />
+              </sheets>
+            </workbook>
+            """;
+
+        const string relsXml = """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Target="worksheets/sheet1.xml" />
+            </Relationships>
+            """;
+
+        const string stylesXml = """
+            <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <cellXfs>
+                <xf numFmtId="0" />
+                <xf numFmtId="14" applyNumberFormat="1" />
+              </cellXfs>
+            </styleSheet>
+            """;
+
+        const string sstXml = """
+            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="1">
+              <si><t>Key</t></si>
+            </sst>
+            """;
+
+        var ms = new MemoryStream();
+        using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            WriteZipEntry(archive, "xl/workbook.xml", workbookXml);
+            WriteZipEntry(archive, "xl/_rels/workbook.xml.rels", relsXml);
+            WriteZipEntry(archive, "xl/styles.xml", stylesXml);
+            WriteZipEntry(archive, "xl/sharedStrings.xml", sstXml);
+            WriteZipEntry(archive, "xl/worksheets/sheet1.xml", sheetXml);
+        }
+
+        ms.Position = 0;
+        return ms;
+    }
+
+    private static void WriteZipEntry(ZipArchive archive, string path, string content)
+    {
+        var entry = archive.CreateEntry(path);
+        using var stream = entry.Open();
+        using var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(content);
     }
 }
