@@ -12,6 +12,7 @@ namespace XLSight.Query.Internal;
 internal sealed class QueryScan
 {
     private const int SampleRowLimit = 5;
+    private const int TopNInitialCapacity = 16;
 
     private readonly ExcelRange _range;
     private readonly int _headerRowParam;
@@ -54,9 +55,9 @@ internal sealed class QueryScan
     private readonly List<ExcelCellValue> _rowBuffer = [];
     private int _rowWidth;
 
-    // Top-N ordered row results: a fixed arena sized k * rowWidth, allocated once at header-bind
-    // time. The min-priority-queue tracks the weakest survivor's slot so a strictly better row
-    // can evict and recycle it in place — no growth, no compaction, O(LIMIT) memory throughout.
+    // Top-N ordered row results: an arena of rowWidth-sized slots, doubling up to a hard cap of
+    // LIMIT slots. The min-priority-queue tracks the weakest survivor's slot so a strictly better
+    // row can evict and recycle it in place — no compaction, O(min(LIMIT, matches)) memory.
     private ExcelCellValue[] _topNArena = [];
     private int[] _topNSourceRows = [];
     private PriorityQueue<int, ExcelCellValue>? _topN;
@@ -314,6 +315,10 @@ internal sealed class QueryScan
         if (topN.Count < _limit)
         {
             slotIndex = topN.Count;
+            if (slotIndex == _topNSourceRows.Length)
+            {
+                GrowTopNArena();
+            }
         }
         else
         {
@@ -334,6 +339,18 @@ internal sealed class QueryScan
 
         _topNSourceRows[slotIndex] = row.RowIndex;
         topN.Enqueue(slotIndex, key);
+    }
+
+    /// <summary>
+    /// Doubles the arena, capped at <c>LIMIT</c> slots. Grown on demand rather than sized from
+    /// <c>LIMIT</c> up front, so an oversized <c>LIMIT</c> costs memory in proportion to the rows
+    /// that actually matched, not to the number the caller asked for.
+    /// </summary>
+    private void GrowTopNArena()
+    {
+        int capacity = (int)Math.Min(_limit, Math.Max(TopNInitialCapacity, _topNSourceRows.Length * 2L));
+        Array.Resize(ref _topNArena, capacity * _rowWidth);
+        Array.Resize(ref _topNSourceRows, capacity);
     }
 
     private void AccumulateGroup(in ExcelRow row)
@@ -501,20 +518,21 @@ internal sealed class QueryScan
     }
 
     /// <summary>
-    /// Resolves the raw-row ORDER BY column and allocates the fixed top-N arena up front, so the
-    /// bounded-memory property holds for the whole scan. <see cref="PriorityQueue{TElement,TPriority}"/>
-    /// is a min-heap, so the comparer is inverted: the root then holds the weakest survivor, which
-    /// is what an incoming row has to beat.
+    /// Resolves the raw-row ORDER BY column and prepares the top-N arena, which never exceeds
+    /// <c>LIMIT</c> slots. <see cref="PriorityQueue{TElement,TPriority}"/> is a min-heap, so the
+    /// comparer is inverted: the root then holds the weakest survivor, which is what an incoming
+    /// row has to beat.
     /// </summary>
     private void BindRowOrder()
     {
         _orderColumnIndex = ResolveColumn(_rowOrderColumn!);
         ExcelCellValueComparer keepComparer = OrderComparer;
 
-        _topNArena = new ExcelCellValue[_limit * _rowWidth];
-        _topNSourceRows = new int[_limit];
+        int capacity = Math.Min(_limit, TopNInitialCapacity);
+        _topNArena = new ExcelCellValue[capacity * _rowWidth];
+        _topNSourceRows = new int[capacity];
         _topN = new PriorityQueue<int, ExcelCellValue>(
-            _limit,
+            capacity,
             Comparer<ExcelCellValue>.Create((x, y) => -keepComparer.Compare(x, y)));
     }
 

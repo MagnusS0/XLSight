@@ -206,6 +206,46 @@ public sealed class QueryRowOrderByTests
     }
 
     [Fact]
+    public void RowOrderBy_SurvivorsExceedInitialArena_GrowsAndOrdersAll()
+    {
+        // 200 survivors force the top-N arena past its initial capacity several times. Growth
+        // must not disturb the slots already held by the heap.
+        using var ms = BuildNumberWorkbook(rowCount: 300);
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook.ExecuteQuery("""
+            FROM Sheet1!A1:A301 HEADER ROW 1
+            SELECT *
+            ORDER BY Key DESC
+            LIMIT 200
+            """);
+
+        Assert.Equal(200, result.Rows.Count);
+        Assert.Equal(
+            Enumerable.Range(101, 200).Reverse().Select(i => (double)i),
+            result.Rows.Select(r => r.Values.Span[0].AsNumber()));
+    }
+
+    [Fact]
+    public void RowOrderBy_LimitFarExceedsMatches_AllocatesForMatchesOnly()
+    {
+        // A LIMIT this large would once have sized the arena from the requested count, either
+        // allocating gigabytes or overflowing the arena length outright.
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        QueryResult result = workbook.ExecuteQuery($"""
+            FROM Sales!A1:F11 HEADER AUTO
+            SELECT *
+            ORDER BY NetSales DESC
+            LIMIT {int.MaxValue}
+            """);
+
+        Assert.Equal(SalesWorkbook.Data.Length, result.Rows.Count);
+        Assert.Equal("300", result.Rows[0].Values.Span[2].ToString());
+    }
+
+    [Fact]
     public void RowOrderBy_NumbersAndDatesInOneColumn_GroupNumbersBeforeDates()
     {
         using var ms = BuildMixedNumberDateWorkbook();
@@ -227,6 +267,21 @@ public sealed class QueryRowOrderByTests
         Assert.Equal(
             [new DateTime(2024, 1, 15), new DateTime(2024, 3, 5)],
             result.Rows.Skip(2).Select(r => r.Values.Span[0].AsDate()));
+    }
+
+    /// <summary>A single numeric "Key" column holding <paramref name="rowCount"/> descending values.</summary>
+    private static MemoryStream BuildNumberWorkbook(int rowCount)
+    {
+        var sb = new StringBuilder();
+        sb.Append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>""");
+        sb.Append("""<row r="1"><c r="A1" t="s"><v>0</v></c></row>""");
+        for (int i = 0; i < rowCount; i++)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"""<row r="{i + 2}"><c r="A{i + 2}"><v>{rowCount - i}</v></c></row>""");
+        }
+
+        sb.Append("</sheetData></worksheet>");
+        return BuildWorkbook(sb.ToString());
     }
 
     /// <summary>A "Key" column mixing plain numbers with date-formatted cells.</summary>
