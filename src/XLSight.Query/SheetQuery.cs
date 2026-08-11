@@ -22,6 +22,10 @@ public sealed class SheetQuery
     private readonly List<AggregateSpec> _aggregates = [];
     private readonly List<string> _projectedColumns = [];
     private string? _groupBy;
+    private bool _hasOrderBy;
+    private string? _orderByColumn;
+    private AggregateKind? _orderByAggregateKind;
+    private bool _orderByDescending;
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
     private IReadOnlyList<ColumnProfile>? _stats;
@@ -94,6 +98,51 @@ public sealed class SheetQuery
         return this;
     }
 
+    /// <summary>
+    /// Sorts results by <paramref name="column"/> before <c>Take</c> truncates. With
+    /// <see cref="GroupBy"/>, sorts the materialized groups by the group column. Without
+    /// <see cref="GroupBy"/>, ranks raw rows against this column and requires <see cref="Take"/>:
+    /// a bounded top-N selection keeps the best <c>Take</c> rows, evaluating every matching row
+    /// rather than stopping early once enough rows are found.
+    /// </summary>
+    /// <param name="column">The group-by column, or (without <see cref="GroupBy"/>) any column to rank raw rows by.</param>
+    /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
+    /// <exception cref="InvalidOperationException">Thrown when <c>OrderBy</c> was already called.</exception>
+    public SheetQuery OrderBy(string column, bool descending = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(column);
+        if (_hasOrderBy)
+        {
+            throw new InvalidOperationException("OrderBy was already called. A query supports a single ordering key.");
+        }
+
+        _hasOrderBy = true;
+        _orderByColumn = column;
+        _orderByDescending = descending;
+        return this;
+    }
+
+    /// <summary>
+    /// Sorts grouped results by a selected aggregate before <c>Take</c> truncates.
+    /// Requires <see cref="GroupBy"/> — an aggregate has no meaning as a raw-row ordering key.
+    /// </summary>
+    /// <param name="aggregate">One of the aggregates passed to <see cref="Select"/>.</param>
+    /// <param name="descending">True to sort descending; false (default) sorts ascending.</param>
+    /// <exception cref="InvalidOperationException">Thrown when <c>OrderBy</c> was already called.</exception>
+    public SheetQuery OrderBy(AggregateSpec aggregate, bool descending = false)
+    {
+        if (_hasOrderBy)
+        {
+            throw new InvalidOperationException("OrderBy was already called. A query supports a single ordering key.");
+        }
+
+        _hasOrderBy = true;
+        _orderByAggregateKind = aggregate.Kind;
+        _orderByColumn = aggregate.Column;
+        _orderByDescending = descending;
+        return this;
+    }
+
     /// <summary>Selects aggregate projections to compute, e.g. <c>QueryAggregates.Sum("NetSales"), QueryAggregates.Count()</c>.</summary>
     /// <param name="aggregates">The aggregate projections to compute.</param>
     public SheetQuery Select(params AggregateSpec[] aggregates)
@@ -134,9 +183,12 @@ public sealed class SheetQuery
     }
 
     /// <summary>
-    /// Caps the number of result rows. For row queries (no aggregates) the scan stops as soon
-    /// as the first <paramref name="count"/> matching rows are found; for grouped queries the
-    /// first <paramref name="count"/> groups in first-seen order are returned after a full scan.
+    /// Caps the number of result rows. For row queries (no aggregates, no <c>OrderBy</c>) the
+    /// scan stops as soon as the first <paramref name="count"/> matching rows are found; for
+    /// grouped queries the first <paramref name="count"/> groups in first-seen order are returned
+    /// after a full scan. With an <c>OrderBy</c> the top <paramref name="count"/> by that ordering
+    /// are returned instead, and the early exit no longer applies — every matching row has to be
+    /// ranked to find the true top <paramref name="count"/>.
     /// </summary>
     /// <param name="count">The maximum number of result rows.</param>
     public SheetQuery Take(int count)
@@ -434,6 +486,14 @@ public sealed class SheetQuery
                 "Project cannot be combined with Select aggregates — a query must either project raw columns or aggregate, not mix the two.");
         }
 
+        if (_hasOrderBy && distinctColumn is not null)
+        {
+            throw new InvalidOperationException(
+                "OrderBy cannot be combined with DistinctValues, which always returns its own frequency-ordered counts.");
+        }
+
+        (int orderIndex, string? rowOrderColumn) = _hasOrderBy ? ResolveOrderBy() : (-1, null);
+
         return new QueryScan(
             _range,
             _headerRow,
@@ -443,7 +503,51 @@ public sealed class SheetQuery
             _projectedColumns,
             distinctColumn,
             _limit,
-            _maxGroups);
+            _maxGroups,
+            orderIndex,
+            _orderByDescending,
+            rowOrderColumn);
+    }
+
+    /// <summary>
+    /// Validates the ordering key against the query's shape, returning either a grouped
+    /// result-column index or the raw column to rank rows by (never both).
+    /// </summary>
+    private (int OrderIndex, string? RowOrderColumn) ResolveOrderBy()
+    {
+        if (_groupBy is not null)
+        {
+            int orderIndex = OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, _orderByAggregateKind);
+            if (orderIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
+            }
+
+            return (orderIndex, null);
+        }
+
+        if (_aggregates.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "OrderBy is not valid on a global aggregate, which returns a single row. Add GroupBy to rank aggregated groups.");
+        }
+
+        if (_orderByAggregateKind is not null)
+        {
+            throw new InvalidOperationException(
+                "OrderBy(AggregateSpec) requires GroupBy. An aggregate is not a valid ordering key for row results.");
+        }
+
+        if (_limit < 0)
+        {
+            throw new InvalidOperationException(
+                "OrderBy requires Take on row results. Call Take(n), or GroupBy to rank aggregated groups.");
+        }
+
+        // Raw-row top-N ordering: the key is a plain column, resolved at header-bind time exactly
+        // like a filter column, so it need not be selected.
+        return (-1, _orderByColumn);
     }
 
     internal SheetQuery WhereCell(string column, QueryOperator op, ExcelCellValue literal)

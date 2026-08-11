@@ -24,8 +24,8 @@ foreach (QueryResultRow row in result.Rows)
 }
 ```
 
-The same query can also be executed from the XLSight Query DSL when a host
-application or agent needs a portable text contract instead of compiled C#:
+Run the same query from the XLSight Query DSL when a host or agent needs a portable
+text contract instead of compiled C#:
 
 ```csharp
 QueryResult result = workbook.ExecuteQuery("""
@@ -46,8 +46,8 @@ QueryResult result = workbook.ExecuteQuery("""
   row results), `Take`, and a `DistinctValues(column, top)` terminal returning
   frequency-ordered value counts for filter discovery.
 - **Row queries.** Without aggregates, `Execute()` returns the matching rows; with a
-  `Take`, the scan stops as soon as enough rows matched.
-- **Dirty data never throws.** Cells that don't coerce to an aggregate's input type are
+  `Take`, the scan stops as soon as enough rows match.
+- **Dirty data never throws.** Cells that do not coerce to an aggregate's input type are
   skipped and reported per column in `QueryResult.Unaggregatable`, with sample row indices.
 - **Stats pruning.** Pass `AnalyzeSheet` column profiles via `WithStats(...)`: a numeric
   filter no value can satisfy returns an empty result without opening the sheet.
@@ -79,7 +79,7 @@ LIMIT 100
 Supported DSL features:
 
 - `FROM <sheet>!<bounded-range>` with bare or quoted sheet names.
-- `HEADER AUTO` or `HEADER ROW <number>`; the header row may sit above the `FROM` range's
+- `HEADER AUTO` or `HEADER ROW <number>`. The header row may be above the `FROM` range's
   top row, but not below its bottom row.
 - `SELECT *` for row results.
 - `SELECT <column>[, <column>...]` for projected row results, in `SELECT` order.
@@ -87,34 +87,34 @@ Supported DSL features:
 - `WHERE` predicates joined by `AND`, using `=`, `!=`, `<`, `<=`, `>`, `>=`.
 - Text, number, `DATE "yyyy-MM-dd"`, and boolean literals.
 - One `GROUP BY` column.
+- One `ORDER BY <key> [ASC|DESC]`, on grouped results or on raw-row results with a `LIMIT`.
+  `ASC` is the default.
 - Optional positive integer `LIMIT`.
 
-`FROM` selects the data window that gets scanned; `HEADER ROW n` only selects where
-column names are read from, and the header row does not need to fall inside that window.
-When the header sits above the range's top row, every row inside `FROM` is treated as
-data — the rows between the header and the range top are never scanned, counted in
-`RowsScanned`, or returned. This binds a header that lives above a data block without
-widening the range to include it:
+`FROM` sets the data window to scan. `HEADER ROW n` sets where column names come from,
+and that row does not have to be inside the window.
+
+When the header is above the range's top row, every row inside `FROM` is data. The rows
+between the header and the range top are never scanned, never counted in `RowsScanned`,
+and never returned. This binds a header above a data block without widening the range to
+include it:
 
 ```sql
 FROM "Sheet1"!B20:O35 HEADER ROW 4
 SELECT *
 ```
 
-When the header row sits inside the range, behavior is unchanged: rows before it are
-ignored and data starts on the row after it. A header row below the range's bottom row
-is rejected with `ArgumentOutOfRangeException`; a header row with no cells raises
+When the header row is inside the range, rows before it are ignored and data starts on
+the next row. A header row below the range's bottom row throws
+`ArgumentOutOfRangeException`. A header row with no cells throws
 `InvalidOperationException`.
 
-`HEADER AUTO` benefits the same way: header inference now recognizes when a region's
-header lives above the queried sub-range and binds that header, instead of falling back
-to the first non-empty row inside `FROM`, which previously risked treating a data row as
-column names.
+`HEADER AUTO` follows the same rule. It binds a region's header when that header is above
+the queried sub-range, instead of the first non-empty row inside `FROM`.
 
-`SELECT` also accepts a list of raw column names instead of `*` or aggregates. Result
-columns follow `SELECT` order, not the sheet's column order, and column names follow the
-same rules as elsewhere in the grammar — bare identifiers, or double-quoted when they
-contain spaces or other non-identifier characters:
+`SELECT` also takes a list of raw column names instead of `*` or aggregates. Result
+columns follow `SELECT` order, not sheet order. Column names are bare identifiers, or
+double-quoted when they contain spaces or other non-identifier characters:
 
 ```sql
 FROM "Sheet1"!A6:F2410 HEADER ROW 6
@@ -123,18 +123,60 @@ WHERE Units > 100
 LIMIT 100
 ```
 
-`WHERE` may filter on columns that aren't selected — here `Units` is used to filter rows
-but isn't returned; the scan reads filter columns without projecting them. Selecting the
-same column twice is allowed and yields two identical result columns. Selecting only the
-columns you need avoids materializing the other cells in each row (no shared-string
-resolution, no number parsing), so it's cheaper than `SELECT *` on wide sheets. The
-fluent-API equivalent is `SheetQuery.Project("Region", "NetSales")`.
+`WHERE` can filter on columns that `SELECT` does not return. Above, the scan reads `Units`
+to filter rows but never projects it. The same column selected twice gives two identical
+result columns. Selecting only the columns you need skips shared-string resolution and
+number parsing on the rest of the row. That beats `SELECT *` on wide sheets. The fluent
+equivalent is `SheetQuery.Project("Region", "NetSales")`.
 
-Raw columns cannot be mixed with aggregates in one `SELECT`; doing so is rejected at
-parse time with `QueryDslException` ("Cannot mix raw columns and aggregates in one
-SELECT. Select raw columns, SELECT *, or aggregates only."). Raw columns combined with
-`GROUP BY` are rejected the same way ("GROUP BY requires aggregate selections. Raw
-column projections cannot be grouped.").
+One `SELECT` cannot mix raw columns with aggregates, and `GROUP BY` cannot take raw column
+projections. Both throw `QueryDslException` at parse time.
+
+`ORDER BY` sorts the groups of a `GROUP BY` query before `LIMIT` truncates. You keep the
+top *N* by the ordering key, not the first *N* seen:
+
+```sql
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+SELECT SUM(NetSales), COUNT()
+GROUP BY Region
+ORDER BY SUM(NetSales) DESC
+LIMIT 10
+```
+
+The key is the `GROUP BY` column or one of the selected aggregates. Matching is on function
+and column, so `ORDER BY AVG(NetSales)` finds `SELECT AVG(NetSales)` even though the result
+column is named `Average(NetSales)`. `ORDER BY` does not raise the group cap, because the
+scan cannot discard a partial aggregate before it reads that group's last row. A query over
+the cap still throws `TooManyGroupsException`. `ORDER BY` on a global aggregate, with no
+`GROUP BY`, throws `QueryDslException`.
+
+`ORDER BY` also works on raw-row results, but only with `LIMIT`. Without `GROUP BY`,
+`LIMIT` is what bounds the memory a sort would otherwise need:
+
+```sql
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+SELECT *
+ORDER BY NetSales DESC
+LIMIT 10
+```
+
+The ordering column does not have to be selected. `SELECT Region ORDER BY NetSales DESC
+LIMIT 10` ranks on `NetSales` and returns `Region`. This is a bounded top-N selection, not
+a full sort, so memory stays `O(min(LIMIT, matching rows))` — an oversized `LIMIT` costs
+only what the rows that actually matched need. The trade-off is that the row-mode early exit
+no longer applies. The scan ranks every matching row to find the true top *N*, so
+`RowsScanned` covers all of them.
+
+Both forms use the same total order over cell values:
+
+- Empty sorts last under `ASC` and `DESC`. It is never the largest value, unlike SQL `NULL`.
+- Types rank numbers first, then dates, then booleans, then text, then errors. The rank is
+  fixed, so a stray `n/a` in a numeric column sorts behind every number in both directions,
+  and a column mixing serial numbers with dates groups all numbers ahead of all dates rather
+  than interleaving them. `DESC` reverses magnitude within a type, so it is not an exact
+  mirror of `ASC` on a mixed-type column.
+- Ties break by first-seen group order, or by sheet row order for raw rows. This matches
+  the order `LIMIT` uses on its own.
 
 For lower-level host validation, parse without executing:
 
@@ -148,11 +190,10 @@ execution rejects it until the engine has a dedicated transposed scan strategy.
 
 ## Using with AI agents
 
-The Query DSL is designed to be the interface between an agent and an Excel file.
-The agent receives a bounded, read-only query grammar, no arbitrary code, no writes,
-no file system access beyond the single file, which makes it safe to expose as a tool
-without a code sandbox. The host validates and executes the DSL; the agent never touches
-the file directly.
+The Query DSL is the interface between an agent and an Excel file. The agent gets a
+bounded, read-only grammar: no arbitrary code, no writes, and no file system access beyond
+the one file. That makes it safe to expose as a tool without a code sandbox. The host
+validates and executes the DSL, and the agent never touches the file.
 
 A minimal tool set covers three operations: workbook discovery, sheet profiling, and
 querying. Wire them up with `AIFunctionFactory.Create` and register them with your agent:
@@ -228,10 +269,10 @@ IList<AITool> tools =
 // pass tools to your IChatClient / AIAgent as usual
 ```
 
-**Stats pruning (optional optimisation).**  If `GetSheetOverview` has already been
-called, pass the column profiles into the query via `WithStats(...)` on the fluent API.
-A numeric filter that no value in the profiled min/max range can satisfy returns an empty
-result without opening the sheet at all:
+**Stats pruning (optional optimisation).** If you already called `GetSheetOverview`, pass
+the column profiles into the query with `WithStats(...)` on the fluent API. When no value
+in the profiled min/max range can satisfy a numeric filter, the query returns an empty
+result without opening the sheet:
 
 ```csharp
 SheetInfo info = wb.AnalyzeSheet(sheet, AnalysisLevel.Full);

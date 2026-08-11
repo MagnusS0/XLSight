@@ -1,4 +1,5 @@
 using XLSight.Analysis;
+using XLSight.Query.Internal;
 
 namespace XLSight.Query;
 
@@ -206,6 +207,19 @@ public static class ExcelWorkbookQueryExtensions
         if (spec.Aggregates.Count > 0)
         {
             query.Select([.. spec.Aggregates]);
+        }
+
+        if (spec.OrderIndex == OrderByKeyResolver.RowOrderIndex)
+        {
+            query.OrderBy(spec.OrderBy!, spec.OrderDescending);
+        }
+        else if (spec.OrderIndex == 0)
+        {
+            query.OrderBy(spec.GroupBy!, spec.OrderDescending);
+        }
+        else if (spec.OrderIndex > 0)
+        {
+            query.OrderBy(spec.Aggregates[spec.OrderIndex - 1], spec.OrderDescending);
         }
 
         if (spec.Limit is { } limit)

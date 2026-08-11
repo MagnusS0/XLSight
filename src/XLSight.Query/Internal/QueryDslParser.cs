@@ -45,6 +45,8 @@ internal static class QueryDslParser
                 groupBy = ParseIdentifierLike("GROUP BY column");
             }
 
+            (string? orderByColumn, AggregateKind? orderByAggregateKind, string? orderByText, bool orderDescending) = ParseOrderBy();
+
             int? limit = null;
             if (TryConsumeKeyword("LIMIT"))
             {
@@ -53,7 +55,7 @@ internal static class QueryDslParser
 
             if (!_tokens.Current.IsEnd)
             {
-                throw Error($"Unexpected token '{_tokens.CurrentDisplay}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, LIMIT.");
+                throw Error($"Unexpected token '{_tokens.CurrentDisplay}'. Clause order is FROM, HEADER, SELECT, WHERE, GROUP BY, ORDER BY, LIMIT.");
             }
 
             if (groupBy is not null && selectAll)
@@ -66,6 +68,8 @@ internal static class QueryDslParser
                 throw Error("GROUP BY requires aggregate selections. Raw column projections cannot be grouped.");
             }
 
+            int orderIndex = ResolveOrderIndex(groupBy, aggregates, orderByColumn, orderByAggregateKind, orderByText, limit);
+
             return new SheetQuerySpec(
                 sheet,
                 rangeAddress,
@@ -76,7 +80,94 @@ internal static class QueryDslParser
                 columns,
                 predicates,
                 groupBy,
+                orderByText,
+                orderDescending,
+                orderIndex,
                 limit);
+        }
+
+        private int ResolveOrderIndex(
+            string? groupBy,
+            IReadOnlyList<AggregateSpec> aggregates,
+            string? orderByColumn,
+            AggregateKind? orderByAggregateKind,
+            string? orderByText,
+            int? limit)
+        {
+            if (orderByText is null)
+            {
+                return -1;
+            }
+
+            if (groupBy is null)
+            {
+                if (aggregates.Count > 0)
+                {
+                    throw Error("ORDER BY is not valid on a global aggregate, which returns a single row. Add GROUP BY to rank aggregated groups.");
+                }
+
+                if (orderByAggregateKind is not null)
+                {
+                    throw Error($"ORDER BY '{orderByText}' requires GROUP BY. An aggregate is not a valid ordering key for row results.");
+                }
+
+                // Raw-row top-N ordering: legal only with LIMIT, which bounds the rows retained
+                // while every matching row is ranked.
+                if (limit is null)
+                {
+                    throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
+                }
+
+                return OrderByKeyResolver.RowOrderIndex;
+            }
+
+            int orderIndex = OrderByKeyResolver.Resolve(groupBy, aggregates, orderByColumn, orderByAggregateKind);
+            if (orderIndex < 0)
+            {
+                throw Error($"Unknown ORDER BY key '{orderByText}'. Valid keys: {OrderByKeyResolver.DescribeValidKeys(groupBy, aggregates)}.");
+            }
+
+            return orderIndex;
+        }
+
+        /// <summary>
+        /// Parses <c>ORDER BY &lt;column|aggregate(column)&gt; [ASC|DESC]</c>. <c>Column</c> carries
+        /// the key's column either way; a non-null <c>AggregateKind</c> is what marks it as an
+        /// aggregate key.
+        /// </summary>
+        private (string? Column, AggregateKind? AggregateKind, string? Text, bool Descending) ParseOrderBy()
+        {
+            if (!_tokens.CurrentIsKeyword("ORDER") || !_tokens.PeekIsKeyword("BY"))
+            {
+                return (null, null, null, false);
+            }
+
+            _tokens.MoveNext(); // consume ORDER
+            _tokens.MoveNext(); // consume BY
+
+            string? column;
+            AggregateKind? aggregateKind = null;
+            string text;
+            if (_tokens.Current.IsIdentifier && _tokens.Peek().Kind is TokenKind.OpenParen)
+            {
+                AggregateSpec keyAggregate = ParseAggregate();
+                aggregateKind = keyAggregate.Kind;
+                column = keyAggregate.Column;
+                text = keyAggregate.Label;
+            }
+            else
+            {
+                column = ParseIdentifierLike("ORDER BY key");
+                text = column;
+            }
+
+            bool descending = TryConsumeKeyword("DESC");
+            if (!descending)
+            {
+                TryConsumeKeyword("ASC");
+            }
+
+            return (column, aggregateKind, text, descending);
         }
 
         private SheetQueryHeader ParseHeader()
