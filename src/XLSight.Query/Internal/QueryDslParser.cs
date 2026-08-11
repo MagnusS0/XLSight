@@ -101,14 +101,24 @@ internal static class QueryDslParser
 
             if (groupBy is null)
             {
-                // Raw-row top-N ordering: legal only with LIMIT, and only for a plain column key
-                // (an aggregate call has no meaning without GROUP BY or a SELECT aggregate).
-                if (aggregates.Count == 0 && limit is not null && orderByAggregateKind is null)
+                if (aggregates.Count > 0)
                 {
-                    return OrderByKeyResolver.RowOrderIndex;
+                    throw Error("ORDER BY is not valid on a global aggregate, which returns a single row. Add GROUP BY to rank aggregated groups.");
                 }
 
-                throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
+                if (orderByAggregateKind is not null)
+                {
+                    throw Error($"ORDER BY '{orderByText}' requires GROUP BY. An aggregate is not a valid ordering key for row results.");
+                }
+
+                // Raw-row top-N ordering: legal only with LIMIT, which bounds the rows retained
+                // while every matching row is ranked.
+                if (limit is null)
+                {
+                    throw Error("ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
+                }
+
+                return OrderByKeyResolver.RowOrderIndex;
             }
 
             int orderIndex = OrderByKeyResolver.Resolve(groupBy, aggregates, orderByColumn, orderByAggregateKind);

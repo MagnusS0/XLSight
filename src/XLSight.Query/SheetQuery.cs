@@ -486,31 +486,13 @@ public sealed class SheetQuery
                 "Project cannot be combined with Select aggregates — a query must either project raw columns or aggregate, not mix the two.");
         }
 
-        int orderIndex = -1;
-        string? rowOrderColumn = null;
-        if (_hasOrderBy)
+        if (_hasOrderBy && distinctColumn is not null)
         {
-            if (_groupBy is not null)
-            {
-                orderIndex = OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, _orderByAggregateKind);
-                if (orderIndex < 0)
-                {
-                    throw new InvalidOperationException(
-                        $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
-                }
-            }
-            else if (_aggregates.Count == 0 && _limit >= 0 && _orderByAggregateKind is null)
-            {
-                // Raw-row top-N ordering: the key is a plain column, resolved at header-bind
-                // time exactly like a filter column, so it need not be selected.
-                rowOrderColumn = _orderByColumn;
-            }
-            else
-            {
-                throw new InvalidOperationException(
-                    "ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.");
-            }
+            throw new InvalidOperationException(
+                "OrderBy cannot be combined with DistinctValues, which always returns its own frequency-ordered counts.");
         }
+
+        (int orderIndex, string? rowOrderColumn) = _hasOrderBy ? ResolveOrderBy() : (-1, null);
 
         return new QueryScan(
             _range,
@@ -525,6 +507,47 @@ public sealed class SheetQuery
             orderIndex,
             _orderByDescending,
             rowOrderColumn);
+    }
+
+    /// <summary>
+    /// Validates the ordering key against the query's shape, returning either a grouped
+    /// result-column index or the raw column to rank rows by (never both).
+    /// </summary>
+    private (int OrderIndex, string? RowOrderColumn) ResolveOrderBy()
+    {
+        if (_groupBy is not null)
+        {
+            int orderIndex = OrderByKeyResolver.Resolve(_groupBy, _aggregates, _orderByColumn, _orderByAggregateKind);
+            if (orderIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"OrderBy key not found among the group column or selected aggregates. Valid keys: {OrderByKeyResolver.DescribeValidKeys(_groupBy, _aggregates)}.");
+            }
+
+            return (orderIndex, null);
+        }
+
+        if (_aggregates.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "OrderBy is not valid on a global aggregate, which returns a single row. Add GroupBy to rank aggregated groups.");
+        }
+
+        if (_orderByAggregateKind is not null)
+        {
+            throw new InvalidOperationException(
+                "OrderBy(AggregateSpec) requires GroupBy. An aggregate is not a valid ordering key for row results.");
+        }
+
+        if (_limit < 0)
+        {
+            throw new InvalidOperationException(
+                "OrderBy requires Take on row results. Call Take(n), or GroupBy to rank aggregated groups.");
+        }
+
+        // Raw-row top-N ordering: the key is a plain column, resolved at header-bind time exactly
+        // like a filter column, so it need not be selected.
+        return (-1, _orderByColumn);
     }
 
     internal SheetQuery WhereCell(string column, QueryOperator op, ExcelCellValue literal)

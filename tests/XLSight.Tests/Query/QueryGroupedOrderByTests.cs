@@ -261,8 +261,40 @@ public sealed class QueryGroupedOrderByTests
             """));
 
         Assert.Equal(
-            "ORDER BY requires LIMIT on row results. Add LIMIT n, or GROUP BY to rank aggregated groups.",
+            "ORDER BY is not valid on a global aggregate, which returns a single row. Add GROUP BY to rank aggregated groups.",
             ex.Message);
+    }
+
+    [Fact]
+    public void GroupedOrderBy_GlobalAggregateWithLimit_StillReportsGlobalAggregate()
+    {
+        // A LIMIT is present, so the row-results message would be actively misleading here.
+        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse($"""
+            FROM Sales!{Range} HEADER AUTO
+            SELECT SUM(NetSales)
+            ORDER BY SUM(NetSales) DESC
+            LIMIT 5
+            """));
+
+        Assert.Equal(
+            "ORDER BY is not valid on a global aggregate, which returns a single row. Add GROUP BY to rank aggregated groups.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void GroupedOrderBy_FluentGlobalAggregate_Rejected()
+    {
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => workbook
+            .QueryRange(SalesWorkbook.SheetName, Range)
+            .Select(QueryAggregates.Sum("NetSales"))
+            .OrderBy(QueryAggregates.Sum("NetSales"), descending: true)
+            .Take(5)
+            .Execute());
+
+        Assert.Contains("global aggregate", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

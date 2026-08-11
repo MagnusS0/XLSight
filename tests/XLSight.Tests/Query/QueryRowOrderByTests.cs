@@ -269,6 +269,35 @@ public sealed class QueryRowOrderByTests
             result.Rows.Skip(2).Select(r => r.Values.Span[0].AsDate()));
     }
 
+    [Fact]
+    public void RowOrderBy_WithDistinctValues_Rejected()
+    {
+        using var ms = SalesWorkbook.Build();
+        using var workbook = ExcelWorkbook.Open(ms);
+
+        // DistinctValues owns its own frequency ordering, so an OrderBy here would be dropped.
+        var ex = Assert.Throws<InvalidOperationException>(() => workbook
+            .QueryRange(SalesWorkbook.SheetName, Range)
+            .OrderBy("NetSales", descending: true)
+            .Take(3)
+            .DistinctValues("Region"));
+
+        Assert.Contains("DistinctValues", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RowOrderBy_AggregateKeyWithoutGroupBy_ReportsGroupByRequired()
+    {
+        var ex = Assert.Throws<QueryDslException>(() => SheetQuerySpec.Parse($"""
+            FROM Sales!{Range} HEADER AUTO
+            SELECT *
+            ORDER BY SUM(NetSales) DESC
+            LIMIT 3
+            """));
+
+        Assert.Contains("requires GROUP BY", ex.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>A single numeric "Key" column holding <paramref name="rowCount"/> descending values.</summary>
     private static MemoryStream BuildNumberWorkbook(int rowCount)
     {
