@@ -8,7 +8,7 @@
 
   <PropertyGroup>
     <PackageId>XLSight.Layout</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Magnus</Authors>
     <Description>Optional worksheet layout inference for XLSight, including axes, measure fields, and related groups across .xlsx, .xlsm, and .xlsb workbooks.</Description>
     <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;layout;analysis;inference;dotnet</PackageTags>

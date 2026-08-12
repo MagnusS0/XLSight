@@ -1,12 +1,12 @@
 # XLSight
 
-[![NuGet](https://img.shields.io/badge/nuget-v0.8.0-blue)](https://www.nuget.org/packages/XLSight/)
+[![NuGet](https://img.shields.io/badge/nuget-v0.8.1-blue)](https://www.nuget.org/packages/XLSight/)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 XLSight is a high-performance, zero-dependency Excel (`.xlsx`, `.xlsm`, `.xlsb`) reader and analyzer for .NET 10.
 
-XLSight bypasses `XmlReader` on the hot path. It scans raw UTF-8 byte streams with SIMD-accelerated `IndexOf`/`SearchValues<byte>` operations and stores shared strings in a chunked, LOH-free arena to minimize per-cell allocations and heap fragmentation.
+XLSight reads worksheet and shared-string XML directly from decompressed UTF-8 bytes. Purpose-built scanners parse only the structures that XLSight needs. They do not use `XmlReader` or create temporary strings for primitive values. The shared-string arena uses 64 KB chunks, and each chunk stays below the large object heap threshold.
 
 - Processes the NYC 311 1M-row workbook in **4.10 s** with **157 MB** peak RSS using the public reader API, about **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
 - Reads the first 10 rows of a 1M-row sheet in about **300 μs** on both public streaming APIs. Use the borrowed reader for the lowest allocations, or the safe stream when you want independent row snapshots.
@@ -562,42 +562,43 @@ yields control immediately once the row limit is reached.
 > null entry before any cell data is written, so per-row cost scales with the sheet's column width
 > rather than the number of non-empty cells. Every cell value is then boxed as `object?`.
 
-### How XLSight achieves high performance
+### How XLSight reduces work
 
-Most xlsx readers sit on top of `XmlReader` or a SAX event stream that fires a callback per XML
-element, allocating a string for every attribute value it encounters. XLSight's sheet scanner and
-shared-string parser bypass `XmlReader` entirely for the hot path. Instead,
-`ReadOnlySpan<byte>.IndexOf` and `SearchValues<byte>` — backed by SIMD intrinsics in the .NET
-runtime — locate `<row>`, `<c>`, `<v>`, `<f>`, and `<t>` tag boundaries directly in the
-decompressed UTF-8 byte stream. A single 64 KB `ArrayPool<byte>`-backed sliding window (`ScanBuffer`)
-is rented once per sheet open and reused for the full stream; no additional I/O buffers are allocated
-during parsing.
+#### Worksheet data
 
-Cell attributes (`r=`, `t=`, `s=`) are extracted in-place from byte spans by `CellAttributeParser`,
-using `Utf8Parser.TryParse` to decode column references, integers, and floats without ever
-constructing a managed string. Numbers, booleans, and shared-string indices all take this
-zero-allocation path. Inline text and formula-result strings are the only cell types that produce a
-heap string during decoding.
+Most `.xlsx` readers use a general-purpose XML parser for worksheet data. This parser must support
+the full XML model and expose data through character and string APIs.
 
-`ExcelCellValue` is a 24-byte `readonly struct` field-ordered to eliminate padding (8-byte `double`,
-8-byte `string` reference, 4-byte `CellType`, 4-byte `int`). The borrowed `ExcelSheetReader`
-reuses one `ExcelCellValue[]` row buffer for the full scan, keeping the hot path allocation-free
-aside from decoded strings. `StreamSheet*` / `StreamRange*` build on top of that reader and
-snapshot rows only when you choose the safe enumerable surface. `RangeResult` stores one flat
-read-only cell buffer and projects cached `ExcelRow` views over slices of that memory instead of
-copying per row. For analysis operations the scanner drives a push-based `struct` sink via a
-generic struct constraint, bypassing the row-yield path entirely and reducing per-row heap
-allocation to zero.
+XLSight uses purpose-built scanners for worksheet data and shared strings. The scanners read
+decompressed UTF-8 bytes and handle only the required OOXML elements and attributes.
 
-The shared-string table is built as a lazy UTF-8 arena: 64 KB byte-array chunks (below the 85 KB
-LOH threshold) hold pre-decoded, entity-resolved UTF-8. A 256 KB `ArrayPool`-rented staging buffer
-assembles each `<si>` entry inline and commits it atomically to the arena — this parser is also
-byte-level, with no `XmlReader`. Entries are indexed via a packed `long[]` table (global offset +
-byte length, 8 bytes per entry). The SST is parsed incrementally and on demand: a consumer that reads
-only 10 rows causes only the handful of SST indices those rows reference to ever be decoded. A
-low-index `string?[]` cache sized to `min(uniqueCount, 131,072)` retains repeated headers and
-categorical values without over-allocating on small workbooks; high-index entries are materialised
-directly from the arena on lookup and collected by Gen 0.
+`ReadOnlySpan<byte>.IndexOf` and `SearchValues<byte>` find the boundaries of `<row>`, `<c>`, `<v>`,
+`<f>`, and `<t>` elements. `CellAttributeParser` reads the `r`, `t`, and `s` attributes from byte
+spans. `Utf8Parser.TryParse` parses integer and floating-point values without temporary strings.
+
+`ScanBuffer` rents one 64 KB buffer from `ArrayPool<byte>` for each open sheet. It reuses this buffer
+for the complete scan. The scanner does not allocate more I/O buffers during the scan.
+
+#### Row storage
+
+`ExcelCellValue` is a 24-byte `readonly struct` with no padding. `ExcelSheetReader` reuses one
+`ExcelCellValue[]` buffer for all rows. The borrowed reader does not allocate a new cell array for
+each row.
+
+`StreamSheet*` and `StreamRange*` copy each row when the caller selects the safe enumerable API.
+`RangeResult` keeps cells in one flat buffer and exposes cached `ExcelRow` views. Analysis operations
+send cells to generic `struct` sinks and do not create row objects.
+
+#### Shared strings
+
+The shared-string parser stores resolved UTF-8 text in 64 KB arena chunks. It rents one 256 KB
+staging buffer and reuses it for each `<si>` element. Each packed `long` records the global offset
+and byte length of one entry.
+
+The parser reads more shared-string entries only when a worksheet requests a higher index. A cache
+holds at most 131,072 low-index strings, such as headers and category values. High-index entries
+remain in the UTF-8 arena. XLSight creates their managed strings on demand, and Gen 0 can collect
+them.
 
 ## Key design points
 

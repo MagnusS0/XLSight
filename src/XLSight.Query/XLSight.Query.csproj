@@ -9,7 +9,7 @@
 
   <PropertyGroup>
     <PackageId>XLSight.Query</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>Magnus</Authors>
     <Description>Streaming single-pass query layer for XLSight: filter, group-by, and aggregate over Excel (.xlsx, .xlsm, .xlsb) ranges with bounded memory. Zero extra dependencies, AOT-compatible.</Description>
     <PackageTags>excel;xlsx;xlsm;xlsb;spreadsheet;query;aggregate;groupby;streaming;dotnet</PackageTags>
