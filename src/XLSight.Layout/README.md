@@ -1,31 +1,31 @@
 # XLSight.Layout
 
-Optional, best-effort worksheet layout inference for [XLSight](https://github.com/MagnusS0/XLSight).
-It runs heuristics over a worksheet's cells — through XLSight's format-neutral
-scan path — and turns an unknown sheet into a structural map: where the tables
-are, which rows and columns label them, and what kind of data each block holds.
+XLSight.Layout is an optional package for best-effort worksheet structure analysis.
+It uses the format-neutral scan path in [XLSight](https://github.com/MagnusS0/XLSight).
+It can find tables, labels, and data blocks in an unknown worksheet.
+
+## Result
 
 `AnalyzeLayout` returns a `SheetLayoutInfo` with three collections:
 
-- **Axes** — the label rows and columns that give data meaning: a year header
-  row, a row-label column, a peeled-off context column. Each axis carries its
-  orientation, role (primary or context), value kind (text, numeric, or date),
-  range, a few sample values, a probed title, and any detected sections — e.g.
-  "Funding" / "Loans" bands within one label column.
-- **Measure fields** — the rectangular data blocks those axes describe, from
-  ordinary header-run tables to numeric sensitivity matrices and header-less
-  vectors. Each field lists the axis ids it answers to and a value profile
-  (cell, numeric, text, and formula counts plus numeric min/max).
-- **Groups** — fields clustered by shared axes into logical tables, each with
-  a bounding range and, when one is found nearby, a title from the sheet.
+- **Axes** are label rows and columns, such as a year header or a row-label
+  column. Each axis has an orientation, role, value kind, range, samples, and
+  an optional title. It can also contain sections such as `Funding` and `Loans`.
+- **Measure fields** are rectangular data blocks. They include standard tables,
+  numeric matrices, and vectors without headers. Each field lists its axes and
+  value profile. The profile contains cell, numeric, text, and formula counts.
+  It also contains the numeric minimum and maximum.
+- **Groups** combine fields that share axes. Each group has a bounding range and
+  an optional title from the worksheet.
 
-Because this is heuristic inference over arbitrary spreadsheets, treat the
-result as a best-effort map rather than ground truth. It is aimed at
-programmatic consumers that need to orient themselves in a workbook they have
-never seen — for example discovering which ranges are worth reading, or picking
-the range and headers to hand to
-[XLSight.Query](https://github.com/MagnusS0/XLSight/tree/master/src/XLSight.Query)
-for aggregation.
+## Limits
+
+Layout analysis uses heuristics, so the result can differ from the intended
+worksheet structure. Use the result to find useful ranges or select a range and
+headers for
+[XLSight.Query](https://github.com/MagnusS0/XLSight/tree/master/src/XLSight.Query).
+
+## Example
 
 ```csharp
 using XLSight;
@@ -40,11 +40,11 @@ foreach (LayoutGroupInfo group in layout.Groups)
 }
 ```
 
-The asynchronous equivalent accepts cancellation:
+The asynchronous API accepts a cancellation token:
 
 ```csharp
 SheetLayoutInfo layout = await workbook.AnalyzeLayoutAsync("Financials", cancellationToken);
 ```
 
-Layout analysis is an explicit worksheet scan. Core `Analyze` and `AnalyzeSheet`
-do not collect layout facts or run layout heuristics.
+Each layout analysis scans the selected worksheet. Core `Analyze` and
+`AnalyzeSheet` do not run layout heuristics.

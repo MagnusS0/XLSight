@@ -4,17 +4,15 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-XLSight is a high-performance, zero-dependency Excel (`.xlsx`, `.xlsm`, `.xlsb`) reader and analyzer for .NET 10.
+XLSight is a fast, dependency-free Excel reader and analyzer for .NET 10. It supports `.xlsx`, `.xlsm`, and `.xlsb` files.
 
-XLSight reads worksheet and shared-string XML directly from decompressed UTF-8 bytes. Purpose-built scanners parse only the structures that XLSight needs. They do not use `XmlReader` or create temporary strings for primitive values. The shared-string arena uses 64 KB chunks, and each chunk stays below the large object heap threshold.
+XLSight reads worksheet XML as UTF-8 bytes. It bypasses `XmlReader` on hot paths and creates managed strings only when required.
 
-- Processes the NYC 311 1M-row workbook in **4.10 s** with **157 MB** peak RSS using the public reader API, about **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
-- Reads the first 10 rows of a 1M-row sheet in about **300 μs** on both public streaming APIs. Use the borrowed reader for the lowest allocations, or the safe stream when you want independent row snapshots.
+- Reads the NYC 311 workbook with one million rows in **4.10 s** with **157 MB** peak RSS. That is **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
+- Stops as soon as the caller has read the required N rows. This allows fast sample reads with minimal memory allocation.
 
-> **Scope note:** XLSight supports Open XML workbooks (`.xlsx`, `.xlsm`) and binary workbooks
-> (`.xlsb`), including source-free VBA project metadata. It does not execute VBA macros and
-> does not support legacy `.xls` or `.csv` files. Some comparison libraries cover those broader
-> formats, so the benchmark tables compare equivalent `.xlsx` reads unless noted otherwise.
+> **Scope:** XLSight reads Open XML and binary workbooks. It can inspect VBA metadata without running macros.
+> It does not support legacy `.xls` or `.csv` files. Benchmark tables compare equivalent `.xlsx` reads unless stated otherwise.
 
 
 ## Installation
@@ -31,7 +29,7 @@ dotnet add package XLSight
 using XLSight;
 
 // Open from file path
-using var workbookFromFile = ExcelWorkbook.Open("report.xlsx"); // .xlsx, .xlsm, and .xlsb are supported
+using var workbookFromFile = ExcelWorkbook.Open("report.xlsx");
 
 // Open from a stream
 using var workbookFromStream = ExcelWorkbook.Open(stream);
@@ -40,7 +38,7 @@ using var workbookFromStream = ExcelWorkbook.Open(stream);
 await using var workbookFromFileAsync = await ExcelWorkbook.OpenAsync("report.xlsx");
 await using var workbookFromStreamAsync = await ExcelWorkbook.OpenAsync(stream);
 
-// Workbook-level metadata
+// Read workbook metadata
 Console.WriteLine(string.Join(", ", workbookFromFile.SheetNames)); // "Sheet1, Sheet2"
 Console.WriteLine(workbookFromFile.IsDate1904);
 Console.WriteLine(workbookFromFile.HasMacros);
@@ -68,7 +66,10 @@ RangeResult result = workbook.ReadRange("Sheet1", "A1:D10");
 foreach (var row in result.Rows)
 {
     foreach (var c in row.Cells)
+    {
         Console.Write($"{c}\t");
+    }
+
     Console.WriteLine();
 }
 
@@ -83,9 +84,9 @@ RangeResult    rangeAsync  = await workbook.ReadRangeAsync("Sheet1", "A1:D10");
 
 ### Stream large sheets safely
 
-Stream rows one at a time without loading the entire sheet into memory.
-The `StreamSheet*` / `StreamRange*` APIs yield **independent row snapshots**, so they are safe
-to buffer, materialize, and use with LINQ. This is the best default for most consumers:
+Read one row at a time without loading the full sheet. `StreamSheet*` and `StreamRange*` return independent row snapshots.
+
+You can retain these rows or use them with LINQ. This is the best default for most consumers:
 
 ```csharp
 using XLSight;
@@ -117,11 +118,9 @@ foreach (var row in workbook.StreamSheet("Sheet1"))
 
 ### Borrowed high-performance reader
 
-If you want the absolute lowest-allocation path, use `GetSheetReader*` / `GetRangeReader*`.
-`ExcelSheetReader.Current` is a **borrowed** row view over a reused internal buffer, so the
-current row is only valid until the next successful call to `Read()` or `ReadAsync()`.
-Use this when you process each row immediately in a hot loop; if you need to retain rows,
-prefer `StreamSheet*` / `StreamRange*`:
+Use `GetSheetReader*` or `GetRangeReader*` for the lowest allocation. `ExcelSheetReader.Current` borrows a reused internal buffer.
+
+The current row stays valid until the next successful read. Process each row before you read the next row.
 
 ```csharp
 await using var reader = await workbook.GetSheetReaderAsync("Sheet1");
@@ -171,14 +170,13 @@ RangeResult formulasRange = workbook.ReadRange("Sheet1", "A1:D10", ReadMode.Form
 
 ### Analyze a workbook
 
-`Analyze` / `AnalyzeSheet` returns structural metadata without requiring you to iterate cells yourself.
-Use `AnalysisLevel` to control how much work is performed:
+`Analyze` and `AnalyzeSheet` return workbook structure. Use `AnalysisLevel` to select the required work.
 
 | Level | What is included |
 |---|---|
-| `Exact` | Metadata parsed from package XML: named ranges, tables, pivot tables, charts, merged regions, data validations, external workbook links, macros |
-| `Observed` | Everything in `Exact` plus a streaming scan: used range, row/column counts, per-column type profiles, formula dependency aggregation |
-| `Full` (default) | Everything in `Observed` plus inferred regions (orientation, key column, and confidence per region) and header row index |
+| `Exact` | Package metadata, including names, tables, charts, merged cells, validation rules, links, and macros |
+| `Observed` | `Exact` data plus used ranges, counts, column profiles, and formula dependencies |
+| `Full` (default) | `Observed` data plus inferred regions and the inferred header row |
 
 ```csharp
 using XLSight;
@@ -186,8 +184,8 @@ using XLSight.Analysis;
 
 using var workbook = ExcelWorkbook.Open("report.xlsx");
 
-// Analyze all sheets at once
-WorkbookInfo info = workbook.Analyze();           // AnalysisLevel.Full by default
+// Analyze all sheets. Full analysis is the default.
+WorkbookInfo info = workbook.Analyze();
 Console.WriteLine($"Tables: {info.Tables.Count}");
 Console.WriteLine($"Has macros: {info.HasMacros}");
 Console.WriteLine($"VBA modules: {info.VbaProject?.Modules.Count ?? 0}");
@@ -203,20 +201,19 @@ foreach (SheetInfo sheet in info.Sheets)
         Console.WriteLine($"  Inferred header row: {headerRow}");
 }
 
-// Analyze a single sheet — with explicit level
+// Analyze one sheet at the selected level.
 SheetInfo s = workbook.AnalyzeSheet("Sheet1", AnalysisLevel.Observed);
 Console.WriteLine($"Used range: {s.UsedRange}");
 Console.WriteLine($"Columns with formulas: {string.Join(", ", s.FormulaColumns)}");
 
-// Async variants
+// Use the asynchronous APIs.
 WorkbookInfo infoAsync  = await workbook.AnalyzeAsync();
 SheetInfo    sheetAsync = await workbook.AnalyzeSheetAsync("Sheet1");
 ```
 
-`Exact` is always populated. `Observed` and `Inferred` are `null` when that analysis work was
-not requested, and the convenience properties (`RowCount`, `Columns`, `UsedRange`,
-`FormulaColumns`, `InferredHeaderRowIndex`, and so on) return `null` instead of throwing.
-Use `TryGetObserved` / `TryGetInferred` when you want the full sub-objects explicitly.
+`Exact` is always available. `Observed` and `Inferred` are `null` when the selected level does not create them.
+
+Related convenience properties also return `null`. Use `TryGetObserved` or `TryGetInferred` to access the complete objects.
 
 ### VBA metadata
 
@@ -286,15 +283,9 @@ SheetInfo sheet = workbook.AnalyzeSheet("Data", options);
 
 ### Infer worksheet layout (XLSight.Layout)
 
-The optional [`XLSight.Layout`](src/XLSight.Layout/README.md) package runs
-best-effort heuristics that map an unknown worksheet's structure across `.xlsx`,
-`.xlsm`, and `.xlsb` files: the label rows and columns that give data meaning
-(axes, with value kinds, samples, and section bands), the rectangular data
-blocks they describe (measure fields, with value profiles), and fields clustered
-into logical tables (groups, with bounding ranges and titles). It is aimed at
-programmatic consumers that need to orient themselves in a workbook they have
-never seen — for example picking the right range and headers to hand to
-[XLSight.Query](src/XLSight.Query/README.md).
+The optional [`XLSight.Layout`](src/XLSight.Layout/README.md) package finds structure in unknown worksheets.
+
+It identifies labels, data blocks, value profiles, and logical tables. Use the result to select ranges and headers for [XLSight.Query](src/XLSight.Query/README.md).
 
 ```bash
 dotnet add package XLSight.Layout
@@ -306,8 +297,7 @@ using XLSight.Layout;
 SheetLayoutInfo layout = workbook.AnalyzeLayout("Financials");
 ```
 
-Layout inference is an explicit worksheet scan. Core `Analyze` and `AnalyzeSheet`
-do not collect layout facts or run layout heuristics.
+Layout analysis scans the selected worksheet. Core `Analyze` and `AnalyzeSheet` do not run these heuristics.
 
 ### Query a range (XLSight.Query)
 
@@ -357,8 +347,7 @@ foreach (DataValidationInfo dv in sheet.DataValidations)
 
 ### External workbook links
 
-`WorkbookInfo.ExternalLinks` lists all external workbook references discovered in the file,
-including the cached sheet names and defined names stored inside each link part:
+WorkbookInfo.ExternalLinks lists external workbook references. Each item can include cached sheet names and defined names.
 
 ```csharp
 WorkbookInfo info = workbook.Analyze();
@@ -420,14 +409,14 @@ if (v.TryGetSharedStringId(out int id)) { /* same id == same string object */ }
 
 ## File-backed vs stream-backed workbooks
 
-How you open a workbook determines its concurrency characteristics:
+The input type controls concurrency.
 
 | | `Open(filePath)` / `OpenAsync(filePath)` | `Open(stream)` / `OpenAsync(stream)` |
 |---|---|---|
 | **Backing** | File-backed | Stream-backed |
-| **Concurrent operations** | ✅ Safe — each read opens its own `ZipArchive` | ❌ One operation at a time |
-| **`Analyze` parallelism** | ✅ Sheets scanned in parallel by default | ❌ Sequential only |
-| **`StreamSheetAsync` iterations** | ✅ Multiple concurrent enumerations allowed | ❌ One enumeration at a time |
+| **Concurrent operations** | Yes. Each read opens a separate `ZipArchive`. | No. Run one operation at a time. |
+| **`Analyze` parallelism** | Scans sheets in parallel by default. | Scans sheets in sequence. |
+| **`StreamSheetAsync` iterations** | Supports concurrent enumerations. | Supports one enumeration at a time. |
 | **Non-seekable input** | N/A | Buffered into `MemoryStream` automatically |
 
 Use file-backed opening whenever you can. The stream overload is intended for cases where
@@ -447,8 +436,7 @@ await using var workbook = await ExcelWorkbook.OpenAsync(networkStream);
 
 ## Controlling analysis parallelism
 
-When analyzing file-backed workbooks, XLSight scans sheets in parallel by default.
-Use `maxDegreeOfParallelism` to tune or disable this:
+XLSight scans file-backed sheets in parallel by default. Set maxDegreeOfParallelism to control this work.
 
 ```csharp
 // Default: library chooses (one Task per sheet, bounded by processor count)
@@ -546,21 +534,12 @@ yields control immediately once the row limit is reached.
 | ExcelDataReader | 96.7 ms · 995.9× | 2.68 s · 8,880.1× | 44.8 MB · 164.4× | 1.80 GB · 1,245.4× |
 | MiniExcel[^1] | 170.2 ms · 1,752.8× | 1.13 s · 3,744.2× | 483 MB · 1,772.7× | 1.51 GB · 1,044.8× |
 
-> **Numeric vs string-heavy files**: the SST is parsed lazily — only the entries referenced by the
-> rows actually consumed are decoded. For numeric sheets the SST is tiny and contributes nothing;
-> for string-heavy sheets only the handful of unique string indices in those 10 rows are resolved,
-> keeping both time and allocation near the numeric baseline regardless of total file size.
+> **Numeric and text files:** XLSight parses shared strings on demand. It decodes only the entries used by the selected rows.
 >
-> **ExcelDataReader** implements `IDataReader`, whose contract requires `FieldCount` and `RowCount`
-> to be known before the first `Read()` call. To satisfy this, the worksheet constructor performs a
-> mandatory pre-scan that reads through the entire `<sheetData>` section. All shared strings and
-> styles are also loaded into memory at workbook-open time. There is no mechanism to exit earlier,
-> so the full sheet is always processed even when only the first row is consumed.
+> **ExcelDataReader:** Its `IDataReader` contract needs `FieldCount` and `RowCount` before the first read.
+> It scans the full `<sheetData>` section first. It also loads all shared strings and styles when it opens the workbook.
 >
-> **MiniExcel** is a streaming XML reader, but `Query()` materialises each row as an `ExpandoObject`
-> (`IDictionary<string, object>`). Every column slot — occupied or not — is pre-populated with a
-> null entry before any cell data is written, so per-row cost scales with the sheet's column width
-> rather than the number of non-empty cells. Every cell value is then boxed as `object?`.
+> **MiniExcel:** `Query()` creates each row as an `ExpandoObject`. It creates one dictionary entry for every column and boxes each cell value.
 
 ### How XLSight reduces work
 
