@@ -6,6 +6,7 @@
     <!-- AOT and trimming compatibility — enforced from day one -->
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
 
   <PropertyGroup>
