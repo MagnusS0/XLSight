@@ -233,6 +233,8 @@ internal static class SharedStringsByteParser
         state.CommitEntry();
     }
 
+    // Scans past the rest of an opening tag (any element, not just <si>), returning
+    // true if it closed as an empty element (.../>) rather than a plain '>'.
     private static bool SkipOpeningTagClose(ScanBuffer buf)
     {
         while (true)
@@ -320,21 +322,31 @@ internal static class SharedStringsByteParser
         if (!IsTagNameBoundary(span[ltIdx + 2])) { buf.Advance(ltIdx + 2); return; }
 
         buf.Advance(ltIdx + 2);
-        SkipToGt(buf);
+        bool selfClosed = SkipOpeningTagClose(buf);
+        if (selfClosed) { return; }
+
         CopyTextContent(buf, state);
         SkipToGt(buf);
     }
 
     private static bool HandleClosingTag(ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx)
     {
-        if (ltIdx + 4 >= span.Length && buf.CanReadMore)
+        TagSearchResult result = IsCloseSiTag(span, ltIdx);
+
+        if (result == TagSearchResult.NeedMoreData)
         {
+            if (!buf.CanReadMore)
+            {
+                buf.Advance(ltIdx + 1);
+                return false;
+            }
+
             buf.Advance(ltIdx);
             buf.Refill();
             return false;
         }
 
-        if (IsCloseSiTag(span, ltIdx))
+        if (result == TagSearchResult.Found)
         {
             buf.Advance(ltIdx + 1);
             SkipToGt(buf);
@@ -345,24 +357,29 @@ internal static class SharedStringsByteParser
         return false;
     }
 
-    private static bool IsCloseSiTag(ReadOnlySpan<byte> span, int ltIdx)
+    // Scans the prefix up to whatever is actually buffered rather than a fixed cap,
+    // so an unusually long namespace prefix just costs another refill instead of a
+    // wrong verdict — the same class of bug as the self-closing <t/> fix.
+    private static TagSearchResult IsCloseSiTag(ReadOnlySpan<byte> span, int ltIdx)
     {
         int pos = ltIdx + 2;
-        if (pos >= span.Length) { return false; }
+        if (pos >= span.Length) { return TagSearchResult.NeedMoreData; }
 
         int nameStart = pos;
-        for (int i = pos; i < Math.Min(pos + 12, span.Length); i++)
+        int i = pos;
+        for (; i < span.Length; i++)
         {
             if (span[i] == (byte)':') { nameStart = i + 1; break; }
             if (!IsValidPrefixChar(span[i])) { break; }
         }
 
-        if (nameStart + 1 >= span.Length) { return false; }
-        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i') { return false; }
+        if (i == span.Length) { return TagSearchResult.NeedMoreData; }
+        if (nameStart + 1 >= span.Length) { return TagSearchResult.NeedMoreData; }
+        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i') { return TagSearchResult.NotFound; }
 
         int boundaryPos = nameStart + 2;
-        if (boundaryPos >= span.Length) { return false; }
-        return IsTagNameBoundary(span[boundaryPos]);
+        if (boundaryPos >= span.Length) { return TagSearchResult.NeedMoreData; }
+        return IsTagNameBoundary(span[boundaryPos]) ? TagSearchResult.Found : TagSearchResult.NotFound;
     }
 
     // ── Text content copy with inline entity resolution ───────────────────────
@@ -415,7 +432,9 @@ internal static class SharedStringsByteParser
     {
         buf.Advance(1); // skip '&'
 
-        if (buf.Span.Length < 12 && buf.CanReadMore) { buf.Refill(); }
+        // Loop, not a single attempt: a partial read (e.g. DeflateStream/zlib-ng chunking)
+        // can leave the buffer short of the full entity after only one refill.
+        while (buf.Span.Length < 12 && buf.CanReadMore) { buf.Refill(); }
 
         var span   = buf.Span;
         var window = span.Length > 16 ? span.Slice(0, 16) : span;
