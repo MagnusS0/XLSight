@@ -222,6 +222,25 @@ public sealed class ScanBufferTests
         Assert.Equal(BufferSize + 10, buf.Span.Length);
     }
 
+    // Regression: unbounded growth from a token that never completes (corrupt or
+    // adversarial input) must stop with a parse error, not grow until OOM.
+    [Fact]
+    public async Task RefillAsync_GrowthExceedsMax_ThrowsMalformedWorkbookException()
+    {
+        var data = new byte[32 * 1024 * 1024];
+        using var stream = new MemoryStream(data);
+        using var buf = new ScanBuffer(stream);
+
+        await Assert.ThrowsAsync<MalformedWorkbookException>(async () =>
+        {
+            while (true)
+            {
+                buf.TryWithoutIO(() => buf.Refill());
+                await buf.RefillAsync(TestContext.Current.CancellationToken);
+            }
+        });
+    }
+
     // ── IsExhausted ──────────────────────────────────────────────────────────
 
     [Fact]

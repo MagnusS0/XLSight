@@ -9,6 +9,7 @@ namespace XLSight.Internal.Readers.Xlsx;
 internal sealed class ScanBuffer : IDisposable
 {
     private const int BufferSize = 65536;
+    private const int MaxBufferSize = 16 * 1024 * 1024;
 
     private readonly Stream _source;
     private byte[] _buf;
@@ -182,9 +183,19 @@ internal sealed class ScanBuffer : IDisposable
     /// Only called when a pending token doesn't fit in the current buffer at all
     /// (no bytes available to compact away).
     /// </summary>
+    /// <exception cref="MalformedWorkbookException">
+    /// The doubled size would exceed <see cref="MaxBufferSize"/> — the pending row/token
+    /// is treated as corrupt rather than growing the buffer without bound.
+    /// </exception>
     private void Grow()
     {
-        byte[] grown = ArrayPool<byte>.Shared.Rent(_buf.Length * 2);
+        long doubled = (long)_buf.Length * 2;
+        if (doubled > MaxBufferSize)
+        {
+            throw new MalformedWorkbookException("Worksheet row exceeds the supported maximum size.");
+        }
+
+        byte[] grown = ArrayPool<byte>.Shared.Rent((int)doubled);
         _buf.AsSpan(0, _end).CopyTo(grown);
         ArrayPool<byte>.Shared.Return(_buf);
         _buf = grown;
