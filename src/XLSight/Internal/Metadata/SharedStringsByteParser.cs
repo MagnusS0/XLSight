@@ -233,6 +233,8 @@ internal static class SharedStringsByteParser
         state.CommitEntry();
     }
 
+    // Scans past the rest of an opening tag (any element, not just <si>), returning
+    // true if it closed as an empty element (.../>) rather than a plain '>'.
     private static bool SkipOpeningTagClose(ScanBuffer buf)
     {
         while (true)
@@ -320,7 +322,9 @@ internal static class SharedStringsByteParser
         if (!IsTagNameBoundary(span[ltIdx + 2])) { buf.Advance(ltIdx + 2); return; }
 
         buf.Advance(ltIdx + 2);
-        SkipToGt(buf);
+        bool selfClosed = SkipOpeningTagClose(buf);
+        if (selfClosed) { return; }
+
         CopyTextContent(buf, state);
         SkipToGt(buf);
     }

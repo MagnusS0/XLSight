@@ -158,6 +158,28 @@ public sealed class SharedStringsByteParserTests
         Assert.Equal("Fourth", result.GetString(3));
     }
 
+    // ── Self-closing <t/> (empty shared string) ──────────────────────────────
+
+    // Regression: a self-closing <t/> was treated as an opening tag with no closer,
+    // so the "skip to closing tag" step after it consumed the following </si> instead,
+    // merging this entry with the next and shifting every later index by one.
+    [Fact]
+    public void Parse_SelfClosingTTag_ProducesEmptyStringWithoutShiftingLaterEntries()
+    {
+        using var stream = Utf8("""
+            <sst>
+              <si><t>First</t></si>
+              <si><t/></si>
+              <si><t>Third</t></si>
+            </sst>
+            """);
+        SharedStringTable result = SharedStringsByteParser.Parse(stream);
+        Assert.Equal(3, result.Count);
+        Assert.Equal("First", result.GetString(0));
+        Assert.Equal("", result.GetString(1));
+        Assert.Equal("Third", result.GetString(2));
+    }
+
     // ── Rich text runs (<r><rPr/><t>) ────────────────────────────────────────
 
     [Fact]
