@@ -17,6 +17,10 @@ internal static class SharedStringsByteParser
 
     private const int ContextKeep = 20;
 
+    // IsCloseSiTag scans up to this many bytes past "</" looking for a namespace
+    // prefix's ':'. HandleClosingTag's lookahead guard must cover the same span.
+    private const int MaxPrefixScan = 12;
+
     /// <summary>
     /// Creates a lazy <see cref="SharedStringTable"/> that owns <paramref name="stream"/>
     /// and pumps it on demand. The stream is closed once all entries are parsed or when
@@ -331,7 +335,9 @@ internal static class SharedStringsByteParser
 
     private static bool HandleClosingTag(ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx)
     {
-        if (ltIdx + 4 >= span.Length && buf.CanReadMore)
+        // Needs "</" + up to MaxPrefixScan prefix bytes + "si" + one boundary byte
+        // buffered before IsCloseSiTag can reach a real (non-truncated) verdict.
+        if (ltIdx + 2 + MaxPrefixScan + 2 + 1 >= span.Length && buf.CanReadMore)
         {
             buf.Advance(ltIdx);
             buf.Refill();
@@ -355,7 +361,7 @@ internal static class SharedStringsByteParser
         if (pos >= span.Length) { return false; }
 
         int nameStart = pos;
-        for (int i = pos; i < Math.Min(pos + 12, span.Length); i++)
+        for (int i = pos; i < Math.Min(pos + MaxPrefixScan, span.Length); i++)
         {
             if (span[i] == (byte)':') { nameStart = i + 1; break; }
             if (!IsValidPrefixChar(span[i])) { break; }
@@ -419,7 +425,9 @@ internal static class SharedStringsByteParser
     {
         buf.Advance(1); // skip '&'
 
-        if (buf.Span.Length < 12 && buf.CanReadMore) { buf.Refill(); }
+        // Loop, not a single attempt: a partial read (e.g. DeflateStream/zlib-ng chunking)
+        // can leave the buffer short of the full entity after only one refill.
+        while (buf.Span.Length < 12 && buf.CanReadMore) { buf.Refill(); }
 
         var span   = buf.Span;
         var window = span.Length > 16 ? span.Slice(0, 16) : span;
