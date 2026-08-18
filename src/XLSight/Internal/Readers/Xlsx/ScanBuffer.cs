@@ -9,6 +9,7 @@ namespace XLSight.Internal.Readers.Xlsx;
 internal sealed class ScanBuffer : IDisposable
 {
     private const int BufferSize = 65536;
+    private const int MaxBufferSize = 16 * 1024 * 1024;
 
     private readonly Stream _source;
     private byte[] _buf;
@@ -45,7 +46,7 @@ internal sealed class ScanBuffer : IDisposable
     /// <summary>Current unconsumed window as a span.</summary>
     internal ReadOnlySpan<byte> Span => _buf.AsSpan(_start, _end - _start);
 
-    internal bool CanReadMore => !_streamDone && (_start > 0 || _end < BufferSize);
+    internal bool CanReadMore => !_streamDone && (_start > 0 || _end < _buf.Length);
 
     /// <summary>
     /// Resets the buffer pointers and refills from the underlying stream's current position.
@@ -105,7 +106,7 @@ internal sealed class ScanBuffer : IDisposable
         // (DeflateStream/zlib-ng returns data in variable-size chunks.)
         if (!_streamDone)
         {
-            int space = BufferSize - _end;
+            int space = _buf.Length - _end;
             if (space > 0)
             {
                 int bytesRead = _source.Read(_buf, _end, space);
@@ -132,6 +133,12 @@ internal sealed class ScanBuffer : IDisposable
     /// Because <see cref="TryWithoutIO"/> skips compaction, the buffer start pointer is
     /// already restored before this method is called, so compaction shifts from the
     /// correct position.
+    /// <para>
+    /// When a pending token already spans the entire buffer (e.g. a very long inline
+    /// string) there are zero consumed bytes to compact away, so the buffer is grown
+    /// instead — otherwise this method would report success without reading anything,
+    /// and the caller's parse/refill loop would spin forever re-parsing the same bytes.
+    /// </para>
     /// </remarks>
     internal async ValueTask<bool> RefillAsync(CancellationToken ct = default)
     {
@@ -149,6 +156,12 @@ internal sealed class ScanBuffer : IDisposable
         if (!_streamDone)
         {
             int space = _buf.Length - _end;
+            if (space == 0)
+            {
+                Grow();
+                space = _buf.Length - _end;
+            }
+
             while (space > 0)
             {
                 int bytesRead = await _source.ReadAsync(_buf.AsMemory(_end, space), ct).ConfigureAwait(false);
@@ -163,6 +176,29 @@ internal sealed class ScanBuffer : IDisposable
         }
 
         return _end > _start;
+    }
+
+    /// <summary>
+    /// Doubles the buffer's capacity, preserving all unconsumed bytes at the front.
+    /// Only called when a pending token doesn't fit in the current buffer at all
+    /// (no bytes available to compact away).
+    /// </summary>
+    /// <exception cref="MalformedWorkbookException">
+    /// The doubled size would exceed <see cref="MaxBufferSize"/> — the pending row/token
+    /// is treated as corrupt rather than growing the buffer without bound.
+    /// </exception>
+    private void Grow()
+    {
+        long doubled = (long)_buf.Length * 2;
+        if (doubled > MaxBufferSize)
+        {
+            throw new MalformedWorkbookException("Worksheet row exceeds the supported maximum size.");
+        }
+
+        byte[] grown = ArrayPool<byte>.Shared.Rent((int)doubled);
+        _buf.AsSpan(0, _end).CopyTo(grown);
+        ArrayPool<byte>.Shared.Return(_buf);
+        _buf = grown;
     }
 
     /// <summary>True when the stream is exhausted and <see cref="Span"/> is empty.</summary>

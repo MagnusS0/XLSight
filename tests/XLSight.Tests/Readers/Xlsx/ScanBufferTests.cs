@@ -195,6 +195,52 @@ public sealed class ScanBufferTests
         Assert.False(result);
     }
 
+    // Regression: a token that fills the buffer with start == 0 left RefillAsync unable
+    // to compact or read, so it reported success with zero new bytes.
+    [Fact]
+    public async Task RefillAsync_AfterFullBufferRewind_GrowsInsteadOfStalling()
+    {
+        const int BufferSize = 65536;
+        var data = new byte[BufferSize + 10];
+        data.AsSpan(BufferSize).Fill((byte)'Z');
+        using var stream = new MemoryStream(data);
+        using var buf = new ScanBuffer(stream);
+
+        // Constructor priming fills the buffer completely.
+        Assert.Equal(BufferSize, buf.Span.Length);
+
+        // A token that doesn't fit: the parse consumes nothing and rewinds.
+        bool parsed = buf.TryWithoutIO(() => buf.Refill());
+        Assert.False(parsed);
+        Assert.True(buf.LastParseNeededIO);
+        Assert.Equal(BufferSize, buf.Span.Length);
+
+        bool result = await buf.RefillAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        Assert.True(buf.Span.Length > BufferSize, "RefillAsync must grow the buffer to make progress.");
+        Assert.Equal(BufferSize + 10, buf.Span.Length);
+    }
+
+    // Regression: unbounded growth from a token that never completes (corrupt or
+    // adversarial input) must stop with a parse error, not grow until OOM.
+    [Fact]
+    public async Task RefillAsync_GrowthExceedsMax_ThrowsMalformedWorkbookException()
+    {
+        var data = new byte[32 * 1024 * 1024];
+        using var stream = new MemoryStream(data);
+        using var buf = new ScanBuffer(stream);
+
+        await Assert.ThrowsAsync<MalformedWorkbookException>(async () =>
+        {
+            while (true)
+            {
+                buf.TryWithoutIO(() => buf.Refill());
+                await buf.RefillAsync(TestContext.Current.CancellationToken);
+            }
+        });
+    }
+
     // ── IsExhausted ──────────────────────────────────────────────────────────
 
     [Fact]
