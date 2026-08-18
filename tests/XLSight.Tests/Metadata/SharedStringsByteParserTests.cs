@@ -244,6 +244,29 @@ public sealed class SharedStringsByteParserTests
         Assert.Equal("Third", result.GetString(2));
     }
 
+    // Regression: IsCloseSiTag capped its prefix scan at a fixed 12 bytes, so a
+    // namespace prefix at or past that length made it misjudge a genuine closing
+    // tag as "not a match" instead of just needing another byte, merging entries.
+    // Reproduces even on a single, unfragmented read -- no partial-read stream needed.
+    [Theory]
+    [InlineData("abcdefghijkl")]     // exactly at the old fixed cap
+    [InlineData("abcdefghijklmnopqrstuvwxyz")]
+    public void Parse_LongNamespacePrefix_DoesNotMergeEntries(string prefix)
+    {
+        using var stream = Utf8($"""
+            <{prefix}:sst xmlns:{prefix}="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <{prefix}:si><t>First</t></{prefix}:si>
+              <{prefix}:si><t/></{prefix}:si>
+              <{prefix}:si><t>Third</t></{prefix}:si>
+            </{prefix}:sst>
+            """);
+        SharedStringTable result = SharedStringsByteParser.Parse(stream);
+        Assert.Equal(3, result.Count);
+        Assert.Equal("First", result.GetString(0));
+        Assert.Equal("", result.GetString(1));
+        Assert.Equal("Third", result.GetString(2));
+    }
+
     // ── Rich text runs (<r><rPr/><t>) ────────────────────────────────────────
 
     [Fact]

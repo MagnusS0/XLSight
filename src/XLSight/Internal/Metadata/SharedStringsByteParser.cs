@@ -17,10 +17,6 @@ internal static class SharedStringsByteParser
 
     private const int ContextKeep = 20;
 
-    // IsCloseSiTag scans up to this many bytes past "</" looking for a namespace
-    // prefix's ':'. HandleClosingTag's lookahead guard must cover the same span.
-    private const int MaxPrefixScan = 12;
-
     /// <summary>
     /// Creates a lazy <see cref="SharedStringTable"/> that owns <paramref name="stream"/>
     /// and pumps it on demand. The stream is closed once all entries are parsed or when
@@ -335,16 +331,22 @@ internal static class SharedStringsByteParser
 
     private static bool HandleClosingTag(ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx)
     {
-        // Needs "</" + up to MaxPrefixScan prefix bytes + "si" + one boundary byte
-        // buffered before IsCloseSiTag can reach a real (non-truncated) verdict.
-        if (ltIdx + 2 + MaxPrefixScan + 2 + 1 >= span.Length && buf.CanReadMore)
+        TagSearchResult result = IsCloseSiTag(span, ltIdx);
+
+        if (result == TagSearchResult.NeedMoreData)
         {
+            if (!buf.CanReadMore)
+            {
+                buf.Advance(ltIdx + 1);
+                return false;
+            }
+
             buf.Advance(ltIdx);
             buf.Refill();
             return false;
         }
 
-        if (IsCloseSiTag(span, ltIdx))
+        if (result == TagSearchResult.Found)
         {
             buf.Advance(ltIdx + 1);
             SkipToGt(buf);
@@ -355,24 +357,29 @@ internal static class SharedStringsByteParser
         return false;
     }
 
-    private static bool IsCloseSiTag(ReadOnlySpan<byte> span, int ltIdx)
+    // Scans the prefix up to whatever is actually buffered rather than a fixed cap,
+    // so an unusually long namespace prefix just costs another refill instead of a
+    // wrong verdict — the same class of bug as the self-closing <t/> fix.
+    private static TagSearchResult IsCloseSiTag(ReadOnlySpan<byte> span, int ltIdx)
     {
         int pos = ltIdx + 2;
-        if (pos >= span.Length) { return false; }
+        if (pos >= span.Length) { return TagSearchResult.NeedMoreData; }
 
         int nameStart = pos;
-        for (int i = pos; i < Math.Min(pos + MaxPrefixScan, span.Length); i++)
+        int i = pos;
+        for (; i < span.Length; i++)
         {
             if (span[i] == (byte)':') { nameStart = i + 1; break; }
             if (!IsValidPrefixChar(span[i])) { break; }
         }
 
-        if (nameStart + 1 >= span.Length) { return false; }
-        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i') { return false; }
+        if (i == span.Length) { return TagSearchResult.NeedMoreData; }
+        if (nameStart + 1 >= span.Length) { return TagSearchResult.NeedMoreData; }
+        if (span[nameStart] != (byte)'s' || span[nameStart + 1] != (byte)'i') { return TagSearchResult.NotFound; }
 
         int boundaryPos = nameStart + 2;
-        if (boundaryPos >= span.Length) { return false; }
-        return IsTagNameBoundary(span[boundaryPos]);
+        if (boundaryPos >= span.Length) { return TagSearchResult.NeedMoreData; }
+        return IsTagNameBoundary(span[boundaryPos]) ? TagSearchResult.Found : TagSearchResult.NotFound;
     }
 
     // ── Text content copy with inline entity resolution ───────────────────────
