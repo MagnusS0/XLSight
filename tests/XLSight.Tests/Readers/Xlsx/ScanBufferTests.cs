@@ -195,6 +195,39 @@ public sealed class ScanBufferTests
         Assert.False(result);
     }
 
+    [Fact]
+    public async Task RefillAsync_AfterFullBufferRewind_GrowsInsteadOfStalling()
+    {
+        // Regression: when TryWithoutIO rewinds to a saved position of 0 because a
+        // single token doesn't fit in an already-full 64 KiB window, RefillAsync
+        // can't compact (start == 0) and can't read (no free space) -- it used to
+        // report success without moving _end, so the outer loop re-parsed the same
+        // bytes forever. RefillAsync must grow the buffer to make progress instead.
+        const int BufferSize = 65536;
+        var data = new byte[BufferSize + 10];
+        data.AsSpan(BufferSize).Fill((byte)'Z');
+        using var stream = new MemoryStream(data);
+        using var buf = new ScanBuffer(stream);
+
+        // Constructor priming fills the buffer completely: start = 0, end = BufferSize.
+        Assert.Equal(BufferSize, buf.Span.Length);
+
+        // Simulate a token that doesn't fit in the fully-buffered window: the parse
+        // consumes nothing and calls Refill(), triggering the IO-skip / rewind path.
+        bool parsed = buf.TryWithoutIO(() => buf.Refill());
+        Assert.False(parsed);
+        Assert.True(buf.LastParseNeededIO);
+        Assert.Equal(BufferSize, buf.Span.Length); // rewound to the same (full) position
+
+        bool result = await buf.RefillAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(result);
+        Assert.True(
+            buf.Span.Length > BufferSize,
+            "RefillAsync must grow the buffer to make progress when a token doesn't fit in a full window.");
+        Assert.Equal(BufferSize + 10, buf.Span.Length);
+    }
+
     // ── IsExhausted ──────────────────────────────────────────────────────────
 
     [Fact]

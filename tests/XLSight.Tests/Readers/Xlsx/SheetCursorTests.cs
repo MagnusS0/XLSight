@@ -304,6 +304,45 @@ public sealed class SheetCursorTests
         Assert.Equal("Item_3", rows[2].GetCell(1).AsText());
     }
 
+    // Regression: a single row whose XML exceeds the 64 KiB ScanBuffer window (e.g. a
+    // very long inline string) makes TryWithoutIO rewind to buffer start on every
+    // attempt. Because the buffer is already full at that point, RefillAsync can
+    // neither compact (start == 0) nor read more (no free space) -- it must report
+    // success without adding any bytes, so the TryParseNext/RefillAsync loop spun
+    // forever re-parsing the same bytes instead of growing the buffer.
+    [Fact]
+    public async Task TryParseNext_RowLargerThanBuffer_Terminates()
+    {
+        string hugeText = new string('A', 100_000);
+        using var cursor = OpenCursor($"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>{hugeText}</t></is></c></row>
+                <row r="2"><c r="A2"><v>2</v></c></row>
+              </sheetData>
+            </worksheet>
+            """);
+
+        var rows = new List<ExcelRow>();
+        int attempts = 0;
+        while (attempts++ < 1000)
+        {
+            if (cursor.TryParseNext(out var row))
+            {
+                rows.Add(row.ToSnapshot());
+                continue;
+            }
+
+            if (cursor.IsSheetDone) { break; }
+            if (!await cursor.RefillAsync()) { break; }
+        }
+
+        Assert.True(attempts < 1000, "TryParseNext/RefillAsync loop did not terminate for a row larger than the buffer.");
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(hugeText, rows[0].GetCell(1).AsText());
+        Assert.Equal(2.0, rows[1].GetCell(1).AsNumber());
+    }
+
     // ── Column projection ─────────────────────────────────────────────────────
 
     [Fact]
