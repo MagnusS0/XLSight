@@ -200,7 +200,7 @@ internal static partial class XlsxSheetScanner
     {
         if (kind == CellDataKind.SharedString)
         {
-            return DecodeSharedStringValue(valueBytes, styleIdx, sharedStrings, styles, isDate1904, decodeSharedString, out sstIndex);
+            return DecodeSharedStringValue(valueBytes, sharedStrings, decodeSharedString, out sstIndex);
         }
 
         sstIndex = -1;
@@ -208,13 +208,17 @@ internal static partial class XlsxSheetScanner
     }
 
     private static ExcelCellValue DecodeSharedStringValue(
-        ReadOnlySpan<byte> valueBytes, int styleIdx,
-        SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
+        ReadOnlySpan<byte> valueBytes, SharedStringTable sharedStrings,
         bool decode, out int sstIndex)
     {
-        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _)) { sstIndex = -1; }
+        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _))
+        {
+            sstIndex = -1;
+            return ExcelCellValue.Empty;
+        }
+
         return decode
-            ? Utf8CellDecoder.Decode(valueBytes, CellDataKind.SharedString, styleIdx, sharedStrings, styles, isDate1904)
+            ? ExcelCellValue.FromSharedString(sharedStrings.GetString(sstIndex), sstIndex)
             : ExcelCellValue.Empty;
     }
 
@@ -362,7 +366,7 @@ internal static partial class XlsxSheetScanner
                 if (TryFindEndTag(body, TagValue, out int vClose, out _, out _) == TagSearchResult.Found)
                 {
                     ExcelCellValue fast = kind == CellDataKind.SharedString
-                        ? DecodeSharedStringValue(body[..vClose], styleIdx, sharedStrings, styles, isDate1904, decode, out sstIndex)
+                        ? DecodeSharedStringValue(body[..vClose], sharedStrings, decode, out sstIndex)
                         : Utf8CellDecoder.Decode(body[..vClose], kind, styleIdx, sharedStrings, styles, isDate1904);
                     buf.Advance(cIdx + cLen);
                     return fast;
@@ -383,7 +387,7 @@ internal static partial class XlsxSheetScanner
         if (vMatch.IsEmptyElement) { SkipToEndTag(buf, TagCell); return ExcelCellValue.Empty; }
         var vBytes = ExtractUntilClose(buf, TagValue);
         ExcelCellValue result = kind == CellDataKind.SharedString
-            ? DecodeSharedStringValue(vBytes, styleIdx, sharedStrings, styles, isDate1904, decode, out sstIndex)
+            ? DecodeSharedStringValue(vBytes, sharedStrings, decode, out sstIndex)
             : Utf8CellDecoder.Decode(vBytes, kind, styleIdx, sharedStrings, styles, isDate1904);
         SkipToEndTag(buf, TagCell);
         return result;
