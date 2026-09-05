@@ -6,7 +6,7 @@ namespace XLSight.Internal.Readers.Xlsx;
 
 /// <summary>
 /// Zero-allocation forward cursor over worksheet rows.
-/// A single <see cref="ExcelCellValue"/> buffer is rented once and reused for every row.
+/// A pooled <see cref="ExcelCellValue"/> buffer grows with row width and is reused for every row.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +29,7 @@ internal sealed class SheetCursor : IRowCursor
     private readonly ReadMode _mode;
     private readonly ExcelRange _range;
     private readonly RowProjection? _projection;
-    private readonly ExcelCellValue[] _cellPool;
+    private ExcelCellValue[] _cellPool;
     // Cached once — an instance method group conversion allocates a new delegate per call.
     private readonly Func<bool> _moveNext;
 
@@ -54,7 +54,9 @@ internal sealed class SheetCursor : IRowCursor
         _mode = mode;
         _range = range;
         _projection = projection;
-        _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
+        _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(256);
+        // Rented arrays may contain old values; sparse gaps must start empty.
+        _cellPool.AsSpan().Clear();
         _moveNext = MoveNext;
         _buf = new ScanBuffer(entryStream);
 
@@ -114,7 +116,7 @@ internal sealed class SheetCursor : IRowCursor
             }
 
             if (XlsxSheetScanner.FillRowCells(
-                _buf, rowIndex, _sharedStrings, _styles, _isDate1904, _mode, _range, _cellPool,
+                _buf, rowIndex, _sharedStrings, _styles, _isDate1904, _mode, _range, ref _cellPool,
                 out int startCol, out int width, _projection))
             {
                 // ExcelRow wraps the shared pool memory — valid only until next MoveNext().
@@ -176,11 +178,8 @@ internal sealed class SheetCursor : IRowCursor
         if (_disposed) { return; }
         _disposed = true;
         _done = true;
-        if (_current.CellCount > 0)
-        {
-            _cellPool.AsSpan(0, _current.CellCount).Clear();
-        }
-        ArrayPool<ExcelCellValue>.Shared.Return(_cellPool, clearArray: false);
+        // Include values written by an interrupted or failed parse, not only Current.
+        ArrayPool<ExcelCellValue>.Shared.Return(_cellPool, clearArray: true);
         _buf.Dispose();
     }
 }
