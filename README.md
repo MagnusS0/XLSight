@@ -8,7 +8,7 @@ XLSight is a fast, dependency-free Excel reader and analyzer for .NET 10. It sup
 
 XLSight reads worksheet XML as UTF-8 bytes. It bypasses `XmlReader` on hot paths and creates managed strings only when required.
 
-- Reads the NYC 311 workbook with one million rows in **4.10 s** with **157 MB** peak RSS. That is **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
+- Reads the NYC 311 workbook with one million rows in **3.39 s** with **161 MiB** peak RSS: **2.65× the throughput** of Rust's [`calamine`](https://github.com/tafia/calamine) in the streaming comparison below.
 - Stops as soon as the caller has read the required N rows. This allows fast sample reads with minimal memory allocation.
 
 > **Scope:** XLSight reads Open XML and binary workbooks. It can inspect VBA metadata without running macros.
@@ -479,17 +479,32 @@ bounded rectangular reads.
 
 ### Real-world benchmark — NYC 311 service requests, 1 M rows × 41 cols
 
-Wall time and peak RSS were measured with a small Python script using `psutil` across 5 runs
-(2 warmup).
+XLSight and calamine were rebuilt and measured on 2026-09-05 using the Python
+`profile_and_plot.py` script through `uv`, with 2 warmups and 5 measured runs per library.
+The script samples the process tree every 10 ms; peak RSS is the maximum across all runs,
+reported in MiB. Warmups populate the OS file cache; each run starts a fresh process.
 
-All four harnesses processed the same workload: **41,000,041 cells**.
+The Release builds used XLSight commit `8384920` (.NET SDK 10.0.111, self-contained runtime
+10.0.11) and calamine 0.36.1 commit `0af05f4` (Rust 1.98.0, optimization level 3, LTO,
+one codegen unit). XLSight uses `GetSheetReader`; calamine uses `worksheet_cells_reader`.
+Both harnesses stream and count the sheet without retaining it or converting every value
+to text. Every measured run reported **1,000,001 rows and 41,000,041 cells**, including
+the header row.
 
 | Library | Mean time | Stddev | Peak RSS |
 |---|---:|---:|---:|
-| **XLSight reader (.NET 10)** | **4.10 s** | **0.004 s** | **157 MB** |
-| calamine (Rust) | 8.69 s · 2.1× | 0.109 s | 160 MB |
-| ExcelDataReader | 19.27 s · 4.7× | 0.140 s | 310 MB |
-| MiniExcel[^1] | 19.11 s · 4.7× | 0.178 s | 395 MB |
+| **XLSight reader (.NET 10)** | **3.39 s** | **0.045 s** | **161 MiB** |
+| calamine (Rust) | 9.00 s | 0.484 s | 160 MiB |
+
+XLSight achieved **2.65× the throughput** with similar peak RSS on this workload.
+
+Earlier measurements of the same cell-count workload are retained below for reference;
+these libraries were not rerun in the comparison above.
+
+| Library (previous measurements) | Mean time | Stddev | Peak RSS |
+|---|---:|---:|---:|
+| ExcelDataReader | 19.27 s | 0.140 s | 310 MiB |
+| MiniExcel[^1] | 19.11 s | 0.178 s | 395 MiB |
 
 ### BenchmarkDotNet — public streaming throughput, all rows
 
