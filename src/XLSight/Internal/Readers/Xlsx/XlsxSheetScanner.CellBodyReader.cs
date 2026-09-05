@@ -122,6 +122,15 @@ internal static partial class XlsxSheetScanner
         while (true)
         {
             var span = buf.Span;
+            if (TryGetCachedValueLength(span, out int valueLength))
+            {
+                var decoded = DecodeCellValueBytes(
+                    span.Slice(3, valueLength), kind, styleIdx, sharedStrings, styles, isDate1904,
+                    decodeSharedString, out sstIndex);
+                buf.Advance(3 + valueLength + 8);
+                return decoded;
+            }
+
             var closeStatus = TryFindEndTag(span, TagCell, out int cClose, out int cCloseLen, out int closePartial);
 
             // Constrain <v> search to the current cell body.
@@ -168,6 +177,20 @@ internal static partial class XlsxSheetScanner
             decodeSharedString, out sstIndex);
         SkipToEndTag(buf, TagCell);
         return result;
+    }
+
+    private static bool TryGetCachedValueLength(ReadOnlySpan<byte> span, out int valueLength)
+    {
+        valueLength = 0;
+        if (!span.StartsWith("<v>"u8)) { return false; }
+
+        int end = span[3..].IndexOf((byte)'<');
+        if (end < 0 || !span[(3 + end)..].StartsWith("</v></c>"u8)) { return false; }
+
+        // Only consume a complete common shape; split tags and XML variants use
+        // the existing refill-aware parser without changing the buffer position.
+        valueLength = end;
+        return true;
     }
 
     private static ExcelCellValue DecodeCellValueBytes(
