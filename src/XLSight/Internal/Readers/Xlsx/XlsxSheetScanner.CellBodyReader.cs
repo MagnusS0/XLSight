@@ -211,7 +211,8 @@ internal static partial class XlsxSheetScanner
         ReadOnlySpan<byte> valueBytes, SharedStringTable sharedStrings,
         bool decode, out int sstIndex)
     {
-        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _))
+        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out int bytesConsumed)
+            || bytesConsumed != valueBytes.Length)
         {
             sstIndex = -1;
             return ExcelCellValue.Empty;
