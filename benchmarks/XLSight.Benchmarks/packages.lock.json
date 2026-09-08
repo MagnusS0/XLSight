@@ -219,13 +219,13 @@
       "xlsight.layout": {
         "type": "Project",
         "dependencies": {
-          "XLSight": "[0.8.3, )"
+          "XLSight": "[0.8.4, )"
         }
       },
       "xlsight.query": {
         "type": "Project",
         "dependencies": {
-          "XLSight": "[0.8.3, )"
+          "XLSight": "[0.8.4, )"
         }
       }
     }
