@@ -22,9 +22,9 @@
       },
       "ExcelDataReader": {
         "type": "Direct",
-        "requested": "[3.8.0, )",
-        "resolved": "3.8.0",
-        "contentHash": "kbUsldc5Fn9IKgzL2nr4VvN/mKqPqn8zGXUZpA7uL6svCA4psF+qMK519EhMvderpU4pAJoqk9DWpiSIkiZtXA=="
+        "requested": "[3.9.0, )",
+        "resolved": "3.9.0",
+        "contentHash": "3lEkUzG67UWPYj/xlX5Hua3MeQQktnK0B7WGzDjLpdJpBtct7szX0E4WB3Kl6C/8bNnbkyT2eO0FSPV+9CCemw=="
       },
       "Meziantou.Analyzer": {
         "type": "Direct",
@@ -45,9 +45,9 @@
       },
       "MiniExcel": {
         "type": "Direct",
-        "requested": "[1.43.0, )",
-        "resolved": "1.43.0",
-        "contentHash": "ImtWDO4zpjNKuNdFlK5LeNcpVtN/8aWp8M0rd8LPjrCU87ND2qbUEfvIcuS9RDGw+9OxS4ZZaDI0PcHiLtb8qg=="
+        "requested": "[1.46.0, )",
+        "resolved": "1.46.0",
+        "contentHash": "IMmli1Hc3/Axst8hcuUx30q/2HTKH2f3nmduiy59wvpth1u0881fZMEMAy4Inl3GBkdrVXA8UUpF5lyoWREdLQ=="
       },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
@@ -219,13 +219,13 @@
       "xlsight.layout": {
         "type": "Project",
         "dependencies": {
-          "XLSight": "[0.8.1, )"
+          "XLSight": "[0.8.3, )"
         }
       },
       "xlsight.query": {
         "type": "Project",
         "dependencies": {
-          "XLSight": "[0.8.1, )"
+          "XLSight": "[0.8.3, )"
         }
       }
     }

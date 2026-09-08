@@ -11,8 +11,8 @@
     <!-- Benchmarks -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <!-- Competitor benchmark packages -->
-    <PackageVersion Include="MiniExcel" Version="1.43.0" />
-    <PackageVersion Include="ExcelDataReader" Version="3.8.0" />
+    <PackageVersion Include="MiniExcel" Version="1.46.0" />
+    <PackageVersion Include="ExcelDataReader" Version="3.9.0" />
   </ItemGroup>
 
   <ItemGroup>

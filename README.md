@@ -8,7 +8,7 @@ XLSight is a fast, dependency-free Excel reader and analyzer for .NET 10. It sup
 
 XLSight reads worksheet XML as UTF-8 bytes. It bypasses `XmlReader` on hot paths and creates managed strings only when required.
 
-- Reads the NYC 311 workbook with one million rows in **4.10 s** with **157 MB** peak RSS. That is **2.1x faster** than Rust's [`calamine`](https://github.com/tafia/calamine) and **4.7x faster** than both [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader) and [`MiniExcel`](https://github.com/mini-software/MiniExcel/tree/master).
+- Reads the NYC 311 workbook with one million rows in **3.38 s** with **161 MiB** peak RSS: **2.3×** faster than [`calamine`](https://github.com/tafia/calamine), **5.2×** faster than [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader), and **6.5×** faster than [`MiniExcel`](https://github.com/mini-software/MiniExcel).
 - Stops as soon as the caller has read the required N rows. This allows fast sample reads with minimal memory allocation.
 
 > **Scope:** XLSight reads Open XML and binary workbooks. It can inspect VBA metadata without running macros.
@@ -472,74 +472,71 @@ Console.WriteLine(ExcelLimits.MaxCells);   // 100,000,000
 
 ## Performance
 
-All benchmarks were run on Linux, .NET 10.0, Intel Core i9-14900K. Every library reads the same
-sheet and touches the same rows and cells. XLSight benchmarks use the relevant
-public API for each scenario: `GetSheetReader` for forward-only streaming and `ReadRange` for
-bounded rectangular reads.
+All benchmarks were run on a Intel Core i9-14900K, running Linux, with .NET 10.0.11. Release builds, measured 2026-09-05.
+XLSight uses `GetSheetReader` for streaming and `ReadRange` for bounded reads.
 
 ### Real-world benchmark — NYC 311 service requests, 1 M rows × 41 cols
 
-Wall time and peak RSS were measured with a small Python script using `psutil` across 5 runs
-(2 warmup).
+Wall time and peak RSS were measured with a small Python script using `psutil`: 2 warmups, 5 measured runs, 10 ms sampling. **41,000,041 cells**.
 
-All four harnesses processed the same workload: **41,000,041 cells**.
+> Calamine `0af05f4`: Rust 1.98.0, `opt-level=3`, LTO, `codegen-units=1`, `target-cpu=native`. ExcelDataReader 3.9.0; MiniExcel 1.46.0.
 
 | Library | Mean time | Stddev | Peak RSS |
 |---|---:|---:|---:|
-| **XLSight reader (.NET 10)** | **4.10 s** | **0.004 s** | **157 MB** |
-| calamine (Rust) | 8.69 s · 2.1× | 0.109 s | 160 MB |
-| ExcelDataReader | 19.27 s · 4.7× | 0.140 s | 310 MB |
-| MiniExcel[^1] | 19.11 s · 4.7× | 0.178 s | 395 MB |
+| **XLSight reader (.NET 10)** | **3.38 s** | **0.025 s** | 161 MiB |
+| calamine (Rust) | 7.73 s | 0.030 s | **160 MiB** |
+| ExcelDataReader | 17.58 s | 0.265 s | 291 MiB |
+| MiniExcel[^1] | 22.10 s | 0.240 s | 396 MiB |
 
 ### BenchmarkDotNet — public streaming throughput, all rows
 
-Measured with [BenchmarkDotNet](https://benchmarkdotnet.org). The 100 K and 1 M datasets are
+Measured with [BenchmarkDotNet](https://benchmarkdotnet.org) 0.15.8: 3 warmups, 5 measured iterations. The 100 K and 1 M datasets are
 synthetic xlsx files with numeric and string columns.
 
 | Library | 100 K rows | 1 M rows | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight reader** | **59.3 ms** | **1.51 s** | **343 KB** | **1.46 GB** |
-| **XLSight safe stream** | **62.0 ms** | **1.56 s** | **14.1 MB** | **1.66 GB** |
-| ExcelDataReader | 268.9 ms · 4.5× | 5.44 s · 3.6× | 165 MB · 492.6× | 3.43 GB · 2.3× |
-| MiniExcel[^1] | 387.1 ms · 6.5× | 4.85 s · 3.2× | 885 MB · 2,642.1× | 7.54 GB · 5.2× |
+| **XLSight reader** | **53.2 ms** | **1.43 s** | **279.7 KiB** | **1.46 GiB** |
+| **XLSight safe stream** | **55.9 ms** | **1.42 s** | **14.0 MiB** | **1.66 GiB** |
+| ExcelDataReader | 238.5 ms (4.5×) | 5.11 s (3.6×) | 118.9 MiB (435.3×) | 2.71 GiB (1.9×) |
+| MiniExcel[^1] | 434.8 ms (8.2×) | 5.24 s (3.7×) | 1.00 GiB (3748.9×) | 9.53 GiB (6.5×) |
 
 > **Allocated** is total managed heap throughput (BenchmarkDotNet), not peak live RSS.
 
-[^1]: All MiniExcel benchmarks use `EnableSharedStringCache = false` (fully in-memory SST — the same memory model as every other library measured here).
+[^1]: MiniExcel uses `EnableSharedStringCache = false` to keep shared strings in memory.
 
 ### BenchmarkDotNet — bounded mid-sheet range
 
-This scenario reads `Scenarios!B10:N20` (**11 rows × 13 columns**) from the middle of
-`complex_workbook.xlsx`. It models the case where the caller wants one table-like region,
-not the whole sheet.
+`complex_workbook.xlsx`, `Scenarios!B10:N20`: **11 rows × 13 columns**.
 
 | Library | Time | Allocated |
 |---|---:|---:|
-| **XLSight `ReadRange`** | **127.0 μs** | **425 KB** |
-| MiniExcel[^1] | 596.6 μs · 4.7× | 839 KB · 2.0× |
-| ExcelDataReader | 735.5 μs · 5.8× | 614 KB · 1.4× |
+| **XLSight `ReadRange`** | **143.7 μs** | **425.6 KiB** |
+| ExcelDataReader | 640.6 μs (4.5×) | 466.7 KiB (1.1×) |
+| MiniExcel[^1] | 645.5 μs (4.5×) | 946.1 KiB (2.2×) |
 
 > XLSight can use a true bounded range API here; MiniExcel and ExcelDataReader still iterate sheet
 > rows and then consume just the requested rectangle.
 
 ### BenchmarkDotNet — early exit, first 10 rows
 
-Agents and pipelines often need only a few rows to sample a file or confirm its schema. XLSight
-yields control immediately once the row limit is reached.
+The same datasets, stopping after 10 rows.
 
 | Library | First 10 of 100 K | First 10 of 1 M | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight reader** | **97.1 μs** | **301.8 μs** | **279 KB** | **1.48 MB** |
-| **XLSight safe stream** | **96.4 μs** | **297.6 μs** | **281 KB** | **1.48 MB** |
-| ExcelDataReader | 96.7 ms · 995.9× | 2.68 s · 8,880.1× | 44.8 MB · 164.4× | 1.80 GB · 1,245.4× |
-| MiniExcel[^1] | 170.2 ms · 1,752.8× | 1.13 s · 3,744.2× | 483 MB · 1,772.7× | 1.51 GB · 1,044.8× |
+| **XLSight reader** | **137.6 μs** | **307.9 μs** | **279.7 KiB** | **1.48 MiB** |
+| **XLSight safe stream** | **137.5 μs** | **304.7 μs** | **281.2 KiB** | **1.48 MiB** |
+| ExcelDataReader | 84.3 ms (612.6×) | 2.60 s (8444.3×) | 21.9 MiB (80.2×) | 1.40 GiB (968.6×) |
+| MiniExcel[^1] | 179.5 ms (1304.5×) | 1.22 s (3962.3×) | 482.3 MiB (1765.7×) | 1.51 GiB (1044.8×) |
 
-> **Numeric and text files:** XLSight parses shared strings on demand. It decodes only the entries used by the selected rows.
->
-> **ExcelDataReader:** Its `IDataReader` contract needs `FieldCount` and `RowCount` before the first read.
-> It scans the full `<sheetData>` section first. It also loads all shared strings and styles when it opens the workbook.
->
-> **MiniExcel:** `Query()` creates each row as an `ExpandoObject`. It creates one dictionary entry for every column and boxes each cell value.
+<details>
+<summary>Why the performance gap?</summary>
+
+**XLSight:** Reads worksheet XML as UTF-8 bytes, reuses a typed row buffer, and creates managed strings on demand. It can stop after the requested rows.
+
+**ExcelDataReader:** Scans worksheet data upfront to determine row and column counts. It also loads shared strings and styles eagerly, so even a short read requires substantial setup work.
+
+**MiniExcel:** Loads all shared strings upfront. `Query()` builds each row as an `ExpandoObject`, then copies its values into another dictionary. It also allocates a formula dictionary per row, even when no formulas are present. Numeric and other value-type cells are boxed.
+</details>
 
 ### How XLSight reduces work
 
@@ -555,8 +552,8 @@ decompressed UTF-8 bytes and handle only the required OOXML elements and attribu
 `<f>`, and `<t>` elements. `CellAttributeParser` reads the `r`, `t`, and `s` attributes from byte
 spans. `Utf8Parser.TryParse` parses integer and floating-point values without temporary strings.
 
-`ScanBuffer` rents one 64 KB buffer from `ArrayPool<byte>` for each open sheet. It reuses this buffer
-for the complete scan. The scanner does not allocate more I/O buffers during the scan.
+`ScanBuffer` rents a 64 KB buffer from `ArrayPool<byte>` for each open sheet. It grows the buffer
+only when a token or asynchronous row exceeds the available space.
 
 #### Row storage
 

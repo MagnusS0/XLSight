@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using XLSight.Internal.Metadata;
 using XLSight.Internal.Parsing;
@@ -274,7 +275,7 @@ internal static partial class XlsxSheetScanner
 
     internal static bool FillRowCells(
         ScanBuffer buf, int rowIndex, SharedStringTable sharedStrings, StyleTable styles,
-        bool isDate1904, ReadMode mode, ExcelRange range, ExcelCellValue[] cellBuf,
+        bool isDate1904, ReadMode mode, ExcelRange range, ref ExcelCellValue[] cellBuf,
         out int startCol, out int width, RowProjection? projection = null)
     {
         startCol = 0;
@@ -306,7 +307,13 @@ internal static partial class XlsxSheetScanner
 
             if (firstCol == 0) { firstCol = currentCol; }
 
-            cellBuf[currentCol - firstCol] = isEmpty || skipValue
+            int cellOffset = currentCol - firstCol;
+            if (cellOffset >= cellBuf.Length)
+            {
+                GrowCellBuffer(ref cellBuf, cellOffset + 1);
+            }
+
+            cellBuf[cellOffset] = isEmpty || skipValue
                 ? ExcelCellValue.Empty
                 : mode == ReadMode.Formulas
                     ? ReadCellValueFormula(buf, kind, styleIdx, sharedStrings, styles, isDate1904)
@@ -320,6 +327,17 @@ internal static partial class XlsxSheetScanner
         startCol = firstCol;
         width = lastCol - firstCol + 1;
         return true;
+    }
+
+    private static void GrowCellBuffer(ref ExcelCellValue[] cellBuf, int requiredCapacity)
+    {
+        int capacity = Math.Max(requiredCapacity, Math.Min(cellBuf.Length * 2, ExcelLimits.MaxColumns));
+        var grown = ArrayPool<ExcelCellValue>.Shared.Rent(capacity);
+        // The unused tail may become sparse gaps in this or a later row.
+        grown.AsSpan(cellBuf.Length).Clear();
+        cellBuf.AsSpan().CopyTo(grown);
+        ArrayPool<ExcelCellValue>.Shared.Return(cellBuf, clearArray: true);
+        cellBuf = grown;
     }
 
     private static bool TryReadNextCell(

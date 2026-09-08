@@ -3,7 +3,8 @@ using System.Buffers;
 namespace XLSight.Internal.Readers.Xlsx;
 
 /// <summary>
-/// A 64 KB sliding window over a <see cref="Stream"/>, backed by a pooled byte array.
+/// A sliding window over a <see cref="Stream"/>, initially 64 KB and backed by a pooled byte array.
+/// Grows only when a pending token or async row does not fit in the window.
 /// Sealed class (not ref struct) so it can be used across yield-return boundaries.
 /// </summary>
 internal sealed class ScanBuffer : IDisposable
@@ -46,7 +47,7 @@ internal sealed class ScanBuffer : IDisposable
     /// <summary>Current unconsumed window as a span.</summary>
     internal ReadOnlySpan<byte> Span => _buf.AsSpan(_start, _end - _start);
 
-    internal bool CanReadMore => !_streamDone && (_start > 0 || _end < _buf.Length);
+    internal bool CanReadMore => !_streamDone;
 
     /// <summary>
     /// Resets the buffer pointers and refills from the underlying stream's current position.
@@ -107,6 +108,12 @@ internal sealed class ScanBuffer : IDisposable
         if (!_streamDone)
         {
             int space = _buf.Length - _end;
+            if (space == 0)
+            {
+                Grow();
+                space = _buf.Length - _end;
+            }
+
             if (space > 0)
             {
                 int bytesRead = _source.Read(_buf, _end, space);
