@@ -189,7 +189,13 @@ internal static partial class XlsxSheetScanner
         SharedStringTable sharedStrings, StyleTable styles, bool isDate1904,
         bool decode, out int sstIndex)
     {
-        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out _)) { sstIndex = -1; }
+        if (!Utf8Parser.TryParse(valueBytes, out sstIndex, out int bytesConsumed)
+            || bytesConsumed != valueBytes.Length)
+        {
+            sstIndex = -1;
+            return ExcelCellValue.Empty;
+        }
+
         return decode
             ? Utf8CellDecoder.Decode(valueBytes, CellDataKind.SharedString, styleIdx, sharedStrings, styles, isDate1904)
             : ExcelCellValue.Empty;
