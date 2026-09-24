@@ -188,6 +188,8 @@ public static class ExcelWorkbookQueryExtensions
     private static SheetQuery ConfigureSheetQuery(ExcelWorkbook workbook, SheetQuerySpec spec, int headerRow)
     {
         SheetQuery query = workbook.QueryRange(spec.Sheet, spec.Range, headerRow);
+        query.WithGroupLimit(spec.GroupLimit);
+        if (spec.ExpressionPlan is { } plan) { return query.WithExpressions(plan); }
 
         foreach (SheetQueryPredicate predicate in spec.Predicates)
         {

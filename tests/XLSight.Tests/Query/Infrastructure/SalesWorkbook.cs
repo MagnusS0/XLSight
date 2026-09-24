@@ -44,11 +44,11 @@ internal static class SalesWorkbook
     public static int SheetRowOf(int recordIndex, int headerRow = 1) => headerRow + 1 + recordIndex;
 
     /// <summary>Builds the fixture workbook. With <paramref name="titleRow"/> a banner occupies row 1 and headers move to row 2.</summary>
-    public static MemoryStream Build(bool titleRow = false)
+    public static MemoryStream Build(bool titleRow = false, IReadOnlyList<SalesRecord>? records = null)
     {
         var sst = new List<string>();
         var sstIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-        string sheetXml = BuildSheetXml(titleRow, sst, sstIndex);
+        string sheetXml = BuildSheetXml(titleRow, sst, sstIndex, records ?? Data);
         string sstXml = BuildSstXml(sst);
 
         var ms = new MemoryStream();
@@ -65,7 +65,7 @@ internal static class SalesWorkbook
         return ms;
     }
 
-    private static string BuildSheetXml(bool titleRow, List<string> sst, Dictionary<string, int> sstIndex)
+    private static string BuildSheetXml(bool titleRow, List<string> sst, Dictionary<string, int> sstIndex, IReadOnlyList<SalesRecord> records)
     {
         var sb = new StringBuilder();
         sb.Append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>""");
@@ -86,7 +86,7 @@ internal static class SalesWorkbook
         sb.Append("</row>");
         row++;
 
-        foreach (SalesRecord record in Data)
+        foreach (SalesRecord record in records)
         {
             AppendDataRow(sb, record, row, sst, sstIndex);
             row++;

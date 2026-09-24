@@ -50,7 +50,7 @@ internal static class QueryDslParser
             int? limit = null;
             if (TryConsumeKeyword("LIMIT"))
             {
-                limit = ParsePositiveInteger("LIMIT");
+                limit = ParsePositiveInteger("LIMIT", allowZero: true);
             }
 
             if (!_tokens.Current.IsEnd)
@@ -396,14 +396,14 @@ internal static class QueryDslParser
             return (rangeAddress, range);
         }
 
-        private int ParsePositiveInteger(string context)
+        private int ParsePositiveInteger(string context, bool allowZero = false)
         {
             Token token = _tokens.Current;
             if (token.Kind is not TokenKind.Integer ||
                 !int.TryParse(_tokens.GetSpan(token), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int value) ||
-                value <= 0)
+                (allowZero ? value < 0 : value <= 0))
             {
-                throw Error($"{context} must be a positive integer.");
+                throw Error($"{context} must be a {(allowZero ? "nonnegative" : "positive")} integer.");
             }
 
             _tokens.MoveNext();

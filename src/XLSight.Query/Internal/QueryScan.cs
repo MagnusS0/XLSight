@@ -9,7 +9,7 @@ namespace XLSight.Query.Internal;
 /// per-mode accumulation (row collection, global aggregates, grouped aggregates,
 /// or distinct-value counting). Shared by the sync and async terminals.
 /// </summary>
-internal sealed class QueryScan
+internal sealed class QueryScan : IQueryScan
 {
     private const int SampleRowLimit = 5;
     private const int TopNInitialCapacity = 16;
@@ -132,6 +132,7 @@ internal sealed class QueryScan
     /// </summary>
     public ExcelRange? DataRangeAfterHeader(ExcelRange range)
     {
+        if (_limit == 0) { return null; }
         int firstDataRow = Math.Max(_boundHeaderRow + 1, range.TopLeft.Row);
         if (firstDataRow > range.BottomRight.Row)
         {
@@ -245,7 +246,7 @@ internal sealed class QueryScan
             }
 
             BindHeader(row);
-            return true;
+            return _limit != 0;
         }
 
         _rowsScanned++;
@@ -609,7 +610,7 @@ internal sealed class QueryScan
     /// (* † ‡ § and superscript digits ¹²³⁴⁵⁶⁷⁸⁹⁰), then trims any space that preceded them.
     /// Interior characters are never removed.
     /// </summary>
-    private static string NormalizeHeaderName(string raw)
+    internal static string NormalizeHeaderName(string raw)
     {
         ReadOnlySpan<char> span = raw.AsSpan().Trim();
 
@@ -636,6 +637,13 @@ internal sealed class QueryScan
     public QueryResult BuildResult(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (_limit == 0 && _headerBound)
+        {
+            string[] columns = _aggregateSpecs.Length == 0 ? _resultColumnNames
+                : _groupByColumn is null ? _aggregateSpecs.Select(a => a.Label).ToArray()
+                : [_groupColumnName, .. _aggregateSpecs.Select(a => a.Label)];
+            return NewResult(columns, []);
+        }
         if (_pruned || (!_headerBound && _aggregateSpecs.Length == 0))
         {
             return new QueryResult

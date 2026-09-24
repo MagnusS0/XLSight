@@ -29,6 +29,13 @@ public sealed class SheetQuery
     private int _limit = -1;
     private int _maxGroups = DefaultGroupLimit;
     private IReadOnlyList<ColumnProfile>? _stats;
+    private ExtendedQueryPlan? _expressionPlan;
+
+    internal SheetQuery WithExpressions(ExtendedQueryPlan plan)
+    {
+        _expressionPlan = plan;
+        return this;
+    }
 
     internal SheetQuery(ExcelWorkbook workbook, string sheet, ExcelRange range, int headerRow)
     {
@@ -193,7 +200,7 @@ public sealed class SheetQuery
     /// <param name="count">The maximum number of result rows.</param>
     public SheetQuery Take(int count)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         _limit = count;
         return this;
     }
@@ -228,8 +235,14 @@ public sealed class SheetQuery
     /// <exception cref="TooManyGroupsException">Thrown when group cardinality exceeds the cap.</exception>
     public QueryResult Execute()
     {
+        if (_expressionPlan is { } plan)
+        {
+            var expressionScan = new ExpressionQueryScan(plan, _headerRow, _maxGroups);
+            RunScan(expressionScan);
+            return expressionScan.BuildResult();
+        }
         var scan = CreateScan(distinctColumn: null);
-        if (!scan.TryPruneWithStats(_stats))
+        if (_limit == 0 || !scan.TryPruneWithStats(_stats))
         {
             RunScan(scan);
         }
@@ -245,8 +258,14 @@ public sealed class SheetQuery
     public async Task<QueryResult> ExecuteAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (_expressionPlan is { } plan)
+        {
+            var expressionScan = new ExpressionQueryScan(plan, _headerRow, _maxGroups);
+            await RunScanAsync(expressionScan, ct).ConfigureAwait(false);
+            return expressionScan.BuildResult(ct);
+        }
         var scan = CreateScan(distinctColumn: null);
-        if (!scan.TryPruneWithStats(_stats))
+        if (_limit == 0 || !scan.TryPruneWithStats(_stats))
         {
             await RunScanAsync(scan, ct).ConfigureAwait(false);
         }
@@ -313,7 +332,7 @@ public sealed class SheetQuery
     /// query never reads are not materialized. Row queries fall back to a single unprojected pass
     /// that binds and scans together, which is cheaper when no projection is possible.
     /// </summary>
-    private void RunScan(QueryScan scan)
+    private void RunScan<TScan>(TScan scan) where TScan : IQueryScan
     {
         if (HasExternalHeader)
         {
@@ -352,7 +371,7 @@ public sealed class SheetQuery
         ScanDataRange(scan, dataRange);
     }
 
-    private void BindExternalHeader(QueryScan scan)
+    private void BindExternalHeader<TScan>(TScan scan) where TScan : IQueryScan
     {
         using (var probe = _workbook.GetRangeReader(_sheet, HeaderRowRange()))
         {
@@ -368,7 +387,7 @@ public sealed class SheetQuery
         }
     }
 
-    private void ScanDataRange(QueryScan scan, ExcelRange dataRange)
+    private void ScanDataRange<TScan>(TScan scan, ExcelRange dataRange) where TScan : IQueryScan
     {
         if (scan.SupportsProjection)
         {
@@ -386,7 +405,7 @@ public sealed class SheetQuery
         }
     }
 
-    private async Task RunScanAsync(QueryScan scan, CancellationToken ct)
+    private async Task RunScanAsync<TScan>(TScan scan, CancellationToken ct) where TScan : IQueryScan
     {
         if (HasExternalHeader)
         {
@@ -429,7 +448,7 @@ public sealed class SheetQuery
         await ScanDataRangeAsync(scan, dataRange, ct).ConfigureAwait(false);
     }
 
-    private async Task BindExternalHeaderAsync(QueryScan scan, CancellationToken ct)
+    private async Task BindExternalHeaderAsync<TScan>(TScan scan, CancellationToken ct) where TScan : IQueryScan
     {
         var probe = await _workbook.GetRangeReaderAsync(_sheet, HeaderRowRange(), ct: ct).ConfigureAwait(false);
         await using (probe.ConfigureAwait(false))
@@ -446,7 +465,7 @@ public sealed class SheetQuery
         }
     }
 
-    private async Task ScanDataRangeAsync(QueryScan scan, ExcelRange dataRange, CancellationToken ct)
+    private async Task ScanDataRangeAsync<TScan>(TScan scan, ExcelRange dataRange, CancellationToken ct) where TScan : IQueryScan
     {
         if (scan.SupportsProjection)
         {
