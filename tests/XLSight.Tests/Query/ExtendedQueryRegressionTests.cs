@@ -44,6 +44,29 @@ public sealed class ExtendedQueryRegressionTests
         Assert.Equal(name, spec.Sheet);
     }
 
+    [Theory]
+    [InlineData("2e")]
+    [InlineData("2E")]
+    [InlineData("2.5e")]
+    [InlineData("2.5E")]
+    [InlineData("2.5east")]
+    public void IncompleteExponents_RemainIdentifiers(string name)
+    {
+        SheetQuerySpec selection = SheetQuerySpec.Parse($"SELECT {name} FROM Sales!A1:F11 HEADER ROW 1");
+        Assert.Equal([name], selection.Columns);
+        SheetQuerySpec source = SheetQuerySpec.Parse($"SELECT Units * 2 FROM {name}!A1:F11 HEADER ROW 1");
+        Assert.Equal(name, source.Sheet);
+    }
+
+    [Theory]
+    [InlineData("2e+ Units", "(2e + Units)")]
+    [InlineData("2.5e- Units", "(2.5e - Units)")]
+    public void IncompleteExponents_DoNotConsumeAnArithmeticOperator(string expression, string expected)
+    {
+        SheetQuerySpec spec = SheetQuerySpec.Parse($"SELECT {expression} FROM Sales!A1:F11 HEADER ROW 1");
+        Assert.Equal(expected, Assert.Single(spec.SelectExpressions));
+    }
+
     [Fact]
     public void ExpressionParser_PreservesLegacyPositiveIntegerSigns()
     {
@@ -171,6 +194,14 @@ public sealed class ExtendedQueryRegressionTests
     [InlineData("COALESCE(NULL, '', 1)", "")]
     [InlineData("'' IS EMPTY", "FALSE")]
     [InlineData("1e308 * 1e308", "Empty")]
+    [InlineData("2e3", "2000")]
+    [InlineData("2E+3", "2000")]
+    [InlineData("2e-3", "0.002")]
+    [InlineData("2.5e3", "2500")]
+    [InlineData("2.5E+3", "2500")]
+    [InlineData("2.5e-3", "0.0025")]
+    [InlineData("-2.5e+3", "-2500")]
+    [InlineData("+2.5e-3", "0.0025")]
     public void ConstantExpressions_RespectTypedAndUnknownSemantics(string expression, string expected)
     {
         using var stream = SalesWorkbook.Build();

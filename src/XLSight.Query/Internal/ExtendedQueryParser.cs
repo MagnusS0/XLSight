@@ -1081,14 +1081,6 @@ internal static class ExtendedQueryParser
                 _position++;
             }
 
-            bool exponent = _position + 1 < _text.Length && _text[_position] is 'e' or 'E'
-                && (char.IsDigit(_text[_position + 1]) || _text[_position + 1] is '+' or '-');
-            if (_position < _text.Length && IsIdentifierStart(_text[_position]) && !exponent)
-            {
-                while (_position < _text.Length && IsIdentifierPart(_text[_position])) { _position++; }
-                return new Token(TokenKind.Identifier, start, _position - start, start);
-            }
-
             bool isDecimal = false;
             if (_position < _text.Length && _text[_position] == '.')
             {
@@ -1100,7 +1092,14 @@ internal static class ExtendedQueryParser
                 }
             }
 
-            if (_position < _text.Length && (_text[_position] is 'e' or 'E'))
+            bool exponent = IsExponentStart();
+            if (_position < _text.Length && IsIdentifierStart(_text[_position]) && !exponent)
+            {
+                while (_position < _text.Length && IsIdentifierPart(_text[_position])) { _position++; }
+                return new Token(TokenKind.Identifier, start, _position - start, start);
+            }
+
+            if (exponent)
             {
                 isDecimal = true;
                 _position++;
@@ -1116,6 +1115,22 @@ internal static class ExtendedQueryParser
             }
 
             return new Token(isDecimal ? TokenKind.Number : TokenKind.Integer, start, _position - start, start);
+        }
+
+        private bool IsExponentStart()
+        {
+            if (_position >= _text.Length || _text[_position] is not ('e' or 'E'))
+            {
+                return false;
+            }
+
+            int digitPosition = _position + 1;
+            if (digitPosition < _text.Length && _text[digitPosition] is '+' or '-')
+            {
+                digitPosition++;
+            }
+
+            return digitPosition < _text.Length && char.IsDigit(_text[digitPosition]);
         }
 
         private bool IsSignedNumberStart(char c)
