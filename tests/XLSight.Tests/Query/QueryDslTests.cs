@@ -279,7 +279,6 @@ public sealed class QueryDslTests
     [Theory]
     [InlineData("A1:F11", "SELECT TOTAL(Units)", "Unknown aggregate 'TOTAL'")]
     [InlineData("A1:F11", "SELECT * GROUP BY Region", "GROUP BY is not valid with SELECT *")]
-    [InlineData("A1:F11", "SELECT COUNT() WHERE Region = \"EMEA\" OR Region = \"APAC\"", "OR is not supported")]
     [InlineData("A1:F11", "SELECT COUNT() WHERE OnPromo > true", "Boolean predicates support '=' and '!=' only")]
     [InlineData("A:F", "SELECT COUNT()", "FROM range must be a bounded A1 range")]
     public void Parse_UnsupportedSyntax_ThrowsRepairableDiagnostic(

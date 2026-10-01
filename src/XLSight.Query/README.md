@@ -67,13 +67,15 @@ aggregates follow in `SELECT` order.
 
 ## Query DSL
 
-Use the fluent API for compiled .NET code. Use the DSL when a query must cross a
-configuration, process, prompt, or tool boundary.
+Use the fluent API for simple queries in .NET code. Use the DSL for the
+expression features below. In .NET code, call `SheetQuerySpec.Parse` and
+`ExecuteQuery(spec)`. To reuse a query, parse it once and reuse the specification.
 
-The DSL uses this clause order:
+The DSL accepts queries that start with `FROM` or `SELECT`:
 
 ```text
-FROM ... HEADER ... SELECT ... [WHERE ...] [GROUP BY ...] [ORDER BY ...] [LIMIT ...]
+FROM ... HEADER ... SELECT ... [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]
+SELECT ... FROM ... HEADER ... [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]
 ```
 
 Supported clauses:
@@ -82,17 +84,89 @@ Supported clauses:
   bare or double-quoted.
 - `HEADER AUTO` or `HEADER ROW <number>` selects the source of column names.
 - `SELECT *` returns all source columns.
-- `SELECT <column>[, <column>...]` returns selected source columns.
+- `SELECT <expression>[, <expression>...]` returns selected source columns or
+  computed values. `AS <alias>` names a result column.
 - `SELECT COUNT()`, `SUM(column)`, `AVG(column)`, `MIN(column)`, and `MAX(column)`
   return aggregates.
-- `WHERE` joins predicates with `AND`. It supports `=`, `!=`, `<`, `<=`, `>`, and
-  `>=`.
-- Literals can contain text, numbers, `DATE "yyyy-MM-dd"` values, and Boolean
-  values.
-- Boolean predicates support only `=` and `!=`.
-- `GROUP BY` accepts one column.
+- `WHERE` compares values or columns. It supports parentheses, `AND`, `OR`,
+  `NOT`, `IN`, `IS EMPTY`, and `IS NULL`.
+- `FILTER (WHERE ...)` gives an aggregate its own row filter.
+- Arithmetic expressions support `+`, `-`, `*`, `/`, and `%`.
+  Multiplication, division, and remainder have priority over addition and
+  subtraction. `YEAR`, `MONTH`, `DAY`, and `DATE_TRUNC` provide date operations.
+- Use single quotes for text literals, such as `Region = 'EMEA'`. Use
+  `[Column Name]` to identify a column. The DSL also accepts double quotes for
+  sheet names and column names in existing queries.
+- `GROUP BY` accepts one or more expressions.
+- `HAVING` filters completed groups. It can use aliases for selected aggregates.
 - `ORDER BY <key> [ASC|DESC]` orders grouped or row results. `ASC` is the default.
-- `LIMIT` accepts a positive integer.
+- `LIMIT` accepts an integer of zero or more. `LIMIT 0` reads headers and returns
+  no data rows. `HEADER AUTO` can still read workbook metadata to find the
+  header row.
+
+### Expression values
+
+Each value has a type, such as text or number. A comparison returns unknown if
+either value is empty or invalid, or if the value types are incompatible.
+`WHERE` keeps rows only when its result is true. `NOT` also returns unknown
+when its input is unknown.
+
+Invalid arithmetic, division by zero, and non-finite numeric results produce an
+empty value for that row. Non-finite numbers are NaN and positive or negative
+infinity. Aggregates skip empty inputs. `QueryResult.Unaggregatable` reports
+nonempty inputs that an aggregate rejects because of their type or value.
+Arithmetic failures that produce empty values have no separate diagnostic count.
+The query counts each rejected cell once per source column or expression,
+even when several aggregates reject it. Sample row indices contain no duplicates.
+
+`IN` compares values for equality and checks their types. If no value matches
+and any comparison returns unknown, the result is unknown. Empty values and
+incompatible types can cause this result. `NOT IN` also returns unknown in
+this case.
+
+`IS NULL` and `IS EMPTY` both check for missing values. They do not match text
+with zero characters. Boolean comparisons support only `=` and `!=`.
+
+### Functions and aggregates
+
+`COALESCE` returns the first nonempty argument. `ABS` accepts numbers. `ROUND`
+accepts an optional integer precision from 0 to 15 and rounds midpoint values
+away from zero. Arithmetic uses `double` values. Results can include rounding
+errors.
+`DATE_TRUNC` accepts the literal units `'year'`, `'month'`, and `'day'`.
+
+Scalar functions can use aggregate results. For example, use
+`ROUND(AVG(NetSales), 2)` or `COALESCE(SUM(NetSales), 0)`. Aggregate functions
+cannot contain other aggregates. A selection can include aggregates,
+constants, and expressions that use group keys. Numeric aggregate inputs must
+be finite. If the total for `SUM` or `AVG` overflows, the result is empty.
+
+### Column names and aliases
+
+`SELECT`, `WHERE`, aggregate arguments, and `GROUP BY` use column names from
+the source header. `HAVING` and `ORDER BY` can also use selection aliases.
+If an alias matches a source name, these two clauses use the alias.
+Column names inside a selection always refer to the source, even when the
+selection has an alias.
+
+Use quotes or brackets around column names such as `TRUE`, `NULL`, or `123`
+to distinguish them from literals. For compatibility, simple queries that
+start with `FROM` still accept bare integers as column names. For example,
+`SUM(2025)` sums the column named `2025`. To use a constant number, use a
+decimal literal such as `2025.0` or a query that starts with `SELECT`.
+
+```sql
+SELECT Region, Units * 1.15 AS WeightedUnits
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+WHERE Region IN ('EMEA', 'APAC') AND NOT (Units IS EMPTY)
+```
+
+```sql
+FROM "Sheet1"!A6:F2410 HEADER ROW 6
+SELECT Region, SUM(NetSales) FILTER (WHERE OnPromo = TRUE) AS PromoSales
+GROUP BY Region
+HAVING PromoSales > 100
+```
 
 ### Header rows
 
@@ -136,9 +210,12 @@ the same column twice creates two equal result columns.
 A projection lets the scanner skip text and number conversion for unused
 columns. The fluent equivalent is `SheetQuery.Project("Region", "NetSales")`.
 
-One `SELECT` clause cannot mix source columns and aggregates. `GROUP BY` cannot
-be used with a source-column projection. The parser throws `QueryDslException`
-for both cases.
+An aggregate query can select group expressions and aggregates together.
+For example, use `SELECT Region, SUM(NetSales) GROUP BY Region`.
+The parser rejects source columns that are outside an aggregate or group
+expression. If the selection contains only aggregate expressions, the query
+puts group keys before the selected columns. This keeps existing queries
+compatible. The fluent `Project` API returns source columns from individual rows.
 
 ```sql
 FROM "Sheet1"!A6:F2410 HEADER ROW 6
@@ -153,13 +230,28 @@ Without `ORDER BY`, `LIMIT` returns the first groups in first-seen order.
 `ORDER BY` orders groups before `LIMIT` selects the result rows. This returns the
 top groups instead.
 
-The key must be the `GROUP BY` column or a selected aggregate. Aggregate matching
-uses the function and source column. For example, `ORDER BY AVG(NetSales)`
-matches `SELECT AVG(NetSales)`.
+The key can be a group expression, a selected aggregate, or an expression
+that uses these values. It can also use an alias for a selected expression.
+Aggregate matching uses the function and source expression. For example,
+`ORDER BY AVG(NetSales)` matches `SELECT AVG(NetSales)`.
 
-Grouped queries scan the full data range, even with `LIMIT`. `LIMIT` caps result
-rows, not stored group states. The group limit bounds those states, and a query
-that exceeds it throws `TooManyGroupsException`.
+Grouped queries scan the full data range, even with a `LIMIT` greater than zero.
+The query stores one state per group. `LIMIT` controls the number of result
+rows. It does not reduce the stored group states. `HAVING` also does not reduce
+these states.
+
+For ordered groups with `LIMIT`, the query keeps only the best result rows
+after aggregation. Without `LIMIT`, the query builds result rows for all
+groups that pass `HAVING`.
+
+The default group limit is 10,000. A query that exceeds this limit throws
+`TooManyGroupsException`. To change the limit, use
+`SheetQuerySpec.Parse(text).WithGroupLimit(n)` or the fluent `WithGroupLimit`
+method. Memory use also depends on the size of group keys, the number of
+aggregates, and stored text.
+
+Row queries without `LIMIT` store every matching result row. Use `LIMIT` when
+you need only a sample.
 
 A global aggregate has no groups to order. `ORDER BY` without `GROUP BY` throws
 `QueryDslException` for this type of query.

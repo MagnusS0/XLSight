@@ -9,7 +9,7 @@ namespace XLSight.Query.Internal;
 /// per-mode accumulation (row collection, global aggregates, grouped aggregates,
 /// or distinct-value counting). Shared by the sync and async terminals.
 /// </summary>
-internal sealed class QueryScan
+internal sealed class QueryScan : IQueryScan
 {
     private const int SampleRowLimit = 5;
     private const int TopNInitialCapacity = 16;
@@ -60,7 +60,7 @@ internal sealed class QueryScan
     // row can evict and recycle it in place — no compaction, O(min(LIMIT, matches)) memory.
     private ExcelCellValue[] _topNArena = [];
     private int[] _topNSourceRows = [];
-    private PriorityQueue<int, ExcelCellValue>? _topN;
+    private PriorityQueue<int, (ExcelCellValue Key, int SourceRow)>? _topN;
     private AggregateAccumulator[]? _globalAggregates;
     private ExcelCellValue _lastGroupKey;
     private AggregateAccumulator[]? _lastGroupAccumulators;
@@ -82,6 +82,7 @@ internal sealed class QueryScan
     private sealed class DirtyColumn
     {
         public int Count;
+        public int LastRow;
         public List<int> SampleRows { get; } = new(SampleRowLimit);
     }
 
@@ -132,6 +133,7 @@ internal sealed class QueryScan
     /// </summary>
     public ExcelRange? DataRangeAfterHeader(ExcelRange range)
     {
+        if (_limit == 0) { return null; }
         int firstDataRow = Math.Max(_boundHeaderRow + 1, range.TopLeft.Row);
         if (firstDataRow > range.BottomRight.Row)
         {
@@ -245,7 +247,7 @@ internal sealed class QueryScan
             }
 
             BindHeader(row);
-            return true;
+            return _limit != 0;
         }
 
         _rowsScanned++;
@@ -308,7 +310,7 @@ internal sealed class QueryScan
     /// </summary>
     private void CollectOrderedRow(in ExcelRow row)
     {
-        PriorityQueue<int, ExcelCellValue> topN = _topN!;
+        var topN = _topN!;
         ExcelCellValue key = row.GetCell(_orderColumnIndex);
 
         int slotIndex;
@@ -322,8 +324,8 @@ internal sealed class QueryScan
         }
         else
         {
-            topN.TryPeek(out _, out ExcelCellValue worstKey);
-            if (OrderComparer.Compare(key, worstKey) >= 0)
+            topN.TryPeek(out _, out var worst);
+            if (OrderComparer.Compare(key, worst.Key) >= 0)
             {
                 return; // Not strictly better than the weakest survivor — discard.
             }
@@ -338,7 +340,7 @@ internal sealed class QueryScan
         }
 
         _topNSourceRows[slotIndex] = row.RowIndex;
-        topN.Enqueue(slotIndex, key);
+        topN.Enqueue(slotIndex, (key, row.RowIndex));
     }
 
     /// <summary>
@@ -402,7 +404,7 @@ internal sealed class QueryScan
 
             if (!accumulators[i].TryAccumulate(aggregate.Kind, in cell))
             {
-                RecordDirty(_aggregateSpecs[i].Column!, row.RowIndex);
+                RecordDirty(_columnNames[aggregate.ColumnIndex - _columnIndices[0]], row.RowIndex);
             }
         }
     }
@@ -434,6 +436,8 @@ internal sealed class QueryScan
             _dirtyOrder.Add(column);
         }
 
+        if (dirty.LastRow == rowIndex) { return; }
+        dirty.LastRow = rowIndex;
         dirty.Count++;
         if (dirty.SampleRows.Count < SampleRowLimit)
         {
@@ -531,9 +535,13 @@ internal sealed class QueryScan
         int capacity = Math.Min(_limit, TopNInitialCapacity);
         _topNArena = new ExcelCellValue[capacity * _rowWidth];
         _topNSourceRows = new int[capacity];
-        _topN = new PriorityQueue<int, ExcelCellValue>(
+        _topN = new PriorityQueue<int, (ExcelCellValue Key, int SourceRow)>(
             capacity,
-            Comparer<ExcelCellValue>.Create((x, y) => -keepComparer.Compare(x, y)));
+            Comparer<(ExcelCellValue Key, int SourceRow)>.Create((x, y) =>
+            {
+                int cmp = keepComparer.Compare(y.Key, x.Key);
+                return cmp != 0 ? cmp : y.SourceRow.CompareTo(x.SourceRow);
+            }));
     }
 
     /// <summary>
@@ -609,7 +617,7 @@ internal sealed class QueryScan
     /// (* † ‡ § and superscript digits ¹²³⁴⁵⁶⁷⁸⁹⁰), then trims any space that preceded them.
     /// Interior characters are never removed.
     /// </summary>
-    private static string NormalizeHeaderName(string raw)
+    internal static string NormalizeHeaderName(string raw)
     {
         ReadOnlySpan<char> span = raw.AsSpan().Trim();
 
@@ -636,7 +644,14 @@ internal sealed class QueryScan
     public QueryResult BuildResult(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (_pruned || (!_headerBound && _aggregateSpecs.Length == 0))
+        if (_limit == 0 && _headerBound)
+        {
+            string[] columns = _aggregateSpecs.Length == 0 ? _resultColumnNames
+                : _groupByColumn is null ? _aggregateSpecs.Select(a => a.Label).ToArray()
+                : [_groupColumnName, .. _aggregateSpecs.Select(a => a.Label)];
+            return NewResult(columns, []);
+        }
+        if (_pruned || (!_headerBound && (_aggregateSpecs.Length == 0 || _limit == 0)))
         {
             return new QueryResult
             {
@@ -655,13 +670,13 @@ internal sealed class QueryScan
     /// <summary>Drains the top-N heap and sorts the ≤k survivors into the requested order.</summary>
     private List<QueryResultRow> BuildOrderedRows()
     {
-        PriorityQueue<int, ExcelCellValue> topN = _topN!;
+        var topN = _topN!;
         int count = topN.Count;
         var survivors = new (int SlotIndex, ExcelCellValue Key)[count];
         int idx = 0;
-        while (topN.TryDequeue(out int slotIndex, out ExcelCellValue key))
+        while (topN.TryDequeue(out int slotIndex, out var priority))
         {
-            survivors[idx++] = (slotIndex, key);
+            survivors[idx++] = (slotIndex, priority.Key);
         }
 
         // Tie-break on source row so equal keys keep sheet order, matching the grouped path's
