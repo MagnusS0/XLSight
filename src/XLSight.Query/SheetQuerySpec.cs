@@ -85,13 +85,13 @@ public sealed class SheetQuerySpec
     /// <summary>Gets the aggregate functions selected by the statement.</summary>
     public IReadOnlyList<AggregateSpec> Aggregates { get; }
 
-    /// <summary>Gets the raw projected column names in <c>SELECT</c> order (empty for <c>SELECT *</c> or aggregate queries).</summary>
+    /// <summary>Gets directly selected source column names in <c>SELECT</c> order. Expression queries can include these alongside aggregates; computed selections appear in <see cref="SelectExpressions"/>.</summary>
     public IReadOnlyList<string> Columns { get; }
 
     /// <summary>Gets simple <c>WHERE</c> predicates combined by <c>AND</c>. Empty for expression queries; see <see cref="WhereExpression"/>.</summary>
     public IReadOnlyList<SheetQueryPredicate> Predicates { get; }
 
-    /// <summary>Gets the optional <c>GROUP BY</c> column.</summary>
+    /// <summary>Gets the optional <c>GROUP BY</c> column, or the first grouping expression for expression queries. See <see cref="GroupByExpressions"/> for all keys.</summary>
     public string? GroupBy { get; }
 
     /// <summary>Gets the optional <c>ORDER BY</c> key, as written (a column name or an aggregate call).</summary>

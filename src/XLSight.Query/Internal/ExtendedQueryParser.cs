@@ -424,7 +424,7 @@ internal static class ExtendedQueryParser
                 throw Error("Expected a column, literal, function, or parenthesized expression.");
             }
 
-                if (_tokens.IsKeyword(token, "TRUE") || _tokens.IsKeyword(token, "FALSE") || _tokens.IsKeyword(token, "DATE")
+            if (_tokens.IsKeyword(token, "TRUE") || _tokens.IsKeyword(token, "FALSE") || _tokens.IsKeyword(token, "DATE")
                     || _tokens.IsKeyword(token, "NULL") || _tokens.IsKeyword(token, "EMPTY"))
             {
                 return new LiteralExpression(ParseLiteral("expression literal"));
@@ -502,9 +502,10 @@ internal static class ExtendedQueryParser
 
             Expect(TokenKind.CloseParen, $"Expected ')' after function '{name}'.");
             ValidateFunction(upper, args.Count);
-            if (args.Any(ContainsAggregate))
+            if (upper is "DATE_TRUNC" && (args[0] is not LiteralExpression literal
+                || !literal.Value.TryGetText(out string? unit) || unit is not ("year" or "month" or "day")))
             {
-                throw Error("Nested aggregate functions are not supported.");
+                throw Error("DATE_TRUNC requires a literal unit: 'year', 'month', or 'day'.");
             }
 
             return new FunctionExpression(upper, args.ToArray());
@@ -604,7 +605,7 @@ internal static class ExtendedQueryParser
         private string ParseName(string context)
         {
             Token token = _tokens.Current;
-            if (token.Kind is not (TokenKind.Identifier or TokenKind.QuotedText or TokenKind.BracketedIdentifier or TokenKind.Integer))
+            if (token.Kind is not (TokenKind.Identifier or TokenKind.QuotedText or TokenKind.BracketedIdentifier or TokenKind.Integer or TokenKind.Number))
             {
                 throw Error($"Expected {context}.");
             }
@@ -638,10 +639,12 @@ internal static class ExtendedQueryParser
 
         private int ParseNonNegativeInteger(string context)
         {
+            bool negative = TryConsume(TokenKind.Minus);
+            if (!negative) { TryConsume(TokenKind.Plus); }
             Token token = _tokens.Current;
             if (token.Kind is not TokenKind.Integer ||
                 !int.TryParse(_tokens.GetSpan(token), NumberStyles.None, CultureInfo.InvariantCulture, out int result) ||
-                result < 0)
+                result < 0 || (negative && result != 0))
             {
                 throw Error($"{context} must be a non-negative integer.");
             }
@@ -698,23 +701,19 @@ internal static class ExtendedQueryParser
             bool hasAggregate = selections.Any(selection => ContainsAggregate(selection.Expression))
                 || (having is not null && ContainsAggregate(having))
                 || (orderBy is not null && ContainsAggregate(orderBy));
-            bool hasRawSelection = selections.Any(selection => !ContainsAggregate(selection.Expression));
-
-            if (hasAggregate && groupBy.Count == 0 && hasRawSelection)
+            if (selectAll && hasAggregate)
             {
-                throw Error("Cannot mix raw columns and aggregates without GROUP BY.");
+                throw Error("Cannot mix SELECT * and aggregates.");
             }
 
-            if (groupBy.Count > 0)
+            if (having is not null && !hasAggregate && groupBy.Count == 0)
             {
-                foreach (QuerySelection selection in selections)
-                {
-                    if (!ContainsAggregate(selection.Expression)
-                        && !groupBy.Any(group => SameExpression(group, selection.Expression)))
-                    {
-                        throw Error("Raw selections with GROUP BY must also appear in GROUP BY.");
-                    }
-                }
+                throw Error("HAVING requires an aggregate query or GROUP BY.");
+            }
+
+            if (hasAggregate || groupBy.Count > 0)
+            {
+                ValidateResultExpressions(selections, groupBy, having);
             }
 
             if (orderBy is not null && groupBy.Count > 0)
@@ -739,6 +738,50 @@ internal static class ExtendedQueryParser
             {
                 ValidateBooleanComparisons(where);
             }
+            IEnumerable<QueryExpression> expressions = selections.Select(s => s.Expression).Concat(groupBy);
+            if (where is not null) { expressions = expressions.Append(where); }
+            if (having is not null) { expressions = expressions.Append(having); }
+            if (orderBy is not null) { expressions = expressions.Append(orderBy); }
+            if (expressions.Any(e => ExpressionDepth(e) > MaxExpressionDepth))
+            {
+                throw Error($"Expression nesting exceeds the maximum depth of {MaxExpressionDepth}.");
+            }
+        }
+
+        private void ValidateResultExpressions(IReadOnlyList<QuerySelection> selections,
+            List<QueryExpression> groupBy, QueryExpression? having)
+        {
+            foreach (QuerySelection selection in selections)
+            {
+                if (!IsResultExpression(selection.Expression, groupBy))
+                {
+                    throw Error(groupBy.Count == 0
+                        ? "Cannot mix raw columns and aggregates without GROUP BY."
+                        : "Raw selections with GROUP BY must also appear in GROUP BY.");
+                }
+            }
+            if (having is null) { return; }
+            var aliases = selections.Where(s => s.Alias is not null)
+                .ToDictionary(s => s.Alias!, s => s.Expression, StringComparer.OrdinalIgnoreCase);
+            if (!IsResultExpression(ExpressionEvaluator.ReplaceAliases(having, aliases), groupBy))
+            {
+                throw Error("HAVING columns must be grouped or aggregated.");
+            }
+        }
+
+        private static bool IsResultExpression(QueryExpression expression, IReadOnlyList<QueryExpression> groupBy)
+        {
+            if (groupBy.Any(group => SameExpression(group, expression))) { return true; }
+            return expression switch
+            {
+                AggregateExpression or LiteralExpression => true,
+                UnaryExpression u => IsResultExpression(u.Operand, groupBy),
+                BinaryExpression b => IsResultExpression(b.Left, groupBy) && IsResultExpression(b.Right, groupBy),
+                FunctionExpression f => f.Arguments.All(a => IsResultExpression(a, groupBy)),
+                InExpression i => IsResultExpression(i.Operand, groupBy),
+                EmptyExpression e => IsResultExpression(e.Operand, groupBy),
+                _ => false,
+            };
         }
 
         private void ValidateGroupedOrderBy(
@@ -749,33 +792,25 @@ internal static class ExtendedQueryParser
             var aliases = selections
                 .Where(selection => selection.Alias is not null)
                 .ToDictionary(selection => selection.Alias!, selection => selection.Expression, StringComparer.OrdinalIgnoreCase);
-            bool IsValid(QueryExpression expression, HashSet<string> seen)
+            AggregateExpression[] aggregates = selections.SelectMany(s => ExpressionEvaluator.Aggregates(s.Expression)).ToArray();
+            bool IsValid(QueryExpression expression)
             {
-                if (expression is ColumnExpression column && aliases.TryGetValue(column.Name, out QueryExpression? replacement)
-                    && !SameExpression(expression, replacement))
-                {
-                    if (!seen.Add(column.Name)) { return false; }
-                    bool valid = IsValid(replacement, seen);
-                    seen.Remove(column.Name);
-                    return valid;
-                }
                 if (groupBy.Any(group => SameExpression(group, expression))) { return true; }
-                if (selections.Any(selection => ContainsAggregate(selection.Expression)
-                    && SameExpression(selection.Expression, expression))) { return true; }
+                if (aggregates.Any(aggregate => SameExpression(aggregate, expression))) { return true; }
 
                 return expression switch
                 {
                     LiteralExpression => true,
-                    UnaryExpression unary => IsValid(unary.Operand, seen),
-                    BinaryExpression binary => IsValid(binary.Left, seen) && IsValid(binary.Right, seen),
-                    FunctionExpression function => function.Arguments.All(argument => IsValid(argument, seen)),
-                    InExpression membership => IsValid(membership.Operand, seen) && membership.Values.All(value => IsValid(value, seen)),
-                    EmptyExpression empty => IsValid(empty.Operand, seen),
+                    UnaryExpression unary => IsValid(unary.Operand),
+                    BinaryExpression binary => IsValid(binary.Left) && IsValid(binary.Right),
+                    FunctionExpression function => function.Arguments.All(IsValid),
+                    InExpression membership => IsValid(membership.Operand) && membership.Values.All(IsValid),
+                    EmptyExpression empty => IsValid(empty.Operand),
                     _ => false,
                 };
             }
 
-            if (IsValid(orderBy, [])) { return; }
+            if (IsValid(ExpressionEvaluator.ReplaceAliases(orderBy, aliases))) { return; }
 
             var validKeys = new List<string>(groupBy.Count + selections.Count);
             foreach (QueryExpression group in groupBy)
@@ -1044,6 +1079,14 @@ internal static class ExtendedQueryParser
             while (_position < _text.Length && char.IsDigit(_text[_position]))
             {
                 _position++;
+            }
+
+            bool exponent = _position + 1 < _text.Length && _text[_position] is 'e' or 'E'
+                && (char.IsDigit(_text[_position + 1]) || _text[_position + 1] is '+' or '-');
+            if (_position < _text.Length && IsIdentifierStart(_text[_position]) && !exponent)
+            {
+                while (_position < _text.Length && IsIdentifierPart(_text[_position])) { _position++; }
+                return new Token(TokenKind.Identifier, start, _position - start, start);
             }
 
             bool isDecimal = false;

@@ -122,11 +122,28 @@ empty result value for that row. Empty aggregate inputs are skipped. Nonempty
 values rejected by an aggregate's typed-input rules are reported through
 `QueryResult.Unaggregatable`; arithmetic failures converted to empty do not
 currently have a separate diagnostic counter.
+Each rejected cell is counted once per source column or expression, even when
+several aggregates reject it. Sample row indices contain no duplicates.
 
 `COALESCE` returns the first nonempty argument. `ABS` accepts numbers. `ROUND`
 accepts an optional integer precision from 0 to 15 and rounds midpoint values
 away from zero. Arithmetic uses `double`, not exact decimal arithmetic.
 `DATE_TRUNC` accepts the literal units `'year'`, `'month'`, and `'day'`.
+
+Scalar functions can consume completed aggregates, for example
+`ROUND(AVG(NetSales), 2)` or `COALESCE(SUM(NetSales), 0)`. Aggregate functions
+cannot contain other aggregates. Constants and expressions computed from grouping
+keys can appear alongside aggregates. Numeric aggregate inputs must be finite;
+an overflowing `SUM` or `AVG` total returns empty.
+
+`SELECT`, `WHERE`, aggregate arguments, and `GROUP BY` resolve column names
+against the source header. `HAVING` and `ORDER BY` can also resolve selection
+aliases; an alias takes precedence over a source name in these two clauses.
+Columns inside an aliased selection still refer to the source. Quote or bracket
+column names such as `TRUE`, `NULL`, or `123` to distinguish them from literals.
+For compatibility, simple `FROM`-first queries still treat bare integers in
+column positions as numeric header names (for example, `SUM(2025)`). Use a
+decimal literal such as `2025.0` or an expression query for a constant number.
 
 `IN` uses typed equality. If no value matches and any comparison is unknown
 (including an empty or incompatible literal), the result is unknown; `NOT IN`

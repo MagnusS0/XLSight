@@ -42,7 +42,7 @@ internal static class QueryDslParser
             {
                 _tokens.MoveNext(); // consume GROUP
                 _tokens.MoveNext(); // consume BY
-                groupBy = ParseIdentifierLike("GROUP BY column");
+                groupBy = ParseColumnName("GROUP BY column");
             }
 
             (string? orderByColumn, AggregateKind? orderByAggregateKind, string? orderByText, bool orderDescending) = ParseOrderBy();
@@ -157,7 +157,7 @@ internal static class QueryDslParser
             }
             else
             {
-                column = ParseIdentifierLike("ORDER BY key");
+                column = ParseColumnName("ORDER BY key");
                 text = column;
             }
 
@@ -217,7 +217,7 @@ internal static class QueryDslParser
                 }
                 else
                 {
-                    columns.Add(ParseIdentifierLike("SELECT column"));
+                    columns.Add(ParseColumnName("SELECT column"));
                 }
 
                 if (!TryConsume(TokenKind.Comma))
@@ -264,7 +264,7 @@ internal static class QueryDslParser
                 throw Error($"{function.ToUpperInvariant()} requires a column.");
             }
 
-            string column = ParseIdentifierLike($"{function} column");
+            string column = ParseColumnName($"{function} column");
             Expect(TokenKind.CloseParen, $"Expected ')' after aggregate '{function}'.");
 
             return kind switch
@@ -296,7 +296,7 @@ internal static class QueryDslParser
 
         private SheetQueryPredicate ParsePredicate()
         {
-            string column = ParseIdentifierLike("predicate column");
+            string column = ParseColumnName("predicate column");
             QueryOperator op = ParseOperator();
             ExcelCellValue literal = ParseLiteral();
 
@@ -320,7 +320,8 @@ internal static class QueryDslParser
             if (token.Kind is TokenKind.Integer or TokenKind.Number)
             {
                 _tokens.MoveNext();
-                if (!double.TryParse(_tokens.GetSpan(token), NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value))
+                if (!double.TryParse(_tokens.GetSpan(token), NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out double value)
+                    || !double.IsFinite(value))
                 {
                     throw Error($"Invalid numeric literal '{_tokens.GetText(token)}'. Numbers must use invariant culture without thousands separators.");
                 }
@@ -420,6 +421,17 @@ internal static class QueryDslParser
 
             _tokens.MoveNext();
             return _tokens.GetText(token);
+        }
+
+        private string ParseColumnName(string context)
+        {
+            if (_tokens.CurrentIsKeyword("TRUE")
+                || _tokens.CurrentIsKeyword("FALSE") || _tokens.CurrentIsKeyword("NULL")
+                || _tokens.CurrentIsKeyword("EMPTY") || _tokens.CurrentIsKeyword("DATE"))
+            {
+                throw Error("Literal expressions require the expression parser. Quote a column name that matches a literal.");
+            }
+            return ParseIdentifierLike(context);
         }
 
         private string ParseBareToken(string context)

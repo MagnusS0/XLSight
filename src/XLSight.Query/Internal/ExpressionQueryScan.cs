@@ -137,6 +137,8 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
                     dirty = new DirtyExpression();
                     _dirty.Add(label, dirty);
                 }
+                if (dirty.LastRow == sourceRow) { continue; }
+                dirty.LastRow = sourceRow;
                 dirty.Count++;
                 if (dirty.Rows.Count < 5) { dirty.Rows.Add(sourceRow); }
             }
@@ -145,15 +147,27 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
 
     private void Bind(in ExcelRow row)
     {
+        BindHeaders(row);
+        BindExpressions();
+        _boundHeaderRow = row.RowIndex;
+        HeaderBound = true;
+    }
+
+    private void BindHeaders(in ExcelRow row)
+    {
         int width = plan.Range.BottomRight.Column - plan.Range.TopLeft.Column + 1;
         _headers = new string[width];
         for (int i = 0; i < width; i++)
         {
             int column = plan.Range.TopLeft.Column + i;
-            string raw = QueryScan.NormalizeHeaderName(row.GetCell(column).ToString());
+            ExcelCellValue cell = row.GetCell(column);
+            string raw = cell.IsEmpty ? string.Empty : QueryScan.NormalizeHeaderName(cell.ToString());
             _headers[i] = raw.Length == 0 ? new ExcelAddress(column, 1).ToString()[..^1] : raw;
         }
+    }
 
+    private void BindExpressions()
+    {
         var aliases = new Dictionary<string, QueryExpression>(StringComparer.OrdinalIgnoreCase);
         foreach (QuerySelection selection in plan.Selections)
         {
@@ -162,10 +176,7 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
                 throw new QueryDslException($"Duplicate alias '{alias}'.");
             }
         }
-        QueryExpression ExpandAlias(QueryExpression expression) => expression is ColumnExpression c && aliases.TryGetValue(c.Name, out QueryExpression? replacement)
-            ? replacement : expression;
-
-        QueryExpression[] grouping = plan.GroupBy.Select(ExpandAlias).ToArray();
+        QueryExpression[] grouping = plan.GroupBy.ToArray();
         QuerySelection[] selections = plan.SelectAll
             ? _headers.Select(h => new QuerySelection(new ColumnExpression(h), null)).ToArray()
             : plan.Selections.ToArray();
@@ -173,7 +184,7 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
         var aggregateIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
         IEnumerable<QueryExpression> allResults = selections.Select(s => s.Expression);
         if (plan.Having is { } having) { allResults = allResults.Append(having); }
-        if (plan.OrderBy is { } ordering) { allResults = allResults.Append(ExpandAlias(ordering)); }
+        if (plan.OrderBy is { } ordering) { allResults = allResults.Append(ReplaceAliases(ordering, aliases)); }
         foreach (QueryExpression expression in allResults)
         {
             foreach (AggregateExpression aggregate in Aggregates(expression))
@@ -197,12 +208,17 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
         _keyBuffer = new ExcelCellValue[_groupKeys.Length];
         _aggregates = aggregateExpressions.Select(a => new BoundAggregate(a,
             a.Argument is null ? null : _source.Bind(a.Argument), a.Filter is null ? null : _source.Bind(a.Filter),
-            a.Argument is null ? "Count()" : ExpressionText.Format(a.Argument))).ToArray();
+            AggregateLabel(a.Argument))).ToArray();
 
         BindResults(grouping, selections, aliases, aggregateIndexes);
-        _boundHeaderRow = row.RowIndex;
-        HeaderBound = true;
     }
+
+    private string AggregateLabel(QueryExpression? argument) => argument switch
+    {
+        null => "Count()",
+        ColumnExpression c => _headers[ResolveColumn(c.Name) - plan.Range.TopLeft.Column],
+        _ => ExpressionText.Format(argument),
+    };
 
     private void BindResults(QueryExpression[] grouping, QuerySelection[] selections,
         Dictionary<string, QueryExpression> aliases, Dictionary<string, int> aggregateIndexes)
@@ -216,7 +232,7 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
             for (int i = 0; i < grouping.Length; i++) { groupIndexes.TryAdd(BoundIdentity(grouping[i]), i); }
             int? Slot(QueryExpression expression)
             {
-                string key = BoundIdentity(expression is ColumnExpression c && aliases.TryGetValue(c.Name, out QueryExpression? alias) ? alias : expression);
+                string key = BoundIdentity(expression);
                 if (groupIndexes.TryGetValue(key, out int g)) { return g; }
                 return aggregateIndexes.TryGetValue(key, out int a) ? grouping.Length + a : null;
             }
@@ -254,19 +270,7 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
     }
 
     private static BoundValue BindWithAliases(ExpressionEvaluator evaluator, QueryExpression expression, Dictionary<string, QueryExpression> aliases)
-    {
-        QueryExpression Replace(QueryExpression e) => e switch
-        {
-            ColumnExpression c when aliases.TryGetValue(c.Name, out QueryExpression? value) => value,
-            UnaryExpression u => u with { Operand = Replace(u.Operand) },
-            BinaryExpression b => b with { Left = Replace(b.Left), Right = Replace(b.Right) },
-            FunctionExpression f => f with { Arguments = f.Arguments.Select(Replace).ToArray() },
-            InExpression i => i with { Operand = Replace(i.Operand) },
-            EmptyExpression empty => empty with { Operand = Replace(empty.Operand) },
-            _ => e,
-        };
-        return evaluator.Bind(Replace(expression));
-    }
+        => evaluator.Bind(ReplaceAliases(expression, aliases));
 
     private int ResolveColumn(string name)
     {
@@ -398,6 +402,7 @@ internal sealed class ExpressionQueryScan(ExtendedQueryPlan plan, int headerRow,
     private sealed class DirtyExpression
     {
         internal int Count;
+        internal int LastRow;
         internal List<int> Rows { get; } = [];
     }
     private readonly record struct GroupKey(ExcelCellValue[] Values);

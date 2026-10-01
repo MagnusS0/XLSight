@@ -138,7 +138,8 @@ internal sealed class ExpressionEvaluator(Func<string, int> resolveColumn, Func<
         return New(() =>
         {
             ExcelCellValue value = operand.Value;
-            if (value.IsEmpty || value.CellType == CellType.Error) { return ExcelCellValue.Empty; }
+            if (value.IsEmpty || value.CellType == CellType.Error
+                || (value.TryGetNumber(out double number) && !double.IsFinite(number))) { return ExcelCellValue.Empty; }
             bool found = set?.Contains(value) ?? Array.IndexOf(values, value) >= 0;
             bool unknown = false;
             foreach (CellType type in types) { unknown |= type != value.CellType || type == CellType.Empty; }
@@ -199,7 +200,7 @@ internal sealed class ExpressionEvaluator(Func<string, int> resolveColumn, Func<
             if (name is "ABS") { return Number(Math.Abs(n)); }
             double digits = 0;
             if (count == 2 && !args[1].Value.TryGetNumber(out digits)) { return ExcelCellValue.Empty; }
-            if (digits != Math.Truncate(digits) || digits is < 0 or > 15) { return ExcelCellValue.Empty; }
+            if (!double.IsFinite(digits) || digits != Math.Truncate(digits) || digits is < 0 or > 15) { return ExcelCellValue.Empty; }
             return Number(Math.Round(n, (int)digits, MidpointRounding.AwayFromZero));
         }, args.All(a => a.IsConstant));
     }
@@ -210,7 +211,8 @@ internal sealed class ExpressionEvaluator(Func<string, int> resolveColumn, Func<
 
     private static int? Compare(ExcelCellValue a, ExcelCellValue b)
     {
-        if (a.CellType != b.CellType || a.IsEmpty) { return null; }
+        if (a.CellType != b.CellType || a.IsEmpty
+            || (a.TryGetNumber(out double x) && (!double.IsFinite(x) || !double.IsFinite(b.AsNumber())))) { return null; }
         return a.CellType switch
         {
             CellType.Number => a.AsNumber().CompareTo(b.AsNumber()),
@@ -252,6 +254,19 @@ internal sealed class ExpressionEvaluator(Func<string, int> resolveColumn, Func<
             foreach (AggregateExpression nested in Aggregates(child)) { yield return nested; }
         }
     }
+
+    // Expand only references in the clause. Columns inside a selected expression
+    // refer to the source, even when another selection uses that name as an alias.
+    internal static QueryExpression ReplaceAliases(QueryExpression expression, IReadOnlyDictionary<string, QueryExpression> aliases) => expression switch
+    {
+        ColumnExpression c when aliases.TryGetValue(c.Name, out QueryExpression? value) => value,
+        UnaryExpression u => u with { Operand = ReplaceAliases(u.Operand, aliases) },
+        BinaryExpression b => b with { Left = ReplaceAliases(b.Left, aliases), Right = ReplaceAliases(b.Right, aliases) },
+        FunctionExpression f => f with { Arguments = f.Arguments.Select(a => ReplaceAliases(a, aliases)).ToArray() },
+        InExpression i => i with { Operand = ReplaceAliases(i.Operand, aliases) },
+        EmptyExpression e => e with { Operand = ReplaceAliases(e.Operand, aliases) },
+        _ => expression,
+    };
 
     private static IEnumerable<QueryExpression> Children(QueryExpression expression) => expression switch
     {

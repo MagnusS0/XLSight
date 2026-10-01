@@ -350,6 +350,7 @@ public sealed class SheetQuery
 
             if (!scan.HeaderBound)
             {
+                ValidateHeaderBound(scan);
                 return;
             }
         }
@@ -359,7 +360,7 @@ public sealed class SheetQuery
             while (fullReader.Read() && scan.ProcessRow(fullReader.Current))
             {
             }
-
+            ValidateHeaderBound(scan);
             return;
         }
 
@@ -424,6 +425,7 @@ public sealed class SheetQuery
 
             if (!scan.HeaderBound)
             {
+                ValidateHeaderBound(scan);
                 return;
             }
         }
@@ -436,7 +438,7 @@ public sealed class SheetQuery
                 {
                 }
             }
-
+            ValidateHeaderBound(scan);
             return;
         }
 
@@ -488,6 +490,14 @@ public sealed class SheetQuery
                 {
                 }
             }
+        }
+    }
+
+    private void ValidateHeaderBound<TScan>(TScan scan) where TScan : IQueryScan
+    {
+        if (!scan.HeaderBound && _headerRow > 0)
+        {
+            throw new InvalidOperationException($"Header row {_headerRow} contains no cells.");
         }
     }
 

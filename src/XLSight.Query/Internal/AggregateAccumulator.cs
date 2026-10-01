@@ -22,7 +22,7 @@ internal struct AggregateAccumulator
     {
         if (kind is AggregateKind.Sum or AggregateKind.Average)
         {
-            if (!cell.TryGetNumber(out double number))
+            if (!cell.TryGetNumber(out double number) || !double.IsFinite(number))
             {
                 return false;
             }
@@ -38,6 +38,7 @@ internal struct AggregateAccumulator
         CellType valueKind;
         if (cell.TryGetNumber(out double n))
         {
+            if (!double.IsFinite(n)) { return false; }
             value = n;
             valueKind = CellType.Number;
         }
@@ -75,8 +76,8 @@ internal struct AggregateAccumulator
     {
         AggregateKind.Count => ExcelCellValue.FromNumber(Count),
         _ when !HasValue => ExcelCellValue.Empty,
-        AggregateKind.Sum => ExcelCellValue.FromNumber(Sum),
-        AggregateKind.Average => ExcelCellValue.FromNumber(Sum / Count),
+        AggregateKind.Sum => double.IsFinite(Sum) ? ExcelCellValue.FromNumber(Sum) : ExcelCellValue.Empty,
+        AggregateKind.Average => double.IsFinite(Sum) ? ExcelCellValue.FromNumber(Sum / Count) : ExcelCellValue.Empty,
         AggregateKind.Min => ToCell(Min),
         AggregateKind.Max => ToCell(Max),
         _ => ExcelCellValue.Empty,

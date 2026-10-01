@@ -13,6 +13,7 @@ internal static class FilterEvaluator
         {
             case CellType.Number:
                 return cell.TryGetNumber(out double number)
+                    && double.IsFinite(number) && double.IsFinite(literal.AsNumber())
                     && Satisfies(number.CompareTo(literal.AsNumber()), op);
             case CellType.Date:
                 return cell.TryGetDate(out DateTime date)
