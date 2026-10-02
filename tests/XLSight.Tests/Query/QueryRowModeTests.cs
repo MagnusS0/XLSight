@@ -50,15 +50,15 @@ public sealed class QueryRowModeTests
 
         QueryResult result = workbook
             .QueryRange(SalesWorkbook.SheetName, Range)
-            .Where("Region", QueryOperator.Equals, "EMEA")
+            .Where("Region", QueryOperator.Equals, "APAC")
             .Take(2)
             .Execute();
 
-        // The first two EMEA records are the first two data rows, so the scan
-        // stops without reading the rest of the range.
+        // Two EMEA rows precede the first two APAC matches. Stop at the second
+        // match rather than the second scanned row or the later APAC match.
         Assert.Equal(2, result.Rows.Count);
-        Assert.Equal(2, result.RowsScanned);
-        Assert.Equal([SalesWorkbook.SheetRowOf(0), SalesWorkbook.SheetRowOf(1)], result.Rows.Select(r => r.SourceRowIndex!.Value));
+        Assert.Equal(4, result.RowsScanned);
+        Assert.Equal([4, 5], result.Rows.Select(r => r.SourceRowIndex!.Value));
     }
 
     [Fact]
@@ -114,9 +114,8 @@ public sealed class QueryRowModeTests
     [Fact]
     public void HeaderRow_AboveRange_BindsExternalHeaderInsteadOfThrowing()
     {
-        // A header row above the queried range is a valid "external header" (see
-        // QueryExternalHeaderTests) — it no longer throws. Only a header below the range's
-        // bottom is rejected; that case is covered by HeaderRow_BelowRangeBottom_Throws below.
+        // An external header can sit immediately above the first data row.
+        // Rejection below the range bottom is covered by QueryExternalHeaderTests.
         using var ms = SalesWorkbook.Build();
         using var workbook = ExcelWorkbook.Open(ms);
 
@@ -126,15 +125,5 @@ public sealed class QueryRowModeTests
 
         Assert.Equal(SalesWorkbook.Headers, result.Columns);
         Assert.Equal(SalesWorkbook.Data.Length, result.RowsScanned);
-    }
-
-    [Fact]
-    public void HeaderRow_BelowRangeBottom_Throws()
-    {
-        using var ms = SalesWorkbook.Build();
-        using var workbook = ExcelWorkbook.Open(ms);
-
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => workbook.QueryRange(SalesWorkbook.SheetName, "A2:F11", headerRow: 12));
     }
 }
