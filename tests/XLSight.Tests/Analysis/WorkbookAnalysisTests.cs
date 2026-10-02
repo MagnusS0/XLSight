@@ -1,7 +1,5 @@
 using System.IO.Compression;
-using System.Reflection;
 using System.Text;
-using XLSight.Internal.Sinks;
 using XLSight.Analysis;
 using Xunit;
 
@@ -185,13 +183,6 @@ public sealed class WorkbookAnalysisTests
         return ms;
     }
 
-    private sealed class EmptySharedStringSource : ISharedStringSource
-    {
-        public string GetString(int index) => string.Empty;
-
-        public int GetCharCount(int index) => 0;
-    }
-
     // --- Tests ---
 
     [Fact]
@@ -250,6 +241,7 @@ public sealed class WorkbookAnalysisTests
         Assert.Equal(0, info.CellCount);
         Assert.Null(info.UsedRange);
         Assert.NotNull(info.Observed);
+        Assert.Empty(info.Columns!);
     }
 
     [Fact]
@@ -367,18 +359,28 @@ public sealed class WorkbookAnalysisTests
     }
 
     [Fact]
-    public void AnalysisSink_ValueLessFormula_ClearsPendingFormulaState()
+    public void AnalyzeSheet_ValueLessFormula_DoesNotCountNextValueAsRegionFormula()
     {
-        var sink = new AnalysisSink(new EmptySharedStringSource(), "Data", AnalysisLevel.Observed);
-        sink.OnRowStart(1);
-        sink.OnFormula(1, isArray: false);
+        const string sheetXml = """
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+              <row r="1">
+                <c r="A1"><f>SUM(B1:C1)</f></c>
+                <c r="B1"><v>7</v></c>
+                <c r="C1"><f>B1*2</f><v>14</v></c>
+              </row>
+            </sheetData></worksheet>
+            """;
+        using var ms = BuildWorkbook(WorkbookXmlOneSheet, RelsXmlOneSheet, sheetXml);
+        using var workbook = ExcelWorkbook.Open(ms);
 
-        sink.OnCell(1, CellDataKind.Number, styleIdx: 0, ExcelCellValue.Empty, rawIndex: -1);
+        SheetInfo info = workbook.AnalyzeSheet("Data");
+        var inferred = Assert.IsType<SheetAnalysisInferred>(info.Inferred);
+        var observed = Assert.IsType<SheetAnalysisObserved>(info.Observed);
+        RegionInfo region = Assert.Single(inferred.Regions);
 
-        FieldInfo pendingFormula = typeof(AnalysisSink).GetField(
-            "_nextCellIsFormula",
-            BindingFlags.Instance | BindingFlags.NonPublic)!;
-        Assert.False(Assert.IsType<bool>(pendingFormula.GetValue(sink)));
+        Assert.Equal(ExcelRange.Parse("B1:C1"), region.Range);
+        Assert.Equal(2, observed.FormulaCount);
+        Assert.Equal(1, region.FormulaCount);
     }
 
     [Fact]

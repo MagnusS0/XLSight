@@ -211,20 +211,6 @@ public sealed class OwnedEntryStreamTests : IDisposable
     // ── ReadAsync ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task TryOpenFreshEntry_ReadAsync_ReturnsBytesFromEntry()
-    {
-        using var package = OpenFileBacked();
-        Stream? stream = package.TryOpenFreshEntry("xl/workbook.xml");
-        Assert.NotNull(stream);
-        await using (stream)
-        {
-            var buf = new byte[64];
-            int read = await stream!.ReadAsync(buf.AsMemory(), TestContext.Current.CancellationToken);
-            Assert.True(read > 0);
-        }
-    }
-
-    [Fact]
     public async Task TryOpenFreshEntry_ReadAsyncMemory_ReturnsBytesFromEntry()
     {
         using var package = OpenFileBacked();
