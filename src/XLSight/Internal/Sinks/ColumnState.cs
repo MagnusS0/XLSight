@@ -15,20 +15,19 @@ internal sealed class ColumnState
     internal double MaxNumeric = double.MinValue;
     internal bool HasNumeric;
     internal int MaxTextLength;
-    internal bool HasFormulas;
 
     // Distinct tracking — typed per-kind to avoid string allocations.
     // SST: integer index (zero-alloc read); Numbers: double bits; Dates: double bits;
     // Booleans: two-bit flags; Errors: int code; Inline strings: string (unavoidable).
     // Each set is allocated on first use, and all sets are nulled out once the combined
-    // count hits DistinctCap and DistinctEstimate is latched (_capped distinguishes
+    // count hits DistinctCap and _distinctEstimate is latched (_capped distinguishes
     // "never used" from "capped" so tracking stops permanently after the cap).
-    internal HashSet<int>? DistinctSstIds;
-    internal HashSet<long>? DistinctNumbers;  // BitConverter.DoubleToInt64Bits
-    internal HashSet<long>? DistinctDates;    // BitConverter.DoubleToInt64Bits
-    internal HashSet<string>? DistinctInlineStrings;
-    internal byte BooleanSeen;   // bit 0 = false seen, bit 1 = true seen
-    internal int DistinctEstimate;
+    private HashSet<int>? _distinctSstIds;
+    private HashSet<long>? _distinctNumbers;  // BitConverter.DoubleToInt64Bits
+    private HashSet<long>? _distinctDates;    // BitConverter.DoubleToInt64Bits
+    private HashSet<string>? _distinctInlineStrings;
+    private byte _booleanSeen;   // bit 0 = false seen, bit 1 = true seen
+    private int _distinctEstimate;
     private bool _capped;
 
     private const int DistinctCap = 1000;
@@ -38,17 +37,17 @@ internal sealed class ColumnState
     {
         get
         {
-            if (DistinctEstimate > 0)
+            if (_distinctEstimate > 0)
             {
-                return DistinctEstimate;
+                return _distinctEstimate;
             }
 
             int count = 0;
-            if (DistinctSstIds is not null) { count += DistinctSstIds.Count; }
-            if (DistinctNumbers is not null) { count += DistinctNumbers.Count; }
-            if (DistinctDates is not null) { count += DistinctDates.Count; }
-            if (DistinctInlineStrings is not null) { count += DistinctInlineStrings.Count; }
-            count += BooleanCount > 0 ? System.Numerics.BitOperations.PopCount(BooleanSeen) : 0;
+            if (_distinctSstIds is not null) { count += _distinctSstIds.Count; }
+            if (_distinctNumbers is not null) { count += _distinctNumbers.Count; }
+            if (_distinctDates is not null) { count += _distinctDates.Count; }
+            if (_distinctInlineStrings is not null) { count += _distinctInlineStrings.Count; }
+            count += BooleanCount > 0 ? System.Numerics.BitOperations.PopCount(_booleanSeen) : 0;
             return count;
         }
     }
@@ -71,8 +70,8 @@ internal sealed class ColumnState
 
         if (!_capped)
         {
-            (DistinctSstIds ??= []).Add(sstIndex);
-            if (DistinctSstIds.Count >= DistinctCap)
+            (_distinctSstIds ??= []).Add(sstIndex);
+            if (_distinctSstIds.Count >= DistinctCap)
             {
                 LatchEstimateAndStopTracking();
             }
@@ -84,11 +83,6 @@ internal sealed class ColumnState
     /// </summary>
     internal void RecordValue(ExcelCellValue value)
     {
-        if (value.IsEmpty)
-        {
-            return;
-        }
-
         NonEmptyCount++;
 
         switch (value.CellType)
@@ -108,12 +102,12 @@ internal sealed class ColumnState
                     if (num > MaxNumeric) { MaxNumeric = num; }
                 }
 
-                TrackDistinctLong(ref DistinctNumbers, System.Runtime.CompilerServices.Unsafe.BitCast<double, long>(num));
+                TrackDistinctLong(ref _distinctNumbers, System.Runtime.CompilerServices.Unsafe.BitCast<double, long>(num));
                 break;
 
             case CellType.Date:
                 DateCount++;
-                TrackDistinctLong(ref DistinctDates, value.AsDate().Ticks);
+                TrackDistinctLong(ref _distinctDates, value.AsDate().Ticks);
                 break;
 
             case CellType.Text:
@@ -126,7 +120,7 @@ internal sealed class ColumnState
 
             case CellType.Boolean:
                 BooleanCount++;
-                BooleanSeen |= value.AsBoolean() ? (byte)2 : (byte)1;
+                _booleanSeen |= value.AsBoolean() ? (byte)2 : (byte)1;
                 break;
 
             case CellType.Error:
@@ -148,8 +142,8 @@ internal sealed class ColumnState
     private void TrackDistinctString(string value)
     {
         if (_capped) { return; }
-        (DistinctInlineStrings ??= new(StringComparer.Ordinal)).Add(value);
-        if (DistinctInlineStrings.Count >= DistinctCap)
+        (_distinctInlineStrings ??= new(StringComparer.Ordinal)).Add(value);
+        if (_distinctInlineStrings.Count >= DistinctCap)
         {
             LatchEstimateAndStopTracking();
         }
@@ -181,8 +175,8 @@ internal sealed class ColumnState
 
         if (BooleanCount > 0)
         {
-            if ((BooleanSeen & 1) != 0) { values.Add("FALSE"); }
-            if ((BooleanSeen & 2) != 0) { values.Add("TRUE"); }
+            if ((_booleanSeen & 1) != 0) { values.Add("FALSE"); }
+            if ((_booleanSeen & 2) != 0) { values.Add("TRUE"); }
         }
 
         return [.. values];
@@ -190,21 +184,21 @@ internal sealed class ColumnState
 
     private void AddDistinctTexts(List<string> values, ISharedStringSource sst)
     {
-        if (DistinctSstIds is null && DistinctInlineStrings is null)
+        if (_distinctSstIds is null && _distinctInlineStrings is null)
         {
             return;
         }
 
         // SST-resolved and inline copies of the same text must not appear twice.
         var texts = new SortedSet<string>(StringComparer.Ordinal);
-        if (DistinctSstIds is not null)
+        if (_distinctSstIds is not null)
         {
-            foreach (int id in DistinctSstIds) { texts.Add(sst.GetString(id)); }
+            foreach (int id in _distinctSstIds) { texts.Add(sst.GetString(id)); }
         }
 
-        if (DistinctInlineStrings is not null)
+        if (_distinctInlineStrings is not null)
         {
-            foreach (string text in DistinctInlineStrings) { texts.Add(text); }
+            foreach (string text in _distinctInlineStrings) { texts.Add(text); }
         }
 
         values.AddRange(texts);
@@ -212,14 +206,14 @@ internal sealed class ColumnState
 
     private void AddDistinctNumbers(List<string> values)
     {
-        if (DistinctNumbers is null)
+        if (_distinctNumbers is null)
         {
             return;
         }
 
-        var numbers = new double[DistinctNumbers.Count];
+        var numbers = new double[_distinctNumbers.Count];
         int i = 0;
-        foreach (long bits in DistinctNumbers) { numbers[i++] = BitConverter.Int64BitsToDouble(bits); }
+        foreach (long bits in _distinctNumbers) { numbers[i++] = BitConverter.Int64BitsToDouble(bits); }
         Array.Sort(numbers);
         foreach (double number in numbers)
         {
@@ -229,12 +223,12 @@ internal sealed class ColumnState
 
     private void AddDistinctDates(List<string> values)
     {
-        if (DistinctDates is null)
+        if (_distinctDates is null)
         {
             return;
         }
 
-        long[] ticks = [.. DistinctDates];
+        long[] ticks = [.. _distinctDates];
         Array.Sort(ticks);
         foreach (long t in ticks)
         {
@@ -247,11 +241,11 @@ internal sealed class ColumnState
 
     private void LatchEstimateAndStopTracking()
     {
-        DistinctEstimate = DistinctCount;
+        _distinctEstimate = DistinctCount;
         _capped = true;
-        DistinctSstIds = null;
-        DistinctNumbers = null;
-        DistinctDates = null;
-        DistinctInlineStrings = null;
+        _distinctSstIds = null;
+        _distinctNumbers = null;
+        _distinctDates = null;
+        _distinctInlineStrings = null;
     }
 }
