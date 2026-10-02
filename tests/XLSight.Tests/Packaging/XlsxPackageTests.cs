@@ -54,13 +54,6 @@ public sealed class XlsxPackageTests
     }
 
     [Fact]
-    public void PathNormalizer_ReplacesBackslashes()
-    {
-        Assert.Equal("xl/workbook.xml", "xl\\workbook.xml".Replace('\\', '/'));
-    }
-
-
-    [Fact]
     public async Task OpenAsync_WithInvalidZip_ThrowsAndDisposesOwnedStream()
     {
         var stream = new ThrowOnDisposeMemoryStream(Encoding.UTF8.GetBytes("not-a-zip"));
