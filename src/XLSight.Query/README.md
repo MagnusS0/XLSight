@@ -1,5 +1,7 @@
 # XLSight.Query
 
+[![NuGet](https://img.shields.io/badge/nuget-v0.4.0-blue)](https://www.nuget.org/packages/XLSight.Query/)
+
 XLSight.Query adds single-pass queries to
 [XLSight](https://github.com/MagnusS0/XLSight). It can filter, group, aggregate,
 project, and order worksheet data without a database.
