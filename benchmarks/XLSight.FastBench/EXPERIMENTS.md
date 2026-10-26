@@ -149,3 +149,17 @@ Raw files: `results/*-baseline-[1-6].json`.
   −10 %. Time: inconclusive on the touched cases. `layout.sparse_fragmented_2k` "faster" −18 %
   is not targeted and not claimed. `scan.numeric_xlsb` +34 % is inconclusive (±22 %), and XLSB
   does not use this decoder.
+
+## E6 — Vectorized end-tag search for skipped rows and cells — **KEEP (time)**
+
+- **Hypothesis (Readers worker):** rows before a bounded range, and cells outside its columns, were
+  discarded with `SkipToEndTag`, which visits every tag (~8 `IndexOf` calls per cell). Searching
+  for the end tag's local name with one vectorized `IndexOf`, and accepting a hit only for
+  `</[prefix:]name ws* >`, skips whole rows in one pass. A cell body cannot contain `</row>`
+  (`<` must be escaped), so cells right of the range jump straight to the row end.
+- **Tests:** new `BoundedRange_SkippedRowsAndCells_EveryChunkBoundary_MatchesFilteredFullScan`
+  (prefixed tags, `</x:row >`, `row>` and escaped `</row>` in text, `</x:rowx>`; chunk sizes 1–64).
+  958/958.
+- **Measurement:** `ab HEAD 3` (`results/E6-compare.md`): `range.large_middle_rows` 53.2 → 34.5 ms
+  (**−35.7 %**, noise ±3.1 %); `range.async_large_middle_rows` 58.9 → 41.6 ms (**−29.3 %**).
+  `query.rows_orderby_limit` "faster" −5.1 % is at the edge of noise and not claimed. No regressions.

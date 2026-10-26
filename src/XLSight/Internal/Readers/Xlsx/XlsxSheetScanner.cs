@@ -85,7 +85,7 @@ internal static partial class XlsxSheetScanner
 
             if (!range.IsUnbounded && rowIndex < range.TopLeft.Row)
             {
-                SkipToEndTag(buf, TagRow);
+                SkipPastEndTag(buf, TagRow);
                 continue;
             }
 
@@ -252,7 +252,7 @@ internal static partial class XlsxSheetScanner
                 if (hasR && parsedRow > ExcelLimits.MaxRows)
                 {
                     buf.Advance(endExcl);
-                    if (!selfClose) { SkipToEndTag(buf, TagRow); }
+                    if (!selfClose) { SkipPastEndTag(buf, TagRow); }
                     continue;
                 }
 
@@ -286,24 +286,24 @@ internal static partial class XlsxSheetScanner
 
         while (TryReadNextCell(buf, ref currentCol, out var kind, out int styleIdx, out bool isEmpty))
         {
-            if (currentCol > ExcelLimits.MaxColumns) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
+            if (currentCol > ExcelLimits.MaxColumns) { if (!isEmpty) { SkipPastEndTag(buf, TagCell); } continue; }
 
             if (!range.IsUnbounded)
             {
                 if (currentCol > range.BottomRight.Column)
                 {
                     // Columns are ascending — nothing further in this row can be in range.
-                    if (!isEmpty) { SkipToEndTag(buf, TagCell); }
-                    SkipToEndTag(buf, TagRow);
+                    // A cell body cannot contain </row>, so skip straight to the row's end.
+                    SkipPastEndTag(buf, TagRow);
                     break;
                 }
-                if (currentCol < range.TopLeft.Column) { if (!isEmpty) { SkipToEndTag(buf, TagCell); } continue; }
+                if (currentCol < range.TopLeft.Column) { if (!isEmpty) { SkipPastEndTag(buf, TagCell); } continue; }
             }
 
             // Projected-out cells keep their position (window and row presence are
             // unchanged) but the value is never materialized.
             bool skipValue = projection is not null && !projection.IncludesColumn(currentCol);
-            if (skipValue && !isEmpty) { SkipToEndTag(buf, TagCell); }
+            if (skipValue && !isEmpty) { SkipPastEndTag(buf, TagCell); }
 
             if (firstCol == 0) { firstCol = currentCol; }
 
@@ -428,19 +428,21 @@ internal static partial class XlsxSheetScanner
         {
             if (currentCol > ExcelLimits.MaxColumns)
             {
-                if (!isEmpty) { SkipToEndTag(buf, TagCell); }
+                if (!isEmpty) { SkipPastEndTag(buf, TagCell); }
                 continue;
             }
 
             bool inRange = range.IsUnbounded || (currentCol >= range.TopLeft.Column && currentCol <= range.BottomRight.Column);
             if (!inRange)
             {
-                if (!isEmpty) { SkipToEndTag(buf, TagCell); }
-                if (!range.IsUnbounded && currentCol > range.BottomRight.Column)
+                if (currentCol > range.BottomRight.Column)
                 {
-                    SkipToEndTag(buf, TagRow);
+                    // A cell body cannot contain </row>, so skip straight to the row's end.
+                    SkipPastEndTag(buf, TagRow);
                     break;
                 }
+
+                if (!isEmpty) { SkipPastEndTag(buf, TagCell); }
                 continue;
             }
 
