@@ -73,3 +73,17 @@ Raw files: `results/*-baseline-[1-6].json`.
 - **Measurement:** `fastbench.sh ab HEAD 3` (`results/E1-compare.md`):
   `range.async_large_middle_rows` 134.7 → 58.8 ms (−57 %), 13.9 MiB → 392 KiB/op (−97 %).
   All other 28 cases inconclusive (no regression).
+
+## E2 — Size package-part read buffers to the entry — **KEEP (allocation)**
+
+- **Hypothesis (Readers worker):** every buffered open of a package part allocated a fixed 64 KiB
+  `BufferedStream` buffer, even for ~550-byte workbook.xml and rels parts and 2.6 KB styles
+  (`ZipEntryExtensions.cs`, `XlsxPackage.cs:158`). Clamping to the declared uncompressed length
+  (512 B – 64 KiB) removes ~190 KiB of dead heap per open without changing read behaviour; the
+  declared length is only a sizing hint.
+- **Tests:** 923/923.
+- **Measurement:** `ab HEAD 3` (`results/E2-compare.md`). Allocation/op: open.small −70 %,
+  readcell −69 %, scan.numeric_xlsx −69 %, range.large_middle_rows −69 %, query cases −20 to −67 %,
+  analyze.full_banking_real −19 % (4.6 → 3.7 MiB), cold Banking analyze −17 %, peak RSS −1.4 %.
+  Time: all inconclusive except `layout.mcdonalds_all` "faster" −13 %. That case was not
+  targeted and there is no clear mechanism, so it is not claimed as an effect.

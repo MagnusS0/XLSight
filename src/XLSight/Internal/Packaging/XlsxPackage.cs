@@ -155,7 +155,7 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
             raw = entry.Open();
             // addBuffer=false when the caller supplies its own pool buffer (e.g. XlsbRecordIterator),
             // avoiding a redundant 65 KB heap allocation that would otherwise pressure the GC.
-            Stream inner = addBuffer ? new BufferedStream(raw, 65536) : raw;
+            Stream inner = addBuffer ? new BufferedStream(raw, ZipEntryExtensions.ReadBufferSize(entry)) : raw;
             var owned = new OwnedEntryStream(inner, new PooledArchiveHandle(this, zip));
             raw = null;
             return owned;
