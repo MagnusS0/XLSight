@@ -296,6 +296,7 @@ internal static class SheetLayoutInference
         var claimed = new List<ExcelRange>();
         foreach (int headerRow in sheet.Rows)
         {
+            PruneExpiredClaims(claimed, headerRow);
             foreach ((int startCol, int endCol) in sheet.GetHeaderRuns(headerRow))
             {
                 int width = endCol - startCol + 1;
@@ -372,6 +373,24 @@ internal static class SheetLayoutInference
             headerRow,
             trimmedStartCol,
             trimmedEndCol);
+    }
+
+    // Header rows ascend, and a claim only suppresses rows strictly above its bottom row, so a
+    // claim whose bottom row is at or above the current header row can never match again.
+    // Dropping it keeps the claim check proportional to the open fields rather than to every
+    // field found so far, which made stacked-table sheets quadratic in table count.
+    private static void PruneExpiredClaims(List<ExcelRange> claimed, int headerRow)
+    {
+        int write = 0;
+        for (int read = 0; read < claimed.Count; read++)
+        {
+            if (claimed[read].BottomRight.Row > headerRow)
+            {
+                claimed[write++] = claimed[read];
+            }
+        }
+
+        claimed.RemoveRange(write, claimed.Count - write);
     }
 
     private static bool IsInsideClaimedField(int headerRow, int startCol, int endCol, List<ExcelRange> claimed)
@@ -642,6 +661,12 @@ internal static class SheetLayoutInference
             for (int j = i + 1; j < ordered.Count;)
             {
                 FieldCandidate other = ordered[j];
+                // Ordered by top row, and merging never moves a top row: no later field can match.
+                if (other.Range.TopLeft.Row > current.Range.TopLeft.Row)
+                {
+                    break;
+                }
+
                 if (current.Range.TopLeft.Row == other.Range.TopLeft.Row &&
                     current.Range.BottomRight.Row == other.Range.BottomRight.Row &&
                     GapIsBridgeable(sheet, current.Range, other.Range) &&
@@ -828,6 +853,7 @@ internal static class SheetLayoutInference
         int[] startRows = new int[width];
         int[] lastRows = new int[width];
         var rowIntervals = new List<(int Start, int End)>();
+        var sweep = new OccupiedRowSweep(occupied);
         int currentRow = int.MinValue;
         int intervalCursor = 0;
 
@@ -837,7 +863,7 @@ internal static class SheetLayoutInference
             if (cell.Row != currentRow)
             {
                 currentRow = cell.Row;
-                BuildRowIntervals(occupied, currentRow, rowIntervals);
+                BuildRowIntervals(sweep.Advance(currentRow), currentRow, rowIntervals);
                 intervalCursor = 0;
             }
 
@@ -872,6 +898,44 @@ internal static class SheetLayoutInference
         return candidates
             .OrderBy(static candidate => candidate.Range.TopLeft.Row)
             .ThenBy(static candidate => candidate.Range.TopLeft.Column);
+    }
+
+    // Rows are visited in ascending order, so a range enters the active set once its top row is
+    // reached and leaves it for good once the sweep passes its bottom row. Each row then filters
+    // only the ranges that can still cover it instead of every occupied range, which made the
+    // vector pass O(rows x occupied ranges) on sheets with many stacked tables.
+    private sealed class OccupiedRowSweep
+    {
+        private readonly ExcelRange[] _byTopRow;
+        private readonly List<ExcelRange> _active = [];
+        private int _next;
+
+        public OccupiedRowSweep(List<ExcelRange> occupied)
+        {
+            _byTopRow = [.. occupied];
+            // Stable order is irrelevant: the caller sorts and merges the covering intervals.
+            Array.Sort(_byTopRow, static (left, right) => left.TopLeft.Row.CompareTo(right.TopLeft.Row));
+        }
+
+        public List<ExcelRange> Advance(int row)
+        {
+            while (_next < _byTopRow.Length && _byTopRow[_next].TopLeft.Row <= row)
+            {
+                _active.Add(_byTopRow[_next++]);
+            }
+
+            int write = 0;
+            for (int read = 0; read < _active.Count; read++)
+            {
+                if (_active[read].BottomRight.Row >= row)
+                {
+                    _active[write++] = _active[read];
+                }
+            }
+
+            _active.RemoveRange(write, _active.Count - write);
+            return _active;
+        }
     }
 
     // Column intervals from ranges in `occupied` that cover `row`, merged and sorted ascending

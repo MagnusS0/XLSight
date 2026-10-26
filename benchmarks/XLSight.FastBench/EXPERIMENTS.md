@@ -194,3 +194,21 @@ Raw files: `results/*-baseline-[1-6].json`.
   inference 127 → 39 ms) has no fast-suite case and is reported as the worker's measurement only.
   `analyze.full_merged_regions` "faster" (−14.5 %) and `scan.mixed_sparse_values` (−3.8 %) are
   outside this change's code path and not claimed.
+
+## E9 — Layout: prune expired claims, sweep occupied ranges by row, early break in column merge — **KEEP**
+
+- **Hypothesis (Query worker, `query-candidate-3.patch`):** three loops scanned every field or
+  occupied range found so far: the header-claim check, `BuildRowIntervals` in the vector pass,
+  and the column-adjacent merge. That makes stacked-table sheets quadratic in table count.
+  - Header rows ascend and a claim suppresses only rows strictly above its bottom
+    (`IsInsideClaimedField`: `headerRow < BottomRight.Row`), so expired claims can be dropped.
+  - Cells come from the row-major CSR store, so occupied ranges can enter and leave an active set.
+  - Merge candidates are ordered by top row, and a merge needs equal top rows and never changes
+    them, so the inner loop can stop at the first larger top row.
+- **Correctness:** `eqcheck.sh` full JSON dumps over 19 workbooks: **identical**. Tests 958/958.
+- **Measurement:** the fast-suite layout fixtures are too small for this effect. A focused `ab
+  HEAD 5` on layout cases was inconclusive under heavy external host noise (±13–63 %,
+  `results/E9-compare-focused.md`). A direct probe on the worker's larger fixtures, run in
+  alternating base/candidate processes (`results/E9-layout-probe.md`): stack3200 463–498 →
+  222–231 ms (**−55 %**, both rounds). Sparse sheets were unchanged, as expected: their
+  superlinear terms are in E10's routines.
