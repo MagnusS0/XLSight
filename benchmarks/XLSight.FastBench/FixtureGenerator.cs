@@ -30,6 +30,9 @@ internal static class FixtureGenerator
             case "mixed_sparse":
                 WriteMixedSparse(outputPath, 25_000);
                 break;
+            case "mixed_sparse_3k":
+                WriteMixedSparse(outputPath, 3_000);
+                break;
             case "mixed_sparse_x8":
                 WriteMixedSparse(outputPath, 200_000);
                 break;

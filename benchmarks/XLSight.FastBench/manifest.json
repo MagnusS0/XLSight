@@ -82,6 +82,13 @@
       "tier": "fast"
     },
     {
+      "name": "mixed_sparse_3k",
+      "path": "artifacts/fastbench/fixtures/mixed_sparse_3k.xlsx",
+      "sha256": "985412fca3c6ab10cb8df21ceec67dec265b4bb024eaae01a546cf7f6fcaa01b",
+      "generator": "mixed_sparse_3k",
+      "tier": "fast"
+    },
+    {
       "name": "strings_repeated_x10",
       "path": "artifacts/fastbench/fixtures/strings_repeated_x10.xlsx",
       "sha256": "d4404d429ef917f926613494103f2126b168c7f01d28a69e8b3278e2fecd9f3f",
@@ -706,6 +713,33 @@
       }
     },
     {
+      "id": "layout.sparse_fragmented_3k",
+      "op": "layout",
+      "fixture": "mixed_sparse_3k",
+      "sheet": "Mixed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 900,
+      "minSamples": 4,
+      "maxSamples": 25,
+      "unit": "sheets",
+      "tags": [
+        "layout",
+        "sparse"
+      ],
+      "expected": {
+        "digest": "654fbf3eb671222e",
+        "deepDigest": "654fbf3eb671222e",
+        "units": 1
+      }
+    },
+    {
       "id": "query.builder_filter_sum_large",
       "op": "queryBuilderFilterSum",
       "fixture": "large_xlsx",
@@ -765,7 +799,7 @@
       "id": "query.expr_groupby_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -794,7 +828,7 @@
       "id": "query.rows_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = 'EMEA' AND Value > 500 ORDER BY Value DESC LIMIT 20",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = \u0027EMEA\u0027 AND Value \u003E 500 ORDER BY Value DESC LIMIT 20",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -821,7 +855,7 @@
       "id": "query.rows_limit_early_exit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = 'N' LIMIT 100",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = \u0027N\u0027 LIMIT 100",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -993,7 +1027,7 @@
       "id": "confirm.cold_query_groupby_x10",
       "op": "query",
       "fixture": "strings_repeated_x10",
-      "query": "FROM Data!A1:H600001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "query": "FROM Data!A1:H600001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
