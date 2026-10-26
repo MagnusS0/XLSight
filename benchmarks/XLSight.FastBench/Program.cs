@@ -7,7 +7,7 @@ using XLSight.FastBench;
 // Commands:
 //   run      [--filter REGEX] [--label NAME] [--out DIR] [--budget-ms N] [--no-internal-watchdog]
 //   compare  --base A.json [A2.json ...] --cand B.json [B2.json ...] [--min-effect PCT]
-//   fixtures [--force]          generate deterministic synthetic fixtures (preparation, not timed)
+//   fixtures [--force] [--confirm]  generate deterministic synthetic fixtures (--confirm adds the large tier)
 //   record-expected             calibration: pin fixture hashes and expected digests into the manifest
 //   child    --case ID          internal: one isolated case in a fresh process
 try
@@ -38,7 +38,7 @@ try
             options.GetValueOrDefault("base") ?? throw new ArgumentException("--base is required"),
             options.GetValueOrDefault("cand") ?? throw new ArgumentException("--cand is required"),
             Single(options, "min-effect") is { } e ? double.Parse(e, CultureInfo.InvariantCulture) : 3.0),
-        "fixtures" => GenerateFixtures(root, manifestPath, options.ContainsKey("force")),
+        "fixtures" => GenerateFixtures(root, manifestPath, options.ContainsKey("force"), options.ContainsKey("confirm")),
         "record-expected" => RecordExpected(root, manifestPath),
         _ => throw new ArgumentException($"Unknown command '{command}'."),
     };
@@ -89,11 +89,11 @@ static string FindRoot()
     throw new ArgumentException("Could not locate the repository root (XLSight.slnx); pass --root.");
 }
 
-static int GenerateFixtures(string root, string manifestPath, bool force)
+static int GenerateFixtures(string root, string manifestPath, bool force, bool confirmTier)
 {
     (Manifest manifest, _) = Manifest.Load(manifestPath);
     int mismatches = 0;
-    foreach (FixtureDef fixture in manifest.Fixtures.Where(f => f.Generator is not null))
+    foreach (FixtureDef fixture in manifest.Fixtures.Where(f => f.Generator is not null && (confirmTier || f.Tier != "confirm")))
     {
         string path = Path.Combine(root, fixture.Path);
         var sw = Stopwatch.StartNew();
@@ -118,12 +118,21 @@ static int GenerateFixtures(string root, string manifestPath, bool force)
 static int RecordExpected(string root, string manifestPath)
 {
     (Manifest manifest, _) = Manifest.Load(manifestPath);
+    HashSet<string> present = new(StringComparer.Ordinal);
     foreach (FixtureDef fixture in manifest.Fixtures)
     {
-        fixture.Sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(root, fixture.Path))));
+        string fixturePath = Path.Combine(root, fixture.Path);
+        if (!File.Exists(fixturePath))
+        {
+            Console.WriteLine($"{fixture.Name}: absent, expectations for its cases left unchanged");
+            continue;
+        }
+
+        present.Add(fixture.Name);
+        fixture.Sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(fixturePath)));
     }
 
-    foreach (CaseDef def in manifest.Cases.Where(c => c.Op != "sleep"))
+    foreach (CaseDef def in manifest.Cases.Where(c => c.Op != "sleep" && (c.Fixture is null || present.Contains(c.Fixture))))
     {
         string? path = def.Fixture is null ? null : Path.Combine(root, manifest.Fixtures.Single(f => f.Name == def.Fixture).Path);
         var sw = Stopwatch.StartNew();

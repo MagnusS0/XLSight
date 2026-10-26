@@ -52,6 +52,9 @@ internal sealed class FixtureDef
 
     /// <summary>Name of the deterministic generator, or null for a checked-in workbook.</summary>
     public string? Generator { get; init; }
+
+    /// <summary>"fast" (default suite) or "confirm" (large fixtures for focused confirmation runs only).</summary>
+    public string Tier { get; init; } = "fast";
 }
 
 internal sealed class CaseDef

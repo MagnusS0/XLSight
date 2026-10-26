@@ -19,25 +19,30 @@ internal static class FixtureGenerator
         switch (generator)
         {
             case "strings_repeated":
-                WriteStringsRepeated(outputPath);
+                WriteStringsRepeated(outputPath, 60_000);
+                break;
+            case "strings_repeated_x10":
+                WriteStringsRepeated(outputPath, 600_000);
                 break;
             case "strings_unique":
                 WriteStringsUnique(outputPath);
                 break;
             case "mixed_sparse":
-                WriteMixedSparse(outputPath);
+                WriteMixedSparse(outputPath, 25_000);
+                break;
+            case "mixed_sparse_x8":
+                WriteMixedSparse(outputPath, 200_000);
                 break;
             default:
                 throw new InvalidOperationException($"Unknown fixture generator '{generator}'.");
         }
     }
 
-    // 60,000 data rows × 8 columns of a typical exported table: low- and medium-cardinality shared
+    // `rows` data rows (60,000 in the fast suite) × 8 columns of a typical exported table: low- and medium-cardinality shared
     // strings (8 regions, 50 categories, 2,000 products), integers, decimals, a styled date column
     // and a Y/N flag. Exercises the shared-string path, grouping, distinct values and dates.
-    private static void WriteStringsRepeated(string path)
+    private static void WriteStringsRepeated(string path, int rows)
     {
-        const int rows = 60_000;
         var rng = new SplitMix64(0x5EED_0001);
         var sst = new SharedStrings();
         string[] headers = ["Id", "Category", "Region", "Product", "Value", "Qty", "Flag", "Date"];
@@ -67,7 +72,7 @@ internal static class FixtureGenerator
             sheet.EndRow();
         }
 
-        WritePackage(path, [("Data", sheet.Finish("A1:H60001"))], sst.Finish());
+        WritePackage(path, [("Data", sheet.Finish($"A1:H{rows + 1}"))], sst.Finish());
     }
 
     // 40,000 rows × 4 columns where every cell is a distinct shared string: ASCII identifiers,
@@ -108,12 +113,11 @@ internal static class FixtureGenerator
         WritePackage(path, [("Data", sheet.Finish("A1:D40001"))], sst.Finish());
     }
 
-    // 25,000 rows across A:Z with ~40% fill plus an occasional far column (AZ): integers,
+    // `rows` rows (25,000 in the fast suite) across A:Z with ~40% fill plus an occasional far column (AZ): integers,
     // decimals, dates, booleans, errors, inline strings, shared strings, numeric and string
     // formulas with cached values. Exercises sparse rows and every cell-type branch.
-    private static void WriteMixedSparse(string path)
+    private static void WriteMixedSparse(string path, int rows)
     {
-        const int rows = 25_000;
         var rng = new SplitMix64(0x5EED_0003);
         var sst = new SharedStrings();
         string[] labels = [.. Enumerable.Range(0, 200).Select(static i => $"Label {i}")];
@@ -161,7 +165,7 @@ internal static class FixtureGenerator
             sheet.EndRow();
         }
 
-        WritePackage(path, [("Mixed", sheet.Finish("A1:AZ25000"))], sst.Finish());
+        WritePackage(path, [("Mixed", sheet.Finish($"A1:AZ{rows}"))], sst.Finish());
     }
 
     private static void WritePackage(string path, (string Name, string Xml)[] sheets, string sharedStrings)

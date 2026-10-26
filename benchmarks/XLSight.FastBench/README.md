@@ -18,8 +18,13 @@ All commands go through `fastbench.sh` (bash, Linux/macOS with coreutils `timeou
 | All prep | `benchmarks/XLSight.FastBench/fastbench.sh prepare` | the three above, each timed separately |
 | **Fast suite** | `benchmarks/XLSight.FastBench/fastbench.sh run [--label NAME] [--filter REGEX]` | never builds, restores or generates; refuses a stale binary |
 | Compare | `benchmarks/XLSight.FastBench/fastbench.sh compare --base A.json [A2.json…] --cand B.json [B2.json…]` | refuses runs with different manifests or fixture bytes |
-| A/B | `benchmarks/XLSight.FastBench/fastbench.sh ab <base-ref> [rounds]` | builds the *current* runner + manifest against `<base-ref>` library sources in a temporary worktree, then alternates base/candidate runs and compares |
+| A/B | `benchmarks/XLSight.FastBench/fastbench.sh ab <base-ref> [rounds] [run args]` | builds the *current* runner + manifest against `<base-ref>` library sources in a temporary worktree, then alternates base/candidate runs and compares |
+| Confirm tier | `fastbench.sh fixtures --confirm`, then `fastbench.sh confirm [REGEX]` | large fixtures (600 K-row strings, 200 K-row mixed), fresh-process cold/peak-RSS cases and long warm sampling; ≈1 min, 200 s cap; not part of the fast suite |
 | Self-test | `benchmarks/XLSight.FastBench/fastbench.sh selftest` | demonstrates every deadline/failure path (≈45 s, not part of the fast suite) |
+
+A/B on the confirm tier: `FASTBENCH_WALL_CAP_S=200 fastbench.sh ab <ref> 3 --filter '^confirm\.' --budget-ms 180000`.
+With fewer than 3 runs per side, `compare` verdicts are marked tentative: an A/A check under load
+produced false "SLOWER" verdicts from within-run MAD alone.
 
 `--filter` matches case ids or tags (e.g. `--filter query`, `--filter '^scan\.'`). Filtered runs
 are for iteration; acceptance decisions use the default suite.

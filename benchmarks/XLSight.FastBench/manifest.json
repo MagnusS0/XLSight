@@ -8,60 +8,85 @@
     {
       "name": "small",
       "path": "tests/XLSight.Tests/TestData/small.xlsx",
-      "sha256": "10e6a1c8cec0a64a4590ba9970ebd89d8cd221df3354083219b3ddab3b51cad2"
+      "sha256": "10e6a1c8cec0a64a4590ba9970ebd89d8cd221df3354083219b3ddab3b51cad2",
+      "tier": "fast"
     },
     {
       "name": "medium",
       "path": "tests/XLSight.Tests/TestData/medium.xlsx",
-      "sha256": "98adde308e17b460062baa734b1f9e26a7d42ded9ea61deff299759dbc5bfb66"
+      "sha256": "98adde308e17b460062baa734b1f9e26a7d42ded9ea61deff299759dbc5bfb66",
+      "tier": "fast"
     },
     {
       "name": "large_xlsx",
       "path": "tests/XLSight.Tests/TestData/large.xlsx",
-      "sha256": "00076e39c9a3896492d4a6588f7c68063050d0c215cd63c1dc72ca919b42e0ee"
+      "sha256": "00076e39c9a3896492d4a6588f7c68063050d0c215cd63c1dc72ca919b42e0ee",
+      "tier": "fast"
     },
     {
       "name": "large_xlsb",
       "path": "tests/XLSight.Tests/TestData/large.xlsb",
-      "sha256": "2f5687113e48103389c3697fa60e231e5cb1408db24cd43721db4a06faa4f93e"
+      "sha256": "2f5687113e48103389c3697fa60e231e5cb1408db24cd43721db4a06faa4f93e",
+      "tier": "fast"
     },
     {
       "name": "string_heavy_xlsb",
       "path": "tests/XLSight.Tests/TestData/string_heavy.xlsb",
-      "sha256": "1b6285f622d9e8018e49e14ea9af88f8234a4b6f2eed256e59a8e6268467c5fd"
+      "sha256": "1b6285f622d9e8018e49e14ea9af88f8234a4b6f2eed256e59a8e6268467c5fd",
+      "tier": "fast"
     },
     {
       "name": "complex",
       "path": "tests/XLSight.Tests/TestData/complex_workbook.xlsx",
-      "sha256": "86aaf579585415fd5d3d55cb710415a8f89841244386eb1b97eda2d8775d6e4c"
+      "sha256": "86aaf579585415fd5d3d55cb710415a8f89841244386eb1b97eda2d8775d6e4c",
+      "tier": "fast"
     },
     {
       "name": "banking_real",
       "path": "tests/XLSight.Layout.Tests/TestData/03_Banking_golden.xlsx",
-      "sha256": "435ff55edf4f3932e01bd1dd5e495717284320233ea94b2eec53787c7b8da6c4"
+      "sha256": "435ff55edf4f3932e01bd1dd5e495717284320233ea94b2eec53787c7b8da6c4",
+      "tier": "fast"
     },
     {
       "name": "mcdonalds_real",
       "path": "tests/XLSight.Layout.Tests/TestData/10_McDonalds_golden.xlsx",
-      "sha256": "661638e615a710959124a7beeee723572a4e10fe490ddfb7bc37175100f2e0b2"
+      "sha256": "661638e615a710959124a7beeee723572a4e10fe490ddfb7bc37175100f2e0b2",
+      "tier": "fast"
     },
     {
       "name": "strings_repeated",
       "path": "artifacts/fastbench/fixtures/strings_repeated.xlsx",
       "sha256": "2609fb4595507b9f27d4ed78f8e0a585312c324c94e4a1577f5bdac0ed4c3f9d",
-      "generator": "strings_repeated"
+      "generator": "strings_repeated",
+      "tier": "fast"
     },
     {
       "name": "strings_unique",
       "path": "artifacts/fastbench/fixtures/strings_unique.xlsx",
       "sha256": "7f2cac7d6424b9829a5553578992f3ab401910399702974949a2db42378b7308",
-      "generator": "strings_unique"
+      "generator": "strings_unique",
+      "tier": "fast"
     },
     {
       "name": "mixed_sparse",
       "path": "artifacts/fastbench/fixtures/mixed_sparse.xlsx",
       "sha256": "9d7c5c11f61f7186e0706937333f7f6394f7a12c45e3687965353c00e513d699",
-      "generator": "mixed_sparse"
+      "generator": "mixed_sparse",
+      "tier": "fast"
+    },
+    {
+      "name": "strings_repeated_x10",
+      "path": "artifacts/fastbench/fixtures/strings_repeated_x10.xlsx",
+      "sha256": "d4404d429ef917f926613494103f2126b168c7f01d28a69e8b3278e2fecd9f3f",
+      "generator": "strings_repeated_x10",
+      "tier": "confirm"
+    },
+    {
+      "name": "mixed_sparse_x8",
+      "path": "artifacts/fastbench/fixtures/mixed_sparse_x8.xlsx",
+      "sha256": "5ab6b647c689d31de923c6091811f3035fc77635df393883006ea0f7ec0f44db",
+      "generator": "mixed_sparse_x8",
+      "tier": "confirm"
     }
   ],
   "cases": [
@@ -677,7 +702,7 @@
       "id": "query.expr_groupby_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -706,7 +731,7 @@
       "id": "query.rows_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = 'EMEA' AND Value > 500 ORDER BY Value DESC LIMIT 20",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = \u0027EMEA\u0027 AND Value \u003E 500 ORDER BY Value DESC LIMIT 20",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -733,7 +758,7 @@
       "id": "query.rows_limit_early_exit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = 'N' LIMIT 100",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = \u0027N\u0027 LIMIT 100",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -822,6 +847,188 @@
       "tags": [
         "probe-hang"
       ]
+    },
+    {
+      "id": "confirm.cold_scan_strings_repeated_x10",
+      "op": "scanSheet",
+      "fixture": "strings_repeated_x10",
+      "sheet": "Data",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 30000,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "160cb1b19f4100a5",
+        "deepDigest": "6bc9a5acab33e84f",
+        "units": 4800008
+      }
+    },
+    {
+      "id": "confirm.cold_stream_snapshots_mixed_x8",
+      "op": "streamSheet",
+      "fixture": "mixed_sparse_x8",
+      "sheet": "Mixed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 30000,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "140d645a80ca0eab",
+        "deepDigest": "2075e63bc9318ae8",
+        "units": 4656457
+      }
+    },
+    {
+      "id": "confirm.cold_analyze_full_strings_repeated_x10",
+      "op": "analyze",
+      "fixture": "strings_repeated_x10",
+      "level": "Full",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 30000,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "c7a3495523d1f04b",
+        "deepDigest": "9f7bb05d2ae3b3ea",
+        "units": 4800008
+      }
+    },
+    {
+      "id": "confirm.cold_query_groupby_x10",
+      "op": "query",
+      "fixture": "strings_repeated_x10",
+      "query": "FROM Data!A1:H600001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 30000,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "fc2ff72e64a8ba93",
+        "deepDigest": "35a3e0daa48c6224",
+        "units": 600000
+      }
+    },
+    {
+      "id": "confirm.warm_scan_numeric_xlsx",
+      "op": "scanSheet",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 12000,
+      "minSamples": 10,
+      "maxSamples": 40,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "dc35d2b951c22cfa",
+        "deepDigest": "1dc98c965ee6838f",
+        "units": 500005
+      }
+    },
+    {
+      "id": "confirm.warm_scan_strings_repeated_x10",
+      "op": "scanSheet",
+      "fixture": "strings_repeated_x10",
+      "sheet": "Data",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 12000,
+      "minSamples": 6,
+      "maxSamples": 15,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "160cb1b19f4100a5",
+        "deepDigest": "6bc9a5acab33e84f",
+        "units": 4800008
+      }
+    },
+    {
+      "id": "confirm.warm_scan_mixed_sparse_x8",
+      "op": "scanSheet",
+      "fixture": "mixed_sparse_x8",
+      "sheet": "Mixed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": false,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 12000,
+      "minSamples": 6,
+      "maxSamples": 15,
+      "unit": "cells",
+      "tags": [
+        "confirm"
+      ],
+      "expected": {
+        "digest": "140d645a80ca0eab",
+        "deepDigest": "2075e63bc9318ae8",
+        "units": 4656457
+      }
     }
   ]
 }

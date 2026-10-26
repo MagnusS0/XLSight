@@ -111,7 +111,12 @@ internal static class Report
             double noise = Math.Max(Noise(b, bm), Noise(k, km));
             double delta = 100 * (km - bm) / bm;
             double threshold = Math.Max(minEffectPercent, 2 * noise);
-            string verdict = isolated ? "single-op (see RSS)" : Math.Abs(delta) <= threshold ? "~ inconclusive" : delta < 0 ? "faster" : "SLOWER";
+            // Between-run variance is unknown with fewer than 3 runs per side: an A/A test under load
+            // produced false "SLOWER" verdicts from within-run MAD alone, so such verdicts stay tentative.
+            bool tentative = b.Count < 3 || k.Count < 3;
+            string verdict = isolated ? "single-op (see RSS)"
+                : Math.Abs(delta) <= threshold ? "~ inconclusive"
+                : (delta < 0 ? "faster" : "SLOWER") + (tentative ? "? (need ≥3 runs/side)" : "");
             double ba = Stats.Median([.. b.Select(c => c.AllocatedBytesPerOp)]);
             double ka = Stats.Median([.. k.Select(c => c.AllocatedBytesPerOp)]);
             string allocDelta = ba == 0 ? (ka == 0 ? "0%" : "+∞") : string.Create(Inv, $"{100 * (ka - ba) / ba:+0.0;-0.0}%");

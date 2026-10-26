@@ -3,9 +3,10 @@
 #
 #   fastbench.sh restore            dotnet restore (locked) for the runner and libraries
 #   fastbench.sh build              Release build of the runner (and the libraries it references)
-#   fastbench.sh fixtures [--force] generate deterministic synthetic fixtures
+#   fastbench.sh fixtures [--force] [--confirm]  generate deterministic synthetic fixtures
 #   fastbench.sh prepare            restore + build + fixtures, each timed
 #   fastbench.sh run [runner args]  the capped fast suite (never builds, never generates)
+#   fastbench.sh confirm [REGEX]    focused longer confirmation tier (large fixtures, ≤200 s cap)
 #   fastbench.sh compare --base A.json... --cand B.json...
 #   fastbench.sh ab <base-ref> [rounds]   alternate baseline/candidate runs, then compare
 #   fastbench.sh selftest           demonstrate deadline, watchdog and missing-fixture handling
@@ -52,6 +53,7 @@ check_fresh() {
 }
 
 git_identity() {
+  if [[ -n "${FASTBENCH_GIT_REV:-}" ]]; then GIT_REV="$FASTBENCH_GIT_REV"; GIT_DIRTY="${FASTBENCH_GIT_DIRTY:-unknown}"; return; fi
   GIT_REV=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
   if git -C "$ROOT" diff --quiet HEAD -- src 2>/dev/null; then
     GIT_DIRTY=clean
@@ -104,6 +106,9 @@ case "$cmd" in
     "$0" restore && "$0" build && "$0" fixtures ;;
   run)
     run_suite "$@" ;;
+  confirm)
+    filter="${1:-^confirm\.}"; shift || true
+    FASTBENCH_WALL_CAP_S=200 run_suite --filter "$filter" --budget-ms 180000 --label "${FASTBENCH_LABEL:-confirm}" "$@" ;;
   compare)
     check_fresh || exit 1
     dotnet "$DLL" compare "$@" ;;
@@ -121,8 +126,13 @@ case "$cmd" in
     base_files=(); cand_files=()
     for i in $(seq 1 "$rounds"); do
       for side in base cand; do
-        if [[ $side == base ]]; then bin="$base_tree/benchmarks/XLSight.FastBench/bin/Release/net10.0"; else bin="$BIN_DIR"; fi
-        FASTBENCH_BIN="$bin" "$0" run --label "ab-$side-$i" "$@" >/dev/null 2>&1
+        if [[ $side == base ]]; then
+          bin="$base_tree/benchmarks/XLSight.FastBench/bin/Release/net10.0"
+          rev="$(git -C "$ROOT" rev-parse --short=12 "$base_ref")"; dirty="clean-base-worktree"
+        else
+          bin="$BIN_DIR"; rev=""; dirty=""
+        fi
+        FASTBENCH_BIN="$bin" FASTBENCH_GIT_REV="$rev" FASTBENCH_GIT_DIRTY="$dirty" "$0" run --label "ab-$side-$i" "$@" >/dev/null 2>&1
         f=$(ls -t "$OUT_DIR"/*-ab-$side-$i.json | head -1)
         if [[ $side == base ]]; then base_files+=("$f"); else cand_files+=("$f"); fi
         echo "round $i $side: $(grep -m1 -o '"status": "[a-z]*"' "$f")" >&2
