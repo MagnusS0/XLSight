@@ -33,6 +33,9 @@ internal static class FixtureGenerator
             case "mixed_sparse_x8":
                 WriteMixedSparse(outputPath, 200_000);
                 break;
+            case "merged_regions":
+                WriteMergedRegions(outputPath);
+                break;
             default:
                 throw new InvalidOperationException($"Unknown fixture generator '{generator}'.");
         }
@@ -166,6 +169,43 @@ internal static class FixtureGenerator
         }
 
         WritePackage(path, [("Mixed", sheet.Finish($"A1:AZ{rows}"))], sst.Finish());
+    }
+
+    // A 5,000-row report-style sheet whose post-sheetData section carries 5,000 merged regions
+    // and 500 data validations: the metadata that full analysis walks after the cell data.
+    private static void WriteMergedRegions(string path)
+    {
+        const int rows = 5_000;
+        var rng = new SplitMix64(0x5EED_0004);
+        var sst = new SharedStrings();
+        var sheet = new SheetWriter();
+        for (int r = 1; r <= rows; r++)
+        {
+            sheet.BeginRow(r);
+            sheet.Shared(1, r, sst.Add($"Section {r / 50}"));
+            sheet.Number(3, r, Math.Round(rng.NextDouble() * 100, 2));
+            sheet.Number(4, r, (long)rng.Next(1_000));
+            sheet.EndRow();
+        }
+
+        string xml = sheet.Finish($"A1:D{rows}");
+        var tail = new StringBuilder();
+        tail.Append(CultureInfo.InvariantCulture, $"<mergeCells count=\"{rows}\">");
+        for (int r = 1; r <= rows; r++)
+        {
+            tail.Append(CultureInfo.InvariantCulture, $"<mergeCell ref=\"A{r}:B{r}\"/>");
+        }
+
+        tail.Append("</mergeCells><dataValidations count=\"500\">");
+        for (int i = 0; i < 500; i++)
+        {
+            int r = 1 + (i * 10);
+            tail.Append(CultureInfo.InvariantCulture, $"<dataValidation type=\"whole\" operator=\"between\" allowBlank=\"1\" sqref=\"D{r}:D{r + 9}\"><formula1>0</formula1><formula2>1000</formula2></dataValidation>");
+        }
+
+        tail.Append("</dataValidations>");
+        xml = xml.Replace("</sheetData></worksheet>", "</sheetData>" + tail + "</worksheet>", StringComparison.Ordinal);
+        WritePackage(path, [("Report", xml)], sst.Finish());
     }
 
     private static void WritePackage(string path, (string Name, string Xml)[] sheets, string sharedStrings)

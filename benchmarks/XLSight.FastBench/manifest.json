@@ -75,6 +75,13 @@
       "tier": "fast"
     },
     {
+      "name": "merged_regions",
+      "path": "artifacts/fastbench/fixtures/merged_regions.xlsx",
+      "sha256": "bc55544b2779b67a58e752f518b3ecdeb41a202345f2c8980abdf8385c0d43b7",
+      "generator": "merged_regions",
+      "tier": "fast"
+    },
+    {
       "name": "strings_repeated_x10",
       "path": "artifacts/fastbench/fixtures/strings_repeated_x10.xlsx",
       "sha256": "d4404d429ef917f926613494103f2126b168c7f01d28a69e8b3278e2fecd9f3f",
@@ -537,6 +544,35 @@
       }
     },
     {
+      "id": "range.async_large_middle_rows",
+      "op": "readRangeAsync",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "range": "A50001:E50100",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 700,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "range",
+        "xlsx",
+        "async"
+      ],
+      "expected": {
+        "digest": "ee8c20f5ec66a5d8",
+        "deepDigest": "ee8c20f5ec66a5d8",
+        "units": 500
+      }
+    },
+    {
       "id": "analyze.full_banking_real",
       "op": "analyze",
       "fixture": "banking_real",
@@ -587,6 +623,33 @@
         "digest": "7da3bdc23c201874",
         "deepDigest": "3d3b3af4b94e1e70",
         "units": 480008
+      }
+    },
+    {
+      "id": "analyze.full_merged_regions",
+      "op": "analyze",
+      "fixture": "merged_regions",
+      "level": "Full",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 700,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "analysis",
+        "metadata"
+      ],
+      "expected": {
+        "digest": "4c537e2b82307946",
+        "deepDigest": "4c537e2b82307946",
+        "units": 15000
       }
     },
     {
@@ -702,7 +765,7 @@
       "id": "query.expr_groupby_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -731,7 +794,7 @@
       "id": "query.rows_orderby_limit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = \u0027EMEA\u0027 AND Value \u003E 500 ORDER BY Value DESC LIMIT 20",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = 'EMEA' AND Value > 500 ORDER BY Value DESC LIMIT 20",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -758,7 +821,7 @@
       "id": "query.rows_limit_early_exit",
       "op": "query",
       "fixture": "strings_repeated",
-      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = \u0027N\u0027 LIMIT 100",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = 'N' LIMIT 100",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,
@@ -930,7 +993,7 @@
       "id": "confirm.cold_query_groupby_x10",
       "op": "query",
       "fixture": "strings_repeated_x10",
-      "query": "FROM Data!A1:H600001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = \u0027Y\u0027) AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "query": "FROM Data!A1:H600001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
       "threshold": 0,
       "headerRow": 0,
       "top": 100,

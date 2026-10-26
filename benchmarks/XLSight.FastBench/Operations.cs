@@ -21,6 +21,7 @@ internal static class Operations
         "streamSheet" => Scan(fixturePath!, def, deep, snapshots: true),
         "rangeReader" => RangeReader(fixturePath!, def, deep),
         "readRange" => ReadRange(fixturePath!, def, deep),
+        "readRangeAsync" => ReadRangeAsync(fixturePath!, def, deep).GetAwaiter().GetResult(),
         "analyze" => Analyze(fixturePath!, def, deep),
         "layout" => Layout(fixturePath!, def),
         "query" => Query(fixturePath!, def, deep),
@@ -103,6 +104,21 @@ internal static class Operations
     {
         using var workbook = ExcelWorkbook.Open(path);
         RangeResult result = workbook.ReadRange(def.Sheet!, def.Range!, Mode(def));
+        var digest = new Digest();
+        long cells = 0;
+        foreach (ExcelRow row in result.Rows)
+        {
+            cells += AddRow(ref digest, row, deep);
+        }
+
+        return new(digest.Value, cells);
+    }
+
+    private static async Task<OpResult> ReadRangeAsync(string path, CaseDef def, bool deep)
+    {
+        ExcelWorkbook workbook = await ExcelWorkbook.OpenAsync(path).ConfigureAwait(false);
+        await using var disposeWorkbook = workbook.ConfigureAwait(false);
+        RangeResult result = await workbook.ReadRangeAsync(def.Sheet!, def.Range!, Mode(def)).ConfigureAwait(false);
         var digest = new Digest();
         long cells = 0;
         foreach (ExcelRow row in result.Rows)
