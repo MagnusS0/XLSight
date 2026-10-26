@@ -163,3 +163,17 @@ Raw files: `results/*-baseline-[1-6].json`.
 - **Measurement:** `ab HEAD 3` (`results/E6-compare.md`): `range.large_middle_rows` 53.2 → 34.5 ms
   (**−35.7 %**, noise ±3.1 %); `range.async_large_middle_rows` 58.9 → 41.6 ms (**−29.3 %**).
   `query.rows_orderby_limit` "faster" −5.1 % is at the edge of noise and not claimed. No regressions.
+
+## E7 — One tag walk over the post-sheetData metadata — **KEEP (time; removes quadratic cost)**
+
+- **Hypothesis (Readers worker):** `TryScanPostSheetData` ran four whole-window `TryFindStartTag`
+  searches (mergeCell, conditionalFormatting, dataValidation, hyperlink) per dispatched element:
+  O(elements × window). Walking `<` to `<` and classifying each tag once makes it linear.
+  Only analysis sinks call it (`XlsxSheetScanner.cs:104`); plain cursors never do.
+- **Tests:** 958/958. The Readers worker also compared analysis output across 43 sheets plus the
+  synthetic files: identical.
+- **Measurement:** `ab HEAD 3` (`results/E7-compare.md`): `analyze.full_merged_regions` (2,500
+  merges + 250 validations) 176.5 → 7.3 ms (**−96 %**). `scan.strings_unique` was flagged
+  "SLOWER" +5.6 %. Under the gate it was re-run with 5 focused rounds
+  (`results/E7-recheck-5rounds.md`): inconclusive (+3.5 %, ±51 %), and the changed code is
+  unreachable from cursor scans, so it is not a regression. Merged regions held at −94.9 %.

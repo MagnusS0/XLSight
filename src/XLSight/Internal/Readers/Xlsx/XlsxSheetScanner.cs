@@ -472,51 +472,75 @@ internal static partial class XlsxSheetScanner
     {
         Span<char> refCharBuf = stackalloc char[32];
 
+        // '<'-first walk: classify each tag once instead of searching the whole window for each
+        // of the four tag names per dispatched element (which was O(elements x window)).
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             var span = buf.Span;
-
-            var mergeStatus = TryFindStartTag(span, TagMergeCell, out var mergeMatch, out int mergePartial);
-            var cfStatus = TryFindStartTag(span, TagConditionalFormatting, out var cfMatch, out int cfPartial);
-            var dvStatus = TryFindStartTag(span, TagDataValidation, out var dvMatch, out int dvPartial);
-            var hyperStatus = TryFindStartTag(span, TagHyperlink, out var hyperMatch, out int hyperPartial);
-
-            int mergePos = mergeStatus == TagSearchResult.Found ? mergeMatch.Start : int.MaxValue;
-            int cfPos = cfStatus == TagSearchResult.Found ? cfMatch.Start : int.MaxValue;
-            int dvPos = dvStatus == TagSearchResult.Found ? dvMatch.Start : int.MaxValue;
-            int hyperPos = hyperStatus == TagSearchResult.Found ? hyperMatch.Start : int.MaxValue;
-            int minFoundPos = Math.Min(Math.Min(mergePos, cfPos), Math.Min(dvPos, hyperPos));
-
-            int needMoreStart = NeedMoreMin(mergeStatus, mergeMatch, cfStatus, cfMatch, dvStatus, dvMatch, hyperStatus, hyperMatch);
-
-            if (minFoundPos == int.MaxValue)
+            int lt = span.IndexOf((byte)'<');
+            if (lt < 0)
             {
-                // Nothing found at all
-                if (needMoreStart != int.MaxValue) { if (!RefillKeepingTagStart(buf, span, needMoreStart)) { break; } continue; }
-                int partial = MaxPartial(MaxPartial(mergePartial, cfPartial), MaxPartial(dvPartial, hyperPartial));
-                if (!RefillKeepingTagStart(buf, span, partial)) { break; }
+                buf.Advance(span.Length);
+                if (!buf.Refill()) { break; }
                 continue;
             }
 
-            if (needMoreStart < minFoundPos) { if (!RefillKeepingTagStart(buf, span, needMoreStart)) { break; } continue; }
+            if (lt > 0) { buf.Advance(lt); }
+            span = buf.Span;
 
-            DispatchPostSheetTag(span, buf, ref sink, refCharBuf, minFoundPos, mergePos, cfPos, dvPos, mergeMatch, cfMatch, dvMatch, hyperMatch);
+            var status = MatchPostSheetTag(span, out int which, out StartTagMatch match);
+            if (status == TagSearchResult.NeedMoreData)
+            {
+                if (!buf.CanReadMore || !buf.Refill()) { break; }
+                continue;
+            }
+
+            if (status == TagSearchResult.NotFound)
+            {
+                SkipPastClosingBracket(buf);
+                continue;
+            }
+
+            const int none = int.MaxValue;
+            DispatchPostSheetTag(
+                span, buf, ref sink, refCharBuf, 0,
+                which == 0 ? 0 : none, which == 1 ? 0 : none, which == 2 ? 0 : none,
+                match, match, match, match);
         }
     }
 
-    private static int NeedMoreMin(
-        TagSearchResult s1, StartTagMatch m1,
-        TagSearchResult s2, StartTagMatch m2,
-        TagSearchResult s3, StartTagMatch m3,
-        TagSearchResult s4, StartTagMatch m4)
+    // Matches the tag starting at span[0] against the post-sheetData tags of interest.
+    // which: 0 = mergeCell, 1 = conditionalFormatting, 2 = dataValidation, 3 = hyperlink.
+    private static TagSearchResult MatchPostSheetTag(ReadOnlySpan<byte> span, out int which, out StartTagMatch match)
     {
-        int min = int.MaxValue;
-        if (s1 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m1.Start); }
-        if (s2 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m2.Start); }
-        if (s3 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m3.Start); }
-        if (s4 == TagSearchResult.NeedMoreData) { min = Math.Min(min, m4.Start); }
-        return min;
+        match = default;
+        which = -1;
+        for (int i = 0; i < 4; i++)
+        {
+            ReadOnlySpan<byte> name = i switch
+            {
+                0 => TagMergeCell,
+                1 => TagConditionalFormatting,
+                2 => TagDataValidation,
+                _ => TagHyperlink,
+            };
+
+            var result = TryMatchStartTagAt(span, name, out int afterName, out int endExcl, out bool selfClose);
+            if (result == TagSearchResult.Found)
+            {
+                which = i;
+                match = new StartTagMatch(0, afterName, endExcl, selfClose);
+                return TagSearchResult.Found;
+            }
+
+            if (result == TagSearchResult.NeedMoreData)
+            {
+                return TagSearchResult.NeedMoreData;
+            }
+        }
+
+        return TagSearchResult.NotFound;
     }
 
     private static void DispatchPostSheetTag<TSink>(
