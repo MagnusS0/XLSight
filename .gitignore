@@ -505,4 +505,6 @@ tests/XLSight.Tests/TestData/.~lock.*
 viz/*
 
 # Claude Code agent working directories
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/agents/
