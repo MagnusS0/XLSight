@@ -250,3 +250,20 @@ Raw files: `results/*-baseline-[1-6].json`.
 - **Process note:** a first probe attempt reused `dotnet run` file-app build caches and measured
   stale binaries. It was caught because the base numbers did not reflect the already-merged E9,
   and it was discarded. Probes are now rebuilt with `--no-cache`.
+
+## E11 — Analysis sink: decode shared strings only for block-start spans — **KEEP (allocation)**
+
+- **Hypothesis (Query worker, `query-candidate-2.patch`):** the analysis sink materialized every
+  shared string (`AnalysisSink.cs` ~206) to compute a value-like count per row span. That count is
+  only read when a span opens a region block (`TopRowValueLike`). Column profiling already works
+  from the SST index and character count (`RecordSharedString`). Recording the index and decoding
+  lazily only for block-start spans removes the per-cell string.
+- **Correctness:** `eqcheck.sh` full JSON dumps over 19 workbooks: **identical**. Tests 958/958.
+- **Measurement:** allocation probe (`results/E11-analysis-alloc-probe.md`): Analyze on
+  strings_unique (Observed or Full) 19.94 → 6.42 MiB (**−68 %**); strings_repeated 0.58 →
+  0.46 MiB (−21 %); Banking unchanged. Fast suite (`results/E11-compare.md`):
+  `analyze.observed_strings_repeated` −21 % allocation, time neutral.
+  `query.groupby_category` "SLOWER" +11 % was re-run with 5 rounds
+  (`results/E11-recheck-5rounds.md`): inconclusive (−0.2 %). HEADER ROW queries never use the
+  analysis sink, so this is not a regression.
+  `analyze.full_merged_regions` "faster" −11 % is not claimed.

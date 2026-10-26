@@ -29,37 +29,68 @@ internal partial struct AnalysisSink
 
     private void AddRowCell(int column, ExcelCellValue value, bool isFormula)
     {
-        // Runs per cell in Full only; restrict to candidate header rows if profiled hot.
-        if (_pendingRowSpans.Count == 0 || column > _pendingRowSpans[^1].EndCol + 1)
+        if (value.CellType == CellType.Text)
+        {
+            _pendingRowTexts.Add(new PendingText(value.AsText(), -1));
+        }
+
+        AddRowCellCore(column, value.CellType, isFormula);
+    }
+
+    /// <summary>A shared-string cell whose text is resolved only if its span starts a block.</summary>
+    private void AddRowSharedStringCell(int column, int rawIndex, bool isFormula)
+    {
+        _pendingRowTexts.Add(new PendingText(null, rawIndex));
+        AddRowCellCore(column, CellType.Text, isFormula);
+    }
+
+    private void AddRowCellCore(int column, CellType type, bool isFormula)
+    {
+        // Runs per cell in Full only. Text cells are recorded in _pendingRowTexts in column
+        // order, so each span's text cells form one contiguous slice of that list.
+        bool startsSpan = _pendingRowSpans.Count == 0 || column > _pendingRowSpans[^1].EndCol + 1;
+        if (startsSpan)
         {
             _pendingRowSpans.Add(new RowSpanState
             {
                 StartCol = column,
-                EndCol = column,
-                FirstCellType = value.CellType == CellType.Text ? 1 : 2,
+                FirstCellType = type == CellType.Text ? 1 : 2,
+                TextStart = _pendingRowTexts.Count - (type == CellType.Text ? 1 : 0),
             });
         }
-        else
-        {
-            var span = _pendingRowSpans[^1];
-            span.EndCol = column;
-            _pendingRowSpans[^1] = span;
-        }
 
-        var current = _pendingRowSpans[^1];
+        ref RowSpanState current = ref CollectionsMarshal.AsSpan(_pendingRowSpans)[^1];
+        current.EndCol = column;
+
         current.CellCount++;
         if (isFormula) { current.FormulaCount++; }
-        if (value.CellType == CellType.Text) { current.TextCount++; }
-        if (value.CellType is CellType.Number or CellType.Date or CellType.Boolean) { current.NumericCount++; }
-        if (IsValueLike(value)) { current.ValueLikeCount++; }
-        _pendingRowSpans[^1] = current;
+        if (type == CellType.Text) { current.TextCount++; }
+        if (type is CellType.Number or CellType.Date or CellType.Boolean) { current.NumericCount++; }
+        if (type is CellType.Number or CellType.Date) { current.NumberOrDateCount++; }
     }
 
-    private static bool IsValueLike(in ExcelCellValue v)
+    /// <summary>
+    /// Value-like cells in a span: every number or date, plus period-pattern text. Only a span
+    /// that opens a new block needs it (it seeds the block's top-row signal), so the text test
+    /// and any shared-string decode run once per block rather than once per text cell.
+    /// </summary>
+    private readonly int CountValueLike(in RowSpanState span)
     {
-        if (v.CellType is CellType.Number or CellType.Date) { return true; }
-        if (v.CellType != CellType.Text) { return false; }
-        ReadOnlySpan<char> s = v.AsText().AsSpan().Trim();
+        int count = span.NumberOrDateCount;
+        int end = span.TextStart + span.TextCount;
+        for (int i = span.TextStart; i < end; i++)
+        {
+            PendingText pending = _pendingRowTexts[i];
+            string text = pending.Text ?? _sst.GetString(pending.RawIndex);
+            if (IsValueLikeText(text)) { count++; }
+        }
+
+        return count;
+    }
+
+    private static bool IsValueLikeText(string text)
+    {
+        ReadOnlySpan<char> s = text.AsSpan().Trim();
         if (s.IsEmpty) { return false; }
         if (double.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out _)) { return true; }
         if (ContainsYearPattern(s)) { return true; }   // 19xx / 20xx year anywhere in text
@@ -96,6 +127,7 @@ internal partial struct AnalysisSink
         SealExpiredBlocks();
 
         _pendingRowSpans.Clear();
+        _pendingRowTexts.Clear();
         _hasPendingRow = false;
     }
 
@@ -115,7 +147,7 @@ internal partial struct AnalysisSink
                 TopRowText = span.TextCount,
                 TopRowNumeric = span.NumericCount,
                 TopRowCells = span.CellCount,
-                TopRowValueLike = span.ValueLikeCount,
+                TopRowValueLike = CountValueLike(span),
             });
             return;
         }
@@ -296,9 +328,15 @@ internal partial struct AnalysisSink
         public int FormulaCount;
         /// <summary>0 = none, 1 = text, 2 = numeric. Set for the FIRST cell added to the span.</summary>
         public int FirstCellType;
-        /// <summary>Count of value-like cells in this span (Number, Date, or period-pattern text).</summary>
-        public int ValueLikeCount;
+        /// <summary>Count of Number or Date cells in this span (always value-like).</summary>
+        public int NumberOrDateCount;
+        /// <summary>Index of this span's first text cell in <c>_pendingRowTexts</c>.</summary>
+        public int TextStart;
     }
+
+    /// <summary>A text cell of the pending row: inline text, or a shared-string index decoded on demand.</summary>
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct PendingText(string? Text, int RawIndex);
 
     [StructLayout(LayoutKind.Auto)]
     private struct ActiveBlockState
