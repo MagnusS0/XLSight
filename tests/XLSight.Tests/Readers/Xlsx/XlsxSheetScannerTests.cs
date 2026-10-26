@@ -761,6 +761,32 @@ public sealed class XlsxSheetScannerTests
         Assert.Equal("A1+B1", rows[0].GetCell(1).AsFormula());
     }
 
+    [Fact]
+    public void FormulasMode_EveryChunkBoundary_MatchesUnchunkedScan()
+    {
+        // A refill landing inside "<v>…</v>" of a non-formula cell used to keep only the latest
+        // partial tag ("<" as a possible "<f>") and skip the complete <v>, returning Empty.
+        string xml = $"""
+            <worksheet xmlns="{Ns}">
+              <sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><f>A1&amp;"x"</f><v>4</v></c><c r="C1"><v>12.5</v></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>Age</t></is></c><c r="B2" t="str"><f>A2</f><v>Age</v></c><c r="C2" t="b"><v>1</v></c></row>
+                <row r="3"><c r="A3"><v>-7</v></c><c r="B3" t="e"><v>#N/A</v></c><c r="C3"><f>C1*2</f><v>25</v></c></row>
+              </sheetData>
+            </worksheet>
+            """;
+        SharedStringTable sst = SstBuilder.Make("Header");
+        List<string> expected = Describe(ScanFormulas(xml, sst));
+
+        for (int chunkSize = 1; chunkSize <= 80; chunkSize++)
+        {
+            Assert.Equal(expected, Describe(ScanFormulasChunked(xml, chunkSize, sst)));
+        }
+
+        static List<string> Describe(List<ExcelRow> rows) =>
+            [.. rows.SelectMany(row => row.Cells.ToArray().Select((cell, i) => $"{row.RowIndex}:{row.StartColumn + i}:{cell.CellType}:{cell}"))];
+    }
+
     // ── Performance optimisations — right-bound early exit ───────────────────
 
     [Fact]

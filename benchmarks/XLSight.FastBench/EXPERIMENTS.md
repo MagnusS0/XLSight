@@ -54,3 +54,22 @@ Raw files: `results/*-baseline-[1-6].json`.
   flagged**. Saved as `results/aa-interleaved-3rounds-compare.md`.
 - Gate used below: `ab` with ≥3 rounds; targeted cases must be "faster" with no "SLOWER"
   elsewhere, or have a mechanism-specific explanation re-confirmed with ≥5 rounds.
+
+## E1 — Fix Formulas-mode boundary loss and async skipped-row rollback — **KEEP**
+
+- **Source:** Readers worker (found while mapping the hot path); reproduced independently by the lead.
+- **Bug A:** in Formulas mode, a buffer refill inside `<v>…</v>` of a non-formula cell kept only
+  the latest partial tag (a `<` that might start `<f>`) and skipped the complete `<v>`, so the
+  cell came back Empty. Repro: `complex_workbook.xlsx` through a 13-byte-read stream returned 2
+  Empty text cells. Fix: the earliest complete `<f>`/`<v>` wins; refills keep the earliest partial.
+- **Bug B:** async bounded reads never committed progress over rows skipped before the range.
+  Every refill rewound to the first skipped row, and the window grew until the row-size guard
+  threw. Repro: `ReadCellAsync("Numbers","E100001")` on large.xlsx threw
+  `MalformedWorkbookException`, while sync returned 0.590495. Fix: `ScanBuffer.CommitNoIOProgress`
+  plus `SheetCursor.CommitSkippedRow`.
+- **Tests:** two new regression tests (`FormulasMode_EveryChunkBoundary_MatchesUnchunkedScan`
+  sweeps chunk sizes 1–80; `LargeSheetAsyncBoundedReadTests`) fail on the baseline and pass with
+  the fix. 923/923 tests pass.
+- **Measurement:** `fastbench.sh ab HEAD 3` (`results/E1-compare.md`):
+  `range.async_large_middle_rows` 134.7 → 58.8 ms (−57 %), 13.9 MiB → 392 KiB/op (−97 %).
+  All other 28 cases inconclusive (no regression).

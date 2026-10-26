@@ -47,22 +47,9 @@ internal static partial class XlsxSheetScanner
             bool fFound = fStatus == TagSearchResult.Found;
             bool vFound = vStatus == TagSearchResult.Found;
 
-            // With <-first scanning a trailing '<' returns NeedMoreData even if we already
-            // found a complete <f> tag.  Only block when we genuinely lack enough data.
-            if (fStatus == TagSearchResult.NeedMoreData || (vStatus == TagSearchResult.NeedMoreData && !fFound))
-            {
-                if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(MaxPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
-            if (!fFound && !vFound)
-            {
-                if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(MaxPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
+            // A complete tag always precedes any partial ("NeedMoreData") match of the other tag,
+            // because the partial '<' is the last unterminated tag in the window. So whichever
+            // of <f>/<v> is complete and earliest wins; refilling past it would drop that tag.
             if (fFound && (!vFound || fMatch.Start < vMatch.Start))
             {
                 buf.Advance(fMatch.EndExclusive);
@@ -70,11 +57,20 @@ internal static partial class XlsxSheetScanner
                 continue; // <f/> with no text — look for <v>
             }
 
-            if (vFound) { return ExtractCachedValue(buf, vMatch, kind, styleIdx, sharedStrings, styles, isDate1904); }
+            if (!vFound)
+            {
+                if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
+                if (!RefillKeepingTagStart(buf, span, EarliestPartial(EarliestPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
+                continue;
+            }
 
-            if (!RefillKeepingTagStart(buf, span, MaxPartial(MaxPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
+            return ExtractCachedValue(buf, vMatch, kind, styleIdx, sharedStrings, styles, isDate1904);
         }
     }
+
+    // Earliest non-negative partial index (-1 when neither side has one).
+    private static int EarliestPartial(int left, int right) =>
+        left < 0 ? right : right < 0 ? left : Math.Min(left, right);
 
     private static ExcelCellValue ExtractFormulaValue(ScanBuffer buf)
     {
@@ -334,21 +330,18 @@ internal static partial class XlsxSheetScanner
             bool fFound = fStatus == TagSearchResult.Found;
             bool vFound = vStatus == TagSearchResult.Found;
 
-            // With <-first scanning a trailing '<' returns NeedMoreData; don't block
-            // on vStatus alone when we already hold a complete <f> match.
-            bool needRefill = fStatus == TagSearchResult.NeedMoreData
-                || (vStatus == TagSearchResult.NeedMoreData && !fFound)
-                || (!fFound && !vFound);
-            if (needRefill)
-            {
-                if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
-                if (!RefillKeepingTagStart(buf, span, MaxPartial(MaxPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
-                continue;
-            }
-
+            // A complete tag always precedes any partial match of the other tag, so the earliest
+            // complete <f>/<v> wins; refilling past it would drop that tag (see ReadCellValueFormula).
             if (fFound && (!vFound || fMatch.Start < vMatch.Start))
             {
                 AdvancePastFormula(buf, span, fMatch, column, ref formulaFound, ref sink);
+                continue;
+            }
+
+            if (!vFound)
+            {
+                if (cStatus == TagSearchResult.Found) { buf.Advance(cIdx + cLen); return ExcelCellValue.Empty; }
+                if (!RefillKeepingTagStart(buf, span, EarliestPartial(EarliestPartial(fPartial, vPartial), cPartial))) { return ExcelCellValue.Empty; }
                 continue;
             }
 
