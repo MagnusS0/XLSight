@@ -1,0 +1,827 @@
+{
+  "version": "1",
+  "description": "Default cross-component fast suite. Changing cases, fixtures, ops or sampling settings requires a new version and a new baseline.",
+  "suiteBudgetMs": 24000,
+  "reserveMs": 1200,
+  "hardDeadlineMs": 27500,
+  "fixtures": [
+    {
+      "name": "small",
+      "path": "tests/XLSight.Tests/TestData/small.xlsx",
+      "sha256": "10e6a1c8cec0a64a4590ba9970ebd89d8cd221df3354083219b3ddab3b51cad2"
+    },
+    {
+      "name": "medium",
+      "path": "tests/XLSight.Tests/TestData/medium.xlsx",
+      "sha256": "98adde308e17b460062baa734b1f9e26a7d42ded9ea61deff299759dbc5bfb66"
+    },
+    {
+      "name": "large_xlsx",
+      "path": "tests/XLSight.Tests/TestData/large.xlsx",
+      "sha256": "00076e39c9a3896492d4a6588f7c68063050d0c215cd63c1dc72ca919b42e0ee"
+    },
+    {
+      "name": "large_xlsb",
+      "path": "tests/XLSight.Tests/TestData/large.xlsb",
+      "sha256": "2f5687113e48103389c3697fa60e231e5cb1408db24cd43721db4a06faa4f93e"
+    },
+    {
+      "name": "string_heavy_xlsb",
+      "path": "tests/XLSight.Tests/TestData/string_heavy.xlsb",
+      "sha256": "1b6285f622d9e8018e49e14ea9af88f8234a4b6f2eed256e59a8e6268467c5fd"
+    },
+    {
+      "name": "complex",
+      "path": "tests/XLSight.Tests/TestData/complex_workbook.xlsx",
+      "sha256": "86aaf579585415fd5d3d55cb710415a8f89841244386eb1b97eda2d8775d6e4c"
+    },
+    {
+      "name": "banking_real",
+      "path": "tests/XLSight.Layout.Tests/TestData/03_Banking_golden.xlsx",
+      "sha256": "435ff55edf4f3932e01bd1dd5e495717284320233ea94b2eec53787c7b8da6c4"
+    },
+    {
+      "name": "mcdonalds_real",
+      "path": "tests/XLSight.Layout.Tests/TestData/10_McDonalds_golden.xlsx",
+      "sha256": "661638e615a710959124a7beeee723572a4e10fe490ddfb7bc37175100f2e0b2"
+    },
+    {
+      "name": "strings_repeated",
+      "path": "artifacts/fastbench/fixtures/strings_repeated.xlsx",
+      "sha256": "2609fb4595507b9f27d4ed78f8e0a585312c324c94e4a1577f5bdac0ed4c3f9d",
+      "generator": "strings_repeated"
+    },
+    {
+      "name": "strings_unique",
+      "path": "artifacts/fastbench/fixtures/strings_unique.xlsx",
+      "sha256": "7f2cac7d6424b9829a5553578992f3ab401910399702974949a2db42378b7308",
+      "generator": "strings_unique"
+    },
+    {
+      "name": "mixed_sparse",
+      "path": "artifacts/fastbench/fixtures/mixed_sparse.xlsx",
+      "sha256": "9d7c5c11f61f7186e0706937333f7f6394f7a12c45e3687965353c00e513d699",
+      "generator": "mixed_sparse"
+    }
+  ],
+  "cases": [
+    {
+      "id": "mem.cold_scan_strings_unique",
+      "op": "scanSheet",
+      "fixture": "strings_unique",
+      "sheet": "Data",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 2500,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "memory",
+        "cold",
+        "strings"
+      ],
+      "expected": {
+        "digest": "79745d2a2b093cc4",
+        "deepDigest": "8ffb85c78f97cf3e",
+        "units": 160004
+      }
+    },
+    {
+      "id": "mem.cold_analyze_banking_real",
+      "op": "analyze",
+      "fixture": "banking_real",
+      "level": "Full",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": true,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 2500,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "memory",
+        "cold",
+        "analysis",
+        "real"
+      ],
+      "expected": {
+        "digest": "e14e8b4ddc7484ce",
+        "deepDigest": "503be09ff39b2977",
+        "units": 40354
+      }
+    },
+    {
+      "id": "open.small",
+      "op": "open",
+      "fixture": "small",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 20,
+      "warmupMs": 100,
+      "budgetMs": 250,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "sheets",
+      "tags": [
+        "open"
+      ],
+      "expected": {
+        "digest": "492b127a3797c7ff",
+        "deepDigest": "492b127a3797c7ff",
+        "units": 2
+      }
+    },
+    {
+      "id": "open.banking_real",
+      "op": "open",
+      "fixture": "banking_real",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 4,
+      "warmupMs": 100,
+      "budgetMs": 400,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "sheets",
+      "tags": [
+        "open",
+        "real"
+      ],
+      "expected": {
+        "digest": "d92761abce98c010",
+        "deepDigest": "d92761abce98c010",
+        "units": 22
+      }
+    },
+    {
+      "id": "readcell.large_early_exit",
+      "op": "readCell",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "address": "B3",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 10,
+      "warmupMs": 100,
+      "budgetMs": 300,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "open",
+        "early-exit",
+        "xlsx"
+      ],
+      "expected": {
+        "digest": "4a9f029f4b4e6f53",
+        "deepDigest": "4a9f029f4b4e6f53",
+        "units": 1
+      }
+    },
+    {
+      "id": "scan.numeric_xlsx",
+      "op": "scanSheet",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 800,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "numeric"
+      ],
+      "expected": {
+        "digest": "dc35d2b951c22cfa",
+        "deepDigest": "1dc98c965ee6838f",
+        "units": 500005
+      }
+    },
+    {
+      "id": "scan.numeric_xlsb",
+      "op": "scanSheet",
+      "fixture": "large_xlsb",
+      "sheet": "Numbers",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 500,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsb",
+        "numeric"
+      ],
+      "expected": {
+        "digest": "dc35d2b951c22cfa",
+        "deepDigest": "1dc98c965ee6838f",
+        "units": 500005
+      }
+    },
+    {
+      "id": "scan.strings_xlsb",
+      "op": "scanSheet",
+      "fixture": "string_heavy_xlsb",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 5,
+      "warmupMs": 100,
+      "budgetMs": 250,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsb",
+        "strings"
+      ],
+      "expected": {
+        "digest": "34fd9a324fed99c0",
+        "deepDigest": "d0a825475f62aaf9",
+        "units": 10005
+      }
+    },
+    {
+      "id": "scan.strings_repeated",
+      "op": "scanSheet",
+      "fixture": "strings_repeated",
+      "sheet": "Data",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "strings"
+      ],
+      "expected": {
+        "digest": "6136712b60553f73",
+        "deepDigest": "8ad3114a92046eef",
+        "units": 480008
+      }
+    },
+    {
+      "id": "scan.strings_unique",
+      "op": "scanSheet",
+      "fixture": "strings_unique",
+      "sheet": "Data",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "strings"
+      ],
+      "expected": {
+        "digest": "79745d2a2b093cc4",
+        "deepDigest": "8ffb85c78f97cf3e",
+        "units": 160004
+      }
+    },
+    {
+      "id": "scan.mixed_sparse_values",
+      "op": "scanSheet",
+      "fixture": "mixed_sparse",
+      "sheet": "Mixed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "mixed"
+      ],
+      "expected": {
+        "digest": "9d18feb3065cdcec",
+        "deepDigest": "47fdacb354b089cc",
+        "units": 581857
+      }
+    },
+    {
+      "id": "scan.mixed_sparse_formulas",
+      "op": "scanSheet",
+      "fixture": "mixed_sparse",
+      "sheet": "Mixed",
+      "mode": "Formulas",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "mixed",
+        "formulas"
+      ],
+      "expected": {
+        "digest": "50e9c0020b383940",
+        "deepDigest": "ea5ba2613125db97",
+        "units": 581857
+      }
+    },
+    {
+      "id": "stream.snapshots_mixed",
+      "op": "streamSheet",
+      "fixture": "mixed_sparse",
+      "sheet": "Mixed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "snapshots"
+      ],
+      "expected": {
+        "digest": "9d18feb3065cdcec",
+        "deepDigest": "47fdacb354b089cc",
+        "units": 581857
+      }
+    },
+    {
+      "id": "scan.real_mcdonalds_all",
+      "op": "scanSheet",
+      "fixture": "mcdonalds_real",
+      "sheet": "*",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "scan",
+        "xlsx",
+        "real"
+      ],
+      "expected": {
+        "digest": "15ec40091a13cf0e",
+        "deepDigest": "ce20f115a4845d8a",
+        "units": 382870
+      }
+    },
+    {
+      "id": "range.large_middle_rows",
+      "op": "rangeReader",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "range": "B60001:C60200",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 2,
+      "warmupMs": 100,
+      "budgetMs": 450,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "range",
+        "xlsx"
+      ],
+      "expected": {
+        "digest": "9005f76751f6caa4",
+        "deepDigest": "9005f76751f6caa4",
+        "units": 400
+      }
+    },
+    {
+      "id": "range.readrange_medium",
+      "op": "readRange",
+      "fixture": "medium",
+      "sheet": "Data",
+      "range": "A1:J1000",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 5,
+      "warmupMs": 100,
+      "budgetMs": 350,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "range",
+        "xlsx"
+      ],
+      "expected": {
+        "digest": "7e66e77d367d94ca",
+        "deepDigest": "ae1413ce0672091f",
+        "units": 10000
+      }
+    },
+    {
+      "id": "analyze.full_banking_real",
+      "op": "analyze",
+      "fixture": "banking_real",
+      "level": "Full",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 800,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "analysis",
+        "real"
+      ],
+      "expected": {
+        "digest": "e14e8b4ddc7484ce",
+        "deepDigest": "503be09ff39b2977",
+        "units": 40354
+      }
+    },
+    {
+      "id": "analyze.observed_strings_repeated",
+      "op": "analyze",
+      "fixture": "strings_repeated",
+      "level": "Observed",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 900,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "cells",
+      "tags": [
+        "analysis"
+      ],
+      "expected": {
+        "digest": "7da3bdc23c201874",
+        "deepDigest": "3d3b3af4b94e1e70",
+        "units": 480008
+      }
+    },
+    {
+      "id": "layout.complex_calculator",
+      "op": "layout",
+      "fixture": "complex",
+      "sheet": "Calculator",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 5,
+      "warmupMs": 100,
+      "budgetMs": 250,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "sheets",
+      "tags": [
+        "layout"
+      ],
+      "expected": {
+        "digest": "ae0b3f185392bc38",
+        "deepDigest": "ae0b3f185392bc38",
+        "units": 1
+      }
+    },
+    {
+      "id": "layout.mcdonalds_all",
+      "op": "layout",
+      "fixture": "mcdonalds_real",
+      "sheet": "*",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 900,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "sheets",
+      "tags": [
+        "layout",
+        "real"
+      ],
+      "expected": {
+        "digest": "675ac58e543cc1a2",
+        "deepDigest": "675ac58e543cc1a2",
+        "units": 8
+      }
+    },
+    {
+      "id": "query.builder_filter_sum_large",
+      "op": "queryBuilderFilterSum",
+      "fixture": "large_xlsx",
+      "sheet": "Numbers",
+      "range": "A1:E100001",
+      "column": "A",
+      "sumColumn": "C",
+      "threshold": 0.5,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 800,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "query"
+      ],
+      "expected": {
+        "digest": "a060877ec23bc81b",
+        "deepDigest": "a060877ec23bc81b",
+        "units": 100000
+      }
+    },
+    {
+      "id": "query.groupby_category",
+      "op": "query",
+      "fixture": "strings_repeated",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Category, SUM(Value), COUNT() GROUP BY Category",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "query",
+        "groupby"
+      ],
+      "expected": {
+        "digest": "aa16dd99a0973e13",
+        "deepDigest": "42b8bdbaf6daf994",
+        "units": 60000
+      }
+    },
+    {
+      "id": "query.expr_groupby_orderby_limit",
+      "op": "query",
+      "fixture": "strings_repeated",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Product, SUM(Value * Qty) FILTER (WHERE Flag = 'Y') AS Revenue GROUP BY Product ORDER BY Revenue DESC LIMIT 25",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 700,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "query",
+        "groupby",
+        "expressions",
+        "orderby"
+      ],
+      "expected": {
+        "digest": "6233c9ac850d3838",
+        "deepDigest": "074e7d72a48fccbf",
+        "units": 60000
+      }
+    },
+    {
+      "id": "query.rows_orderby_limit",
+      "op": "query",
+      "fixture": "strings_repeated",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT Id, Product, Value WHERE Region = 'EMEA' AND Value > 500 ORDER BY Value DESC LIMIT 20",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 650,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "query",
+        "orderby"
+      ],
+      "expected": {
+        "digest": "0e1ed32ea081fc28",
+        "deepDigest": "401170491214b4b4",
+        "units": 60000
+      }
+    },
+    {
+      "id": "query.rows_limit_early_exit",
+      "op": "query",
+      "fixture": "strings_repeated",
+      "query": "FROM Data!A1:H60001 HEADER ROW 1 SELECT * WHERE Flag = 'N' LIMIT 100",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 5,
+      "warmupMs": 100,
+      "budgetMs": 250,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "rows",
+      "tags": [
+        "query",
+        "early-exit"
+      ],
+      "expected": {
+        "digest": "f5907422acae0a23",
+        "deepDigest": "6274e78aba880117",
+        "units": 324
+      }
+    },
+    {
+      "id": "query.distinct_product",
+      "op": "distinct",
+      "fixture": "strings_repeated",
+      "sheet": "Data",
+      "range": "A1:H60001",
+      "column": "Product",
+      "threshold": 0,
+      "headerRow": 1,
+      "top": 100,
+      "sleepMs": 0,
+      "default": true,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 700,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "counted",
+      "tags": [
+        "query",
+        "distinct"
+      ],
+      "expected": {
+        "digest": "214e4d7817e8e340",
+        "deepDigest": "9e6abea7a061c215",
+        "units": 4185
+      }
+    },
+    {
+      "id": "probe.over_budget",
+      "op": "sleep",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 400,
+      "default": false,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 100,
+      "budgetMs": 60000,
+      "minSamples": 100,
+      "maxSamples": 100,
+      "unit": "ops",
+      "tags": [
+        "probe"
+      ]
+    },
+    {
+      "id": "probe.hang",
+      "op": "sleep",
+      "threshold": 0,
+      "headerRow": 0,
+      "top": 100,
+      "sleepMs": 120000,
+      "default": false,
+      "isolated": false,
+      "opsPerSample": 1,
+      "warmupMs": 0,
+      "budgetMs": 60000,
+      "minSamples": 5,
+      "maxSamples": 25,
+      "unit": "ops",
+      "tags": [
+        "probe-hang"
+      ]
+    }
+  ]
+}

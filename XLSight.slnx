@@ -10,5 +10,6 @@
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/XLSight.Benchmarks/XLSight.Benchmarks.csproj" />
+    <Project Path="benchmarks/XLSight.FastBench/XLSight.FastBench.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <!-- Measurement settings are part of the build identity recorded in every result file. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XLSight\XLSight.csproj" />
+    <ProjectReference Include="..\..\src\XLSight.Layout\XLSight.Layout.csproj" />
+    <ProjectReference Include="..\..\src\XLSight.Query\XLSight.Query.csproj" />
+  </ItemGroup>
+</Project>
