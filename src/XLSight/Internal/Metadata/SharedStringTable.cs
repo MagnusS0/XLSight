@@ -30,19 +30,27 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     // 131 072 entries × 8 bytes = 1 MB — covers low-index clustered strings.
     private const int MaxCacheEntries = 131072;
 
+    // Cache slots are allocated in 4 096-entry (32 KB) chunks on first touch, so an
+    // early-exit read of a large SST does not pay for the full 1 MB slot array up front.
+    private const int CacheChunkBits = 12;
+    private const int CacheChunkSize = 1 << CacheChunkBits;
+    private const int CacheChunkMask = CacheChunkSize - 1;
+
     internal static readonly SharedStringTable Empty = new();
 
     private readonly List<byte[]> _arena;
     private readonly List<long[]> _info;
     // Low-index strings are clustered and highly repeated; high-index strings bypass and die in Gen 0.
-    private readonly string?[] _cache;
+    private readonly string?[]?[] _cache;
 
     // Lazy-parsing state — all null once _isComplete is true.
     private SharedStringsByteParser.ParseState? _parseState;
+    private Stream? _sstStream;
     private ScanBuffer? _sstBuffer;
     private byte[]? _stagingBuf;
     private readonly Lock _pumpLock = new();
     private readonly int _cacheLength;
+    private readonly int _declaredUniqueCount = -1;
 
     private int  _parsedCount;
     private bool _isComplete;
@@ -75,18 +83,21 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     /// requests an index not yet in the arena.
     /// </summary>
     internal SharedStringTable(
+        Stream stream,
         ScanBuffer buffer,
         SharedStringsByteParser.ParseState state,
         byte[] stagingBuf,
         int declaredUniqueCount)
     {
+        _sstStream  = stream;
         _sstBuffer  = buffer;
         _parseState = state;
         _stagingBuf = stagingBuf;
         _arena      = state.ArenaChunks;
         _info       = state.InfoChunks;
         _cacheLength = GetCacheLength(declaredUniqueCount);
-        _cache      = new string?[_cacheLength];
+        _cache      = new string?[]?[(_cacheLength + CacheChunkMask) >> CacheChunkBits];
+        _declaredUniqueCount = declaredUniqueCount;
         _isComplete = false;
     }
 
@@ -102,12 +113,20 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
         if ((uint)index >= (uint)_parsedCount) { return string.Empty; }
 
-        if (index < _cache.Length)
+        if (index < _cacheLength)
         {
-            return _cache[index] ??= DecodeFromArena(index);
+            string?[] chunk = _cache[index >> CacheChunkBits] ?? CreateCacheChunk(index >> CacheChunkBits);
+            return chunk[index & CacheChunkMask] ??= DecodeFromArena(index);
         }
 
         return DecodeFromArena(index);
+    }
+
+    private string?[] CreateCacheChunk(int chunkIndex)
+    {
+        int length = Math.Min(CacheChunkSize, _cacheLength - (chunkIndex << CacheChunkBits));
+        var created = new string?[length];
+        return Interlocked.CompareExchange(ref _cache[chunkIndex], created, null) ?? created;
     }
 
     /// <summary>
@@ -162,7 +181,10 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
         if (_isComplete) { return; }
         lock (_pumpLock)
         {
-            while (!_isComplete && _parsedCount <= targetIndex)
+            // Once the declared uniqueCount is reached, probe once more: on a well-formed SST
+            // this hits </sst>, completes the table and releases the stream, the 64 KB scan
+            // window and the 256 KB staging buffer instead of holding them until Dispose.
+            while (!_isComplete && (_parsedCount <= targetIndex || _parsedCount == _declaredUniqueCount))
             {
                 if (!SharedStringsByteParser.FindNextSiCandidate(_sstBuffer!))
                 {
@@ -180,6 +202,9 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     {
         _sstBuffer?.Dispose();
         _sstBuffer = null;
+        // ScanBuffer does not own its source; release the zip entry (inflater) stream here.
+        _sstStream?.Dispose();
+        _sstStream = null;
         if (_stagingBuf is not null)
         {
             ArrayPool<byte>.Shared.Return(_stagingBuf, clearArray: false);

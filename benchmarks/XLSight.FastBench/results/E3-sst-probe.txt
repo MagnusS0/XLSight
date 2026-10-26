@@ -1,0 +1,31 @@
+# E3 focused SST probe (dotnet run probe.cs, base = HEAD a6c45e1, cand = HEAD + memory-candidate-2)
+```csharp
+#:project PROJECT
+#:property TreatWarningsAsErrors=false
+using XLSight;
+string f = "/home/user/XLSight/artifacts/fastbench/fixtures/strings_unique.xlsx";
+// warm the JIT and pools once
+using (var w = ExcelWorkbook.Open(f)) { w.ReadRange("Data", "A1:D10"); }
+Measure("first10", wb => { var r = wb.ReadRange("Data", "A1:D10"); return r.Rows.Count; });
+Measure("fullscan", wb => { long n = 0; using var rd = wb.GetSheetReader("Data"); while (rd.Read()) n += rd.Current.CellCount; return n; });
+void Measure(string name, Func<ExcelWorkbook, long> op)
+{
+    GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+    long before = GC.GetTotalMemory(true);
+    long a0 = GC.GetTotalAllocatedBytes(true);
+    var wb = ExcelWorkbook.Open(f);
+    long result = op(wb);
+    long alloc = GC.GetTotalAllocatedBytes(true) - a0;
+    long retainedOpen = GC.GetTotalMemory(true) - before;
+    wb.Dispose();
+    long retainedDisposed = GC.GetTotalMemory(true) - before;
+    GC.KeepAlive(wb);
+    Console.WriteLine($"{name,-9} result={result} alloc={alloc / 1024} KiB retained(open)={retainedOpen / 1024} KiB retained(disposed, ref held)={retainedDisposed / 1024} KiB");
+}
+```
+base:
+first10   result=10 alloc=1245 KiB retained(open)=1178 KiB retained(disposed, ref held)=1163 KiB
+fullscan  result=160004 alloc=20197 KiB retained(open)=17797 KiB retained(disposed, ref held)=17782 KiB
+cand:
+first10   result=10 alloc=245 KiB retained(open)=178 KiB retained(disposed, ref held)=171 KiB
+fullscan  result=160004 alloc=20190 KiB retained(open)=17790 KiB retained(disposed, ref held)=17783 KiB

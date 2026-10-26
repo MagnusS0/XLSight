@@ -87,3 +87,24 @@ Raw files: `results/*-baseline-[1-6].json`.
   analyze.full_banking_real −19 % (4.6 → 3.7 MiB), cold Banking analyze −17 %, peak RSS −1.4 %.
   Time: all inconclusive except `layout.mcdonalds_all` "faster" −13 %. That case was not
   targeted and there is no clear mechanism, so it is not claimed as an effect.
+
+## E3 — Release shared-string parser resources at completion; lazy cache chunks — **KEEP (memory)**
+
+- **Hypothesis (Memory worker):** the SST table never reached `_isComplete` during normal scans,
+  so it held a 256 KiB staging buffer, a 64 KiB window and the zip entry stream until Dispose.
+  That stream was never disposed at all (its zlib state waited for the finalizer). The table
+  also allocated its 1 MiB cache-slot array up front. Fix: probe once more when `parsed ==
+  declared uniqueCount` to complete the table and free its buffers; dispose the entry stream;
+  allocate cache slots in 4,096-entry chunks via `Interlocked.CompareExchange`.
+- **Tests:** 923/923.
+- **Fast suite:** `ab HEAD 3` (`results/E3-compare.md`). No regression; allocations −1 to −3.5 %
+  broadly; `query.groupby_category` "faster" −4.9 %, at the edge of noise and not claimed.
+- **Focused probe** (deterministic allocation, strings_unique.xlsx, 160 K unique SST entries; script in
+  `results/E3-sst-probe.txt`):
+
+  | Workload | Base alloc | Cand alloc | Base retained (open) | Cand retained (open) |
+  |---|--:|--:|--:|--:|
+  | ReadRange A1:D10 | 1,245 KiB | 245 KiB (−80 %) | 1,178 KiB | 178 KiB (−85 %) |
+  | Full scan | 20,197 KiB | 20,190 KiB | 17,797 KiB | 17,790 KiB |
+
+  Still open: a disposed workbook that is still referenced retains 17.8 MiB (follow-up F-dispose).
