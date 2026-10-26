@@ -291,3 +291,14 @@ Raw files: `results/*-baseline-[1-6].json`.
   - It weakens the documented `TryGetSharedStringId` contract ("the identical string object").
   - The remaining retained-memory problem after Dispose is handled separately (wave-2 Memory
     worker, Dispose release).
+
+## Interim cumulative check — HEAD `937d7d8` (E1–E11 kept) vs baseline `5643a0c`
+
+`ab 5643a0c 3` (`results/interim-cumulative-vs-baseline.md`), with three niced wave-2 workers running.
+"faster" with all rounds agreeing: async bounded range −69 % (alloc −98.5 %), merged-regions
+analysis −97 %, sparse layout −67 %, bounded range −31 %, ReadRange medium −21 %, queries −12 to
+−18 % (expression group/order/limit, row order/limit, distinct), mixed values scan −12 %.
+Allocation/op: open −70 %, readcell −69 %, numeric scan −69 %, mixed scans −44/−45 %, query cases
+−21 to −67 %, Banking analysis −19 %. Single-op cold cases and full numeric scans were too noisy
+to read here; a final quiet remeasure follows after wave 2. One base round came out incomplete:
+the slower baseline under host load overran the 24 s internal budget (21.1–22.8 s observed).
