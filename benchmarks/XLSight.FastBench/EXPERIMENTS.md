@@ -267,3 +267,27 @@ Raw files: `results/*-baseline-[1-6].json`.
   (`results/E11-recheck-5rounds.md`): inconclusive (−0.2 %). HEADER ROW queries never use the
   analysis sink, so this is not a regression.
   `analyze.full_merged_regions` "faster" −11 % is not claimed.
+
+## E12 — Cache a shared string only on its second lookup (TinyLFU-style doorkeeper) — **REJECT**
+
+- **Hypothesis (Memory worker, `memory-candidate-3.patch`):** strings looked up once (IDs, free text)
+  are also kept as a UTF-16 copy beside the UTF-8 arena. Admitting to the cache only on the second
+  touch (Einziger et al., "TinyLFU", ACM TOS 2017, https://arxiv.org/abs/1512.00727; applying it
+  to the SST cache is the worker's inference) should cut retained memory.
+- **Tests:** 958/958.
+- **Measurement** (`results/E12-sst-second-touch-probe.md`, strings_unique.xlsx, 2 alternating rounds):
+
+  | Metric | Base | Cand |
+  |---|--:|--:|
+  | Retained after one scan | 17.83 MiB | 7.54 MiB (−58 %) |
+  | **Peak RSS, one scan** | 61.0 MiB | **68.1 MiB (+12 %)** |
+  | Second scan, allocation | 2.28 MiB | **12.56 MiB (+5.5×)** |
+  | Scan time | 650 / 242–278 ms | 647–651 / 241–274 ms |
+
+- **Decision:** reject.
+  - The retained-heap win is real, but peak process memory got worse: uncached first-touch strings
+    become garbage the GC absorbs by growing gen0 first.
+  - Any second pass (analysis then query, `HEADER AUTO`) re-allocates every singleton.
+  - It weakens the documented `TryGetSharedStringId` contract ("the identical string object").
+  - The remaining retained-memory problem after Dispose is handled separately (wave-2 Memory
+    worker, Dispose release).
