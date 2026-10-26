@@ -212,3 +212,41 @@ Raw files: `results/*-baseline-[1-6].json`.
   alternating base/candidate processes (`results/E9-layout-probe.md`): stack3200 463–498 →
   222–231 ms (**−55 %**, both rounds). Sparse sheets were unchanged, as expected: their
   superlinear terms are in E10's routines.
+
+## E10 — Layout: indexed lookups instead of all-fields scans in four routines — **KEEP**
+
+- **Hypothesis (Query worker, `query-candidate-4.patch`):** on sparse, fragmented sheets layout
+  inference was worse than quadratic (worker scaling: 0.94 s → 4.6 s → 40 s as rows doubled from
+  6,250 to 25,000). Four routines scanned every field or component:
+  - `ClassifyColumnZone` (every field, for every column of every field) → a per-column index
+    sorted by top row with a running max of bottom rows. It returns the same "first field in
+    list order" the loop returned.
+  - `InheritHorizontalContext` (`Where().MaxBy()` over all axes per field, plus an all-fields host
+    search) → a binary search over primary horizontals. `SnapshotAxes` is ordered by top row then
+    column, and the backward scan keeps `MaxBy`'s first-of-ties choice. Hosts are bucketed by left
+    column, which is exact because a host must start at `fragment.Right + 1`.
+  - `FindConnectedComponents` (all pairs) → bucket by left column. `VectorsConnect` is
+    symmetric and union-find ignores pair order.
+  - `MergeOverlappingComponents` (restart from the top after every merge) → an incremental
+    merge with column buckets. It reproduces the original "lowest i, then lowest j, restart"
+    merge order exactly (worker differential fuzz: 20 K random cases, ~295 K merges, duplicates
+    included).
+  - The lead checked each invariant in the source: `fieldRanges` is never mutated after
+    construction, the original loop returns at its first match, and the ordering and symmetry
+    hold as stated.
+- **Correctness:** `eqcheck.sh` full JSON dumps over 19 workbooks: **identical** (the candidate's
+  dump also ran 23 s → 9 s). Tests 958/958.
+- **Measurement:** direct probe, alternating processes (`results/E10-layout-probe.md`):
+
+  | Sheet | Base | Cand |
+  |---|--:|--:|
+  | sparse6250 | 1,111–1,122 ms | 194–220 ms (−82 %) |
+  | sparse12500 | 5,077–5,318 ms | 358–407 ms (−93 %) |
+  | mixed_sparse (25 K rows, FastBench fixture) | 12,880–13,038 ms | 931–1,022 ms (−93 %) |
+  | stack3200 / t60k | unchanged | unchanged |
+
+  Fast suite (`results/E10-compare-focused.md`, noisy host): `layout.sparse_fragmented_2k`
+  −28.9 % "faster"; other layout/analysis cases inconclusive.
+- **Process note:** a first probe attempt reused `dotnet run` file-app build caches and measured
+  stale binaries. It was caught because the base numbers did not reflect the already-merged E9,
+  and it was discarded. Probes are now rebuilt with `--no-cache`.

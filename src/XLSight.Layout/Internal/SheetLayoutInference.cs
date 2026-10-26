@@ -573,7 +573,9 @@ internal static class SheetLayoutInference
     // host's horizontals. Context-role copies keep the tables in separate groups.
     private static void InheritHorizontalContext(List<DetectedField> fields, AxisBuilder axisBuilder)
     {
-        IReadOnlyList<LayoutAxis> axes = axisBuilder.SnapshotAxes();
+        // Primary horizontal axes in snapshot order, which is ascending by top row.
+        List<LayoutAxis> horizontals = [.. axisBuilder.SnapshotAxes().Where(static axis =>
+            axis.Orientation == LayoutAxisOrientation.Horizontal && axis.Role == LayoutAxisRole.Primary)];
         foreach (var field in fields)
         {
             if (field.Axes.Any(static axis => axis.Orientation == LayoutAxisOrientation.Horizontal))
@@ -582,18 +584,24 @@ internal static class SheetLayoutInference
             }
 
             ExcelRange range = field.Candidate.Range;
-            LayoutAxis? inherited = axes
-                .Where(axis => axis.Orientation == LayoutAxisOrientation.Horizontal &&
-                    axis.Role == LayoutAxisRole.Primary &&
-                    axis.Range.TopLeft.Row < range.TopLeft.Row &&
-                    axis.Range.TopLeft.Column <= range.TopLeft.Column &&
-                    axis.Range.BottomRight.Column >= range.BottomRight.Column &&
-                    range.Width * 2 >= axis.Range.Width)
-                .MaxBy(static axis => axis.Range.TopLeft.Row);
-            if (inherited is not null)
+            if (FindInheritedHorizontal(horizontals, range) is { } inherited)
             {
                 field.Axes.Add(axisBuilder.CreateContextCopy(inherited));
             }
+        }
+
+        // A host abuts the fragment's right edge, so only fields starting in that column qualify.
+        var fieldsByLeftColumn = new Dictionary<int, List<int>>();
+        for (int i = 0; i < fields.Count; i++)
+        {
+            int left = fields[i].Candidate.Range.TopLeft.Column;
+            if (!fieldsByLeftColumn.TryGetValue(left, out List<int>? bucket))
+            {
+                bucket = [];
+                fieldsByLeftColumn.Add(left, bucket);
+            }
+
+            bucket.Add(i);
         }
 
         for (int i = 0; i < fields.Count; i++)
@@ -603,14 +611,57 @@ internal static class SheetLayoutInference
                 continue;
             }
 
-            InheritFromHost(fields, axisBuilder, i);
+            if (fieldsByLeftColumn.TryGetValue(fields[i].Candidate.Range.BottomRight.Column + 1, out List<int>? hosts))
+            {
+                InheritFromHost(fields, hosts, axisBuilder, i);
+            }
         }
     }
 
-    private static void InheritFromHost(List<DetectedField> fields, AxisBuilder axisBuilder, int fragmentIndex)
+    // The qualifying axis with the greatest top row, first in snapshot order among equal top rows
+    // (Enumerable.MaxBy semantics). Scans backward from the last axis above the field and stops
+    // once a match is found and the top row changes.
+    private static LayoutAxis? FindInheritedHorizontal(List<LayoutAxis> horizontals, ExcelRange range)
+    {
+        int lo = 0;
+        int hi = horizontals.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (horizontals[mid].Range.TopLeft.Row < range.TopLeft.Row)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
+        LayoutAxis? best = null;
+        for (int i = lo - 1; i >= 0; i--)
+        {
+            LayoutAxis axis = horizontals[i];
+            if (best is not null && axis.Range.TopLeft.Row != best.Range.TopLeft.Row)
+            {
+                break;
+            }
+
+            if (axis.Range.TopLeft.Column <= range.TopLeft.Column &&
+                axis.Range.BottomRight.Column >= range.BottomRight.Column &&
+                range.Width * 2 >= axis.Range.Width)
+            {
+                best = axis;
+            }
+        }
+
+        return best;
+    }
+
+    private static void InheritFromHost(List<DetectedField> fields, List<int> hosts, AxisBuilder axisBuilder, int fragmentIndex)
     {
         ExcelRange fragment = fields[fragmentIndex].Candidate.Range;
-        for (int host = 0; host < fields.Count; host++)
+        foreach (int host in hosts)
         {
             ExcelRange hostRange = fields[host].Candidate.Range;
             if (host == fragmentIndex ||
@@ -791,9 +842,30 @@ internal static class SheetLayoutInference
             return x;
         }
 
+        // Connected vectors are column-adjacent, so each vector only needs comparing with those
+        // whose left column is right after its own right column; the opposite direction is found
+        // from the other vector. Components are a partition, so pair order does not matter.
+        var byLeftColumn = new Dictionary<int, List<int>>();
         for (int i = 0; i < pending.Count; i++)
         {
-            for (int j = i + 1; j < pending.Count; j++)
+            int left = pending[i].Range.TopLeft.Column;
+            if (!byLeftColumn.TryGetValue(left, out List<int>? bucket))
+            {
+                bucket = [];
+                byLeftColumn.Add(left, bucket);
+            }
+
+            bucket.Add(i);
+        }
+
+        for (int i = 0; i < pending.Count; i++)
+        {
+            if (!byLeftColumn.TryGetValue(pending[i].Range.BottomRight.Column + 1, out List<int>? neighbors))
+            {
+                continue;
+            }
+
+            foreach (int j in neighbors)
             {
                 if (VectorsConnect(pending[i].Range, pending[j].Range))
                 {
@@ -815,23 +887,115 @@ internal static class SheetLayoutInference
     // vector fields never overlap.
     private static void MergeOverlappingComponents(List<(FieldCandidate Seed, ExcelRange Bounds)> components)
     {
-        for (bool merged = true; merged;)
+        // Same result as repeatedly merging the first overlapping pair (i < j, lowest i, then
+        // lowest j) and restarting from the top: before a merge, no component below i overlaps
+        // any later one, so after i grows only an earlier component overlapping the grown i can
+        // be the next pair, and that pair is (earliest such k, i). Components are tracked by
+        // stable ids (list order is preserved by removal), and overlap candidates come from
+        // per-column buckets instead of a scan over every component.
+        int count = components.Count;
+        if (count < 2)
         {
-            merged = false;
-            for (int i = 0; i < components.Count && !merged; i++)
+            return;
+        }
+
+        var bounds = new ExcelRange[count];
+        var alive = new bool[count];
+        var byColumn = new Dictionary<int, List<int>>();
+        for (int id = 0; id < count; id++)
+        {
+            bounds[id] = components[id].Bounds;
+            alive[id] = true;
+            IndexColumns(byColumn, id, bounds[id].TopLeft.Column, bounds[id].BottomRight.Column);
+        }
+
+        int current = 0;
+        while (current < count)
+        {
+            if (!alive[current])
             {
-                for (int j = i + 1; j < components.Count; j++)
-                {
-                    if (Overlaps(components[i].Bounds, components[j].Bounds))
-                    {
-                        components[i] = (components[i].Seed, Union(components[i].Bounds, components[j].Bounds));
-                        components.RemoveAt(j);
-                        merged = true;
-                        break;
-                    }
-                }
+                current++;
+                continue;
+            }
+
+            int next = FirstOverlapping(byColumn, bounds, alive, current, after: true);
+            if (next < 0)
+            {
+                current++;
+                continue;
+            }
+
+            Absorb(byColumn, bounds, alive, current, next);
+            for (int earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false);
+                earlier >= 0;
+                earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false))
+            {
+                Absorb(byColumn, bounds, alive, earlier, current);
+                current = earlier;
             }
         }
+
+        int write = 0;
+        for (int id = 0; id < count; id++)
+        {
+            if (alive[id])
+            {
+                components[write++] = (components[id].Seed, bounds[id]);
+            }
+        }
+
+        components.RemoveRange(write, count - write);
+    }
+
+    private static void IndexColumns(Dictionary<int, List<int>> byColumn, int id, int startCol, int endCol)
+    {
+        for (int col = startCol; col <= endCol; col++)
+        {
+            if (!byColumn.TryGetValue(col, out List<int>? bucket))
+            {
+                bucket = [];
+                byColumn.Add(col, bucket);
+            }
+
+            bucket.Add(id);
+        }
+    }
+
+    // Lowest live id above (after) or below (!after) `id` whose bounds overlap it, or -1.
+    private static int FirstOverlapping(Dictionary<int, List<int>> byColumn, ExcelRange[] bounds, bool[] alive, int id, bool after)
+    {
+        int best = -1;
+        ExcelRange range = bounds[id];
+        for (int col = range.TopLeft.Column; col <= range.BottomRight.Column; col++)
+        {
+            if (!byColumn.TryGetValue(col, out List<int>? bucket))
+            {
+                continue;
+            }
+
+            foreach (int other in bucket)
+            {
+                if (other == id || !alive[other] || (after ? other < id : other > id) ||
+                    (best >= 0 && other >= best) || !Overlaps(range, bounds[other]))
+                {
+                    continue;
+                }
+
+                best = other;
+            }
+        }
+
+        return best;
+    }
+
+    private static void Absorb(Dictionary<int, List<int>> byColumn, ExcelRange[] bounds, bool[] alive, int keep, int remove)
+    {
+        ExcelRange before = bounds[keep];
+        ExcelRange merged = Union(before, bounds[remove]);
+        bounds[keep] = merged;
+        alive[remove] = false;
+        IndexColumns(byColumn, keep, merged.TopLeft.Column, before.TopLeft.Column - 1);
+        IndexColumns(byColumn, keep, before.BottomRight.Column + 1, merged.BottomRight.Column);
     }
 
     private static bool VectorsConnect(ExcelRange left, ExcelRange right)
@@ -1284,16 +1448,21 @@ internal static class SheetLayoutInference
             return bestCol == 0 ? null : bestCol;
         }
 
+        private readonly Dictionary<int, ColumnFieldIndex> _fieldsByColumn = [];
+
         private ColumnZone ClassifyColumnZone(int col, ExcelRange fieldRange)
         {
-            foreach (var other in fieldRanges)
+            if (!_fieldsByColumn.TryGetValue(col, out ColumnFieldIndex? index))
             {
-                if (other == fieldRange ||
-                    col < other.TopLeft.Column || col > other.BottomRight.Column ||
-                    other.TopLeft.Row > fieldRange.BottomRight.Row || other.BottomRight.Row < fieldRange.TopLeft.Row)
-                {
-                    continue;
-                }
+                index = new ColumnFieldIndex(fieldRanges, col);
+                _fieldsByColumn.Add(col, index);
+            }
+
+            // The first field (in fieldRanges order) covering col whose rows overlap this field.
+            int first = index.FirstOverlapping(fieldRanges, fieldRange);
+            if (first >= 0)
+            {
+                ExcelRange other = fieldRanges[first];
 
                 bool sameRows = other.TopLeft.Row == fieldRange.TopLeft.Row &&
                     other.BottomRight.Row == fieldRange.BottomRight.Row;
@@ -1308,6 +1477,76 @@ internal static class SheetLayoutInference
             }
 
             return ColumnZone.None;
+        }
+
+        /// <summary>
+        /// The field ranges covering one column, sorted by top row with a running maximum of
+        /// bottom rows, so an overlap query visits only ranges that can reach the probe rows
+        /// instead of every field on the sheet.
+        /// </summary>
+        private sealed class ColumnFieldIndex
+        {
+            private readonly int[] _indices;
+            private readonly int[] _maxBottomThrough;
+
+            public ColumnFieldIndex(List<ExcelRange> ranges, int col)
+            {
+                var indices = new List<int>();
+                for (int i = 0; i < ranges.Count; i++)
+                {
+                    if (col >= ranges[i].TopLeft.Column && col <= ranges[i].BottomRight.Column)
+                    {
+                        indices.Add(i);
+                    }
+                }
+
+                _indices = [.. indices];
+                Array.Sort(_indices, (left, right) =>
+                {
+                    int byTop = ranges[left].TopLeft.Row.CompareTo(ranges[right].TopLeft.Row);
+                    return byTop != 0 ? byTop : left.CompareTo(right);
+                });
+                _maxBottomThrough = new int[_indices.Length];
+                int maxBottom = int.MinValue;
+                for (int i = 0; i < _indices.Length; i++)
+                {
+                    maxBottom = Math.Max(maxBottom, ranges[_indices[i]].BottomRight.Row);
+                    _maxBottomThrough[i] = maxBottom;
+                }
+            }
+
+            /// <summary>Lowest list index of a range other than <paramref name="probe"/> whose rows overlap it, or -1.</summary>
+            public int FirstOverlapping(List<ExcelRange> ranges, ExcelRange probe)
+            {
+                int lo = 0;
+                int hi = _indices.Length;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) >>> 1;
+                    if (ranges[_indices[mid]].TopLeft.Row <= probe.BottomRight.Row)
+                    {
+                        lo = mid + 1;
+                    }
+                    else
+                    {
+                        hi = mid;
+                    }
+                }
+
+                int first = -1;
+                for (int i = lo - 1; i >= 0 && _maxBottomThrough[i] >= probe.TopLeft.Row; i--)
+                {
+                    int candidate = _indices[i];
+                    ExcelRange other = ranges[candidate];
+                    if (other.BottomRight.Row >= probe.TopLeft.Row && other != probe &&
+                        (first < 0 || candidate < first))
+                    {
+                        first = candidate;
+                    }
+                }
+
+                return first;
+            }
         }
 
         // A section header is an axis-column text row with no measure data across the attached
