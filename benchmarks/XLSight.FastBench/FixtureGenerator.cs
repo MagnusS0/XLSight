@@ -30,8 +30,8 @@ internal static class FixtureGenerator
             case "mixed_sparse":
                 WriteMixedSparse(outputPath, 25_000);
                 break;
-            case "mixed_sparse_3k":
-                WriteMixedSparse(outputPath, 3_000);
+            case "mixed_sparse_2k":
+                WriteMixedSparse(outputPath, 2_000);
                 break;
             case "mixed_sparse_x8":
                 WriteMixedSparse(outputPath, 200_000);
@@ -174,11 +174,11 @@ internal static class FixtureGenerator
         WritePackage(path, [("Mixed", sheet.Finish($"A1:AZ{rows}"))], sst.Finish());
     }
 
-    // A 5,000-row report-style sheet whose post-sheetData section carries 5,000 merged regions
-    // and 500 data validations: the metadata that full analysis walks after the cell data.
+    // A 2,500-row report-style sheet whose post-sheetData section carries 2,500 merged regions
+    // and 250 data validations: the metadata that full analysis walks after the cell data.
     private static void WriteMergedRegions(string path)
     {
-        const int rows = 5_000;
+        const int rows = 2_500;
         var rng = new SplitMix64(0x5EED_0004);
         var sst = new SharedStrings();
         var sheet = new SheetWriter();
@@ -199,8 +199,8 @@ internal static class FixtureGenerator
             tail.Append(CultureInfo.InvariantCulture, $"<mergeCell ref=\"A{r}:B{r}\"/>");
         }
 
-        tail.Append("</mergeCells><dataValidations count=\"500\">");
-        for (int i = 0; i < 500; i++)
+        tail.Append("</mergeCells><dataValidations count=\"250\">");
+        for (int i = 0; i < 250; i++)
         {
             int r = 1 + (i * 10);
             tail.Append(CultureInfo.InvariantCulture, $"<dataValidation type=\"whole\" operator=\"between\" allowBlank=\"1\" sqref=\"D{r}:D{r + 9}\"><formula1>0</formula1><formula2>1000</formula2></dataValidation>");
