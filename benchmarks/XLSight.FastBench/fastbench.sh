@@ -138,7 +138,7 @@ case "$cmd" in
         echo "round $i $side: $(grep -m1 -o '"status": "[a-z]*"' "$f")" >&2
       done
     done
-    dotnet "$DLL" compare --base "${base_files[@]}" --cand "${cand_files[@]}"
+    dotnet "$DLL" compare --paired --base "${base_files[@]}" --cand "${cand_files[@]}" | tee "$OUT_DIR/ab-$(date -u +%Y%m%d-%H%M%S)-compare.md"
     git -C "$ROOT" worktree remove --force "$base_tree" ;;
   selftest)
     rc_all=0

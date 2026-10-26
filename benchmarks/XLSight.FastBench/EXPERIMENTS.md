@@ -29,3 +29,28 @@ acceptance requires ≥3 rounds per side, and decisions are only made on a quiet
 showed allocation counts are near- but not perfectly deterministic (`scan.numeric_xlsb` 38.2 vs
 28.6 KiB/op): `GetTotalAllocatedBytes` includes runtime background-thread allocations, so deltas
 below ~10 KiB/op on multi-MiB cases are noise.
+
+## Baseline (manifest v1, frozen) — quiet host
+
+Revision `5643a0c` (library sources identical to `c1452e3`), XLSight.dll sha `42fc625761d4`.
+29 default cases (2 fresh-process). Workers idle; load average ≈1.0 (agent host process).
+
+| Run set | Status | Suite wall-clock |
+|---|---|---|
+| baseline-1..3 | complete ×3 | 20.3, 20.4, 20.4 s |
+| baseline-4..6 | complete ×3 | 20.7, 21.1, 21.0 s |
+
+Raw files: `results/*-baseline-[1-6].json`.
+
+### Noise characterization
+
+- Within-run MAD: typically 0.2–5 % of the median for ≥50 ms cases; 5–20 % for sub-ms cases
+  (open, readcell, readrange) and cases with background parallelism (analyze).
+- **Block drift:** comparing runs 1–3 with 4–6 (identical code, back to back) gave false "SLOWER"
+  verdicts of +5.7 %, +15 %, +22 %, even when per-run medians were paired, because the whole host
+  slowed between blocks. So no acceptance decision is made from block comparisons.
+- **Interleaved A/A** (`fastbench.sh ab HEAD 3`: base/cand alternate per round, paired per-round
+  deltas, a verdict needs all rounds to agree in sign and |Δ| > max(3 %, 2 × noise)): **0 of 29 cases
+  flagged**. Saved as `results/aa-interleaved-3rounds-compare.md`.
+- Gate used below: `ab` with ≥3 rounds; targeted cases must be "faster" with no "SLOWER"
+  elsewhere, or have a mechanism-specific explanation re-confirmed with ≥5 rounds.

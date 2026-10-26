@@ -6,7 +6,7 @@ using XLSight.FastBench;
 
 // Commands:
 //   run      [--filter REGEX] [--label NAME] [--out DIR] [--budget-ms N] [--no-internal-watchdog]
-//   compare  --base A.json [A2.json ...] --cand B.json [B2.json ...] [--min-effect PCT]
+//   compare  --base A.json [A2.json ...] --cand B.json [B2.json ...] [--min-effect PCT] [--paired]
 //   fixtures [--force] [--confirm]  generate deterministic synthetic fixtures (--confirm adds the large tier)
 //   record-expected             calibration: pin fixture hashes and expected digests into the manifest
 //   child    --case ID          internal: one isolated case in a fresh process
@@ -37,7 +37,8 @@ try
         "compare" => Report.Compare(
             options.GetValueOrDefault("base") ?? throw new ArgumentException("--base is required"),
             options.GetValueOrDefault("cand") ?? throw new ArgumentException("--cand is required"),
-            Single(options, "min-effect") is { } e ? double.Parse(e, CultureInfo.InvariantCulture) : 3.0),
+            Single(options, "min-effect") is { } e ? double.Parse(e, CultureInfo.InvariantCulture) : 3.0,
+            options.ContainsKey("paired")),
         "fixtures" => GenerateFixtures(root, manifestPath, options.ContainsKey("force"), options.ContainsKey("confirm")),
         "record-expected" => RecordExpected(root, manifestPath),
         _ => throw new ArgumentException($"Unknown command '{command}'."),

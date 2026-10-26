@@ -67,7 +67,7 @@ internal static class Report
     /// Compares runs of the same manifest. With several files per side, each case uses the median
     /// of per-run medians, and noise is the larger of the per-side spread and the within-run MAD.
     /// </summary>
-    public static int Compare(IReadOnlyList<string> basePaths, IReadOnlyList<string> candidatePaths, double minEffectPercent)
+    public static int Compare(IReadOnlyList<string> basePaths, IReadOnlyList<string> candidatePaths, double minEffectPercent, bool paired)
     {
         List<RunResult> baseRuns = [.. basePaths.Select(Load)];
         List<RunResult> candRuns = [.. candidatePaths.Select(Load)];
@@ -91,7 +91,7 @@ internal static class Report
         }
 
         var sb = new StringBuilder();
-        sb.Append(Inv, $"base: {Describe(baseRuns)}\ncand: {Describe(candRuns)}\n\n");
+        sb.Append(Inv, $"base: {Describe(baseRuns)}\ncand: {Describe(candRuns)}\nmode: {(paired ? "paired interleaved rounds (median of per-round deltas; verdict needs every round to agree in sign)" : "unpaired blocks")}\n\n");
         sb.Append("| case | base ms | cand ms | Δ time | noise ± | verdict | base alloc/op | cand alloc/op | Δ alloc |\n");
         sb.Append("|---|--:|--:|--:|--:|---|--:|--:|--:|\n");
         IEnumerable<string> ids = baseRuns[0].Cases.Select(c => c.Id).Union(candRuns[0].Cases.Select(c => c.Id));
@@ -110,13 +110,29 @@ internal static class Report
             double km = Stats.Median([.. k.Select(c => isolated ? c.Isolation!.WarmOpMs : c.MedianMs)]);
             double noise = Math.Max(Noise(b, bm), Noise(k, km));
             double delta = 100 * (km - bm) / bm;
-            double threshold = Math.Max(minEffectPercent, 2 * noise);
-            // Between-run variance is unknown with fewer than 3 runs per side: an A/A test under load
-            // produced false "SLOWER" verdicts from within-run MAD alone, so such verdicts stay tentative.
-            bool tentative = b.Count < 3 || k.Count < 3;
-            string verdict = isolated ? "single-op (see RSS)"
-                : Math.Abs(delta) <= threshold ? "~ inconclusive"
-                : (delta < 0 ? "faster" : "SLOWER") + (tentative ? "? (need ≥3 runs/side)" : "");
+            string verdict;
+            double threshold;
+            if (paired && b.Count == k.Count && b.Count >= 3 && !isolated)
+            {
+                // Interleaved rounds (base_i ran right before cand_i): judge per-pair deltas so slow
+                // host drift between rounds cancels. A/A block comparisons showed drift of up to
+                // +22% between back-to-back blocks of identical code.
+                double[] pairs = [.. b.Zip(k, (x, y) => 100 * (y.MedianMs - x.MedianMs) / x.MedianMs)];
+                delta = Stats.Median(pairs);
+                double within = Stats.Median([.. b.Concat(k).Select(c => c.MedianMs > 0 ? 100 * c.MadMs / c.MedianMs : 0)]);
+                threshold = Math.Max(minEffectPercent, 2 * Math.Max(within, 1.4826 * Stats.Mad(pairs)));
+                bool consistent = pairs.All(p => p < 0) || pairs.All(p => p > 0);
+                verdict = Math.Abs(delta) <= threshold || !consistent ? "~ inconclusive"
+                    : delta < 0 ? "faster" : "SLOWER";
+            }
+            else
+            {
+                // Unpaired block comparison: vulnerable to host drift, so verdicts stay tentative.
+                threshold = Math.Max(minEffectPercent, 2 * noise);
+                verdict = isolated ? "single-op (see RSS)"
+                    : Math.Abs(delta) <= threshold ? "~ inconclusive"
+                    : (delta < 0 ? "faster?" : "SLOWER?") + " (unpaired; use ab)";
+            }
             double ba = Stats.Median([.. b.Select(c => c.AllocatedBytesPerOp)]);
             double ka = Stats.Median([.. k.Select(c => c.AllocatedBytesPerOp)]);
             string allocDelta = ba == 0 ? (ka == 0 ? "0%" : "+∞") : string.Create(Inv, $"{100 * (ka - ba) / ba:+0.0;-0.0}%");
