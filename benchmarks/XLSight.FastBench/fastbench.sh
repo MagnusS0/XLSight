@@ -67,6 +67,8 @@ git_identity() {
 run_suite() {
   local WALL_CAP_S="${FASTBENCH_WALL_CAP_S:-30}"
   check_fresh || return 1
+  # Resident compiler/MSBuild servers from earlier builds compete for CPU during measurement.
+  dotnet build-server shutdown >/dev/null 2>&1 || true
   git_identity
   mkdir -p "$OUT_DIR"
   local t0 rc t1
@@ -98,7 +100,7 @@ case "$cmd" in
   restore)
     timed restore dotnet restore "$PROJECT" --locked-mode -m:1 ;;
   build)
-    timed build dotnet build "$PROJECT" -c Release --no-restore -m:1 -nologo -clp:ErrorsOnly ;;
+    timed build dotnet build "$PROJECT" -c Release --no-restore -m:1 -nologo -clp:ErrorsOnly -nodeReuse:false -p:UseSharedCompilation=false ;;
   fixtures)
     check_fresh || exit 1
     timed fixtures dotnet "$DLL" fixtures --root "$ROOT" "$@" ;;
@@ -121,7 +123,7 @@ case "$cmd" in
     rm -rf "$base_tree/benchmarks/XLSight.FastBench"
     mkdir -p "$base_tree/benchmarks/XLSight.FastBench"
     (cd "$HERE" && tar --exclude=bin --exclude=obj -cf - .) | tar -C "$base_tree/benchmarks/XLSight.FastBench" -xf -
-    timed build-base dotnet build "$base_tree/benchmarks/XLSight.FastBench/XLSight.FastBench.csproj" -c Release -m:1 -nologo -clp:ErrorsOnly || exit 1
+    timed build-base dotnet build "$base_tree/benchmarks/XLSight.FastBench/XLSight.FastBench.csproj" -c Release -m:1 -nologo -clp:ErrorsOnly -nodeReuse:false -p:UseSharedCompilation=false || exit 1
     "$0" build || exit 1
     base_files=(); cand_files=()
     for i in $(seq 1 "$rounds"); do

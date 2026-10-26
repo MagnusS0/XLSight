@@ -108,3 +108,25 @@ Raw files: `results/*-baseline-[1-6].json`.
   | Full scan | 20,197 KiB | 20,190 KiB | 17,797 KiB | 17,790 KiB |
 
   Still open: a disposed workbook that is still referenced retains 17.8 MiB (follow-up F-dispose).
+
+## E4 — Clinger fast path for short decimals — **KEEP (time)**
+
+- **Hypothesis (both the Readers and Memory workers, prototyped independently):** `Utf8Parser.TryParse`
+  costs ~50–70 ns per short value and ~21 % of the numeric-scan profile. For `-?\d+(\.\d+)?` with
+  ≤15 digits, the mantissa is an exact integer below 2^53 and 10^k is an exact double, so one
+  IEEE division is correctly rounded (Clinger 1990; Lemire, SP&E 2021, §3,
+  https://arxiv.org/abs/2101.11408). Other input falls through to `Utf8Parser`, so its lenient
+  prefix semantics (`12abc` → 12) are unchanged. The Readers version was chosen as the more
+  conservative of the two (`1.` and `.5` fall back).
+- **Tests:** new `ShortDecimalParserTests` (accepted inputs bit-identical to `Utf8Parser`, including
+  `-0`; unusual inputs declined; 200,000 random short decimals bit-identical). 947/947.
+- **Measurement:**
+  - Full `ab HEAD 3` (`results/E4-compare-full.md`): the host was noisy (a resident Roslyn
+    `VBCSCompiler` averaged 35 % CPU). `scan.numeric_xlsx` was inconclusive; `scan.strings_repeated`
+    −11 % and `query.rows_limit_early_exit` −23 % were "faster"; no regressions.
+  - After fixing the driver to shut down build servers before measuring, a focused `ab HEAD 5`
+    (`results/E4-compare-focused-5rounds.md`): `confirm.warm_scan_numeric_xlsx` (40 samples/run)
+    152.5 → 137.1 ms (**−10.1 %**, noise ±6.2 %, all 5 rounds faster); `scan.numeric_xlsx` −16.9 %.
+    Mixed, real and string scans were inconclusive, as expected from their lower numeric share.
+- **Driver fix:** `fastbench.sh` now builds with `-nodeReuse:false -p:UseSharedCompilation=false`
+  and runs `dotnet build-server shutdown` before every measured run.
