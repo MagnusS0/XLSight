@@ -177,3 +177,20 @@ Raw files: `results/*-baseline-[1-6].json`.
   "SLOWER" +5.6 %. Under the gate it was re-run with 5 focused rounds
   (`results/E7-recheck-5rounds.md`): inconclusive (+3.5 %, ±51 %), and the changed code is
   unreachable from cursor scans, so it is not a regression. Merged regions held at −94.9 %.
+
+## E8 — Layout: O(1) matrix-run precondition; allocation-free header runs — **KEEP**
+
+- **Hypothesis (Query worker, `query-candidate-1.patch`):** `FindMatrixFields` ran a row and column
+  binary search (`FindCoordinateFirstRow`) for every cell before checking that a uniform-step
+  run could exist. A qualifying run needs ≥3 cells, and `ExtendUniformRun` is prefix-monotone
+  (uniformity is judged against the first step), so extending at most 3 cells first is an exact
+  O(1) filter. `GetHeaderRuns` was an iterator allocating per call; it is now a struct enumerator.
+- **Correctness:** full JSON dumps of `AnalyzeLayout` + `AnalyzeSheet(Observed/Full)` for every
+  sheet of 19 workbooks (golden, test, synthetic and FastBench fixtures; 232 records), built
+  against base and candidate: **identical** (`eqcheck.sh`). Tests 958/958.
+- **Measurement:** `ab HEAD 3` (`results/E8-compare.md`): `layout.complex_calculator` −14.4 %
+  (±6.2 %); layout allocation −14.3 % (sparse_fragmented_2k) and −7.7 % (McDonalds). Other layout
+  times were inconclusive on a noisy host. The worker's larger dense-table figure (60 K rows,
+  inference 127 → 39 ms) has no fast-suite case and is reported as the worker's measurement only.
+  `analyze.full_merged_regions` "faster" (−14.5 %) and `scan.mixed_sparse_values` (−3.8 %) are
+  outside this change's code path and not claimed.
