@@ -1,5 +1,4 @@
 using System.Buffers.Text;
-using System.Net;
 using System.Text;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
@@ -75,9 +74,9 @@ internal static partial class XlsxSheetScanner
     private static ExcelCellValue ExtractFormulaValue(ScanBuffer buf)
     {
         var fb = ExtractUntilClose(buf, TagFormula);
-        var text = Encoding.UTF8.GetString(fb);
+        // Decode before SkipToEndTag: fb points into the scan buffer.
+        var text = Utf8CellDecoder.DecodeXmlText(fb);
         SkipToEndTag(buf, TagCell);
-        if (text.Contains('&', StringComparison.Ordinal)) { text = WebUtility.HtmlDecode(text); }
         return ExcelCellValue.FromFormula(text);
     }
 

@@ -130,3 +130,22 @@ Raw files: `results/*-baseline-[1-6].json`.
     Mixed, real and string scans were inconclusive, as expected from their lower numeric share.
 - **Driver fix:** `fastbench.sh` now builds with `-nodeReuse:false -p:UseSharedCompilation=false`
   and runs `dotnet build-server shutdown` before every measured run.
+
+## E5 — Single-allocation XML text decode; shared error-code strings — **KEEP (allocation)**
+
+- **Hypothesis (Memory worker):** inline strings, `t="str"` values and formula text containing `&`
+  were materialized twice (`Encoding.UTF8.GetString`, then `WebUtility.HtmlDecode`), and every
+  error cell allocated a new string. Decoding the five XML entities and numeric references on the
+  UTF-8 bytes into a stack or pooled buffer, then calling `GetString` once, halves that.
+  Unrecognized forms (`&nbsp;`, `&#0;`, surrogates, a missing `;`, signs) keep the old path, so
+  output is identical.
+- **Implementation:** the decode-only part of `memory-candidate-1.patch`, applied by hand on top
+  of E4 (whose number fast path superseded the Memory worker's own).
+- **Tests:** new `XmlTextDecoderTests` (50,000 random entity mixes, including HTML-only names,
+  malformed and out-of-range references, non-ASCII and >256-byte strings, all equal to
+  `HtmlDecode(GetString(bytes))`; error codes). 949/949.
+- **Measurement:** `ab HEAD 3` (`results/E5-compare.md`). Allocation/op: scan.mixed_sparse_values
+  4.4 → 2.6 MiB (−41 %), scan.mixed_sparse_formulas 9.1 → 5.1 MiB (−44 %), stream.snapshots_mixed
+  −10 %. Time: inconclusive on the touched cases. `layout.sparse_fragmented_2k` "faster" −18 %
+  is not targeted and not claimed. `scan.numeric_xlsb` +34 % is inconclusive (±22 %), and XLSB
+  does not use this decoder.
