@@ -372,3 +372,25 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
   | strings_unique full scan | 17,784 KiB | 15 KiB |
   | strings_unique Analyze | 6,268 KiB | 13 KiB |
   | string_heavy.xlsb scan | 39 KiB | 9 KiB |
+
+## E16 — XLSB cursor: grow the cell buffer on demand, default input window — **KEEP (allocation)**
+
+- **Hypothesis (wave-2 Memory worker, `w2-memory-2.patch`):** each XLSB cursor rented all
+  16,384 cells (384 KiB, on the LOH). Unbounded reads also used a 1 MiB input window. Returned pool
+  arrays can stay in thread-local and per-core slots until gen2 trimming, so every cursor holds
+  about 1.4 MiB. Source: dotnet/runtime `SharedArrayPool.cs`, read 2026-10-27.
+- **Change:**
+  - The cell buffer starts at min(256, the bounded range's right column) and doubles as needed
+    up to 16,384. It is cleared when rented and returned with `clearArray: true`.
+  - Unbounded reads use the iterator's default 32 KiB window.
+- **Tests:** 1018/1018. The new wide-row test covers growth mid-row, out-of-order columns, column
+  16,384, no leak into the next row, and the projection path.
+- **Measurement** (`results/E16-xlsb-cursor-probe.md`, re-run by the lead):
+  - First cold cursor: 1024 → 6 KiB.
+  - 4 readers open at once: 4256 → 178 KiB.
+  - Steady-state alloc/op in the suite is unchanged, because the pool reuses arrays.
+  - Time: full-scan minimums were base 144.7–149.7 ms and cand 148.6–151.5 ms. A cost of up to
+    about 2 % is possible but sits inside the noise.
+  - The 11-round paired run (`results/E16-xlsb-11rounds.md`) was inconclusive at ±93 % noise
+    because the Query worker was running.
+- **Decision:** keep for the allocation. The final quiet run re-checks `scan.numeric_xlsb`.

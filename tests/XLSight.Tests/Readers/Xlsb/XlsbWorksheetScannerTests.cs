@@ -237,6 +237,66 @@ public sealed class XlsbWorksheetScannerTests
         Assert.Equal(5, row.GetCell(5).AsNumber());
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("A1:XFD3")]
+    [InlineData("B1:XFD3")]
+    public void Cursor_WideRows_GrowCellBufferWithoutLosingOrLeakingCells(string reference)
+    {
+        // The cursor starts with a small cell buffer and must grow it mid-row (columns 300 and
+        // 16,384), keep cells stored before the growth, and not leak them into later rows.
+        ExcelRange range = reference.Length == 0 ? ExcelRange.Unbounded : ExcelRange.Parse(reference);
+        using var stream = XlsbTestRecords.Stream(
+            XlsbTestRecords.Row(1),
+            XlsbTestRecords.Real(2, 2),
+            XlsbTestRecords.Real(300, 300),
+            XlsbTestRecords.Real(ExcelLimits.MaxColumns, ExcelLimits.MaxColumns),
+            XlsbTestRecords.Real(3, 3),
+            XlsbTestRecords.Row(2),
+            XlsbTestRecords.Real(2, -2),
+            XlsbTestRecords.Real(ExcelLimits.MaxColumns - 1, -1),
+            XlsbTestRecords.Row(3),
+            XlsbTestRecords.SharedString(1000, 0),
+            XlsbTestRecords.Real(1001, 1001),
+            XlsbTestRecords.EndSheetData());
+
+        using var cursor = new XlsbSheetCursor(
+            stream,
+            new Lazy<XlsbSharedStringTable>(() => new XlsbSharedStringTable(["shared"])),
+            StyleTable.Default,
+            isDate1904: false,
+            ReadMode.Values,
+            range,
+            formulaContext: null,
+            projection: new RowProjection([2, 3, 300, ExcelLimits.MaxColumns - 1, ExcelLimits.MaxColumns, 1001]));
+
+        Assert.True(cursor.MoveNext());
+        ExcelRow first = cursor.Current;
+        Assert.Equal(2, first.StartColumn);
+        Assert.Equal(ExcelLimits.MaxColumns - 1, first.CellCount);
+        Assert.Equal(2.0, first.GetCell(2).AsNumber());
+        Assert.Equal(3.0, first.GetCell(3).AsNumber());
+        Assert.Equal(300.0, first.GetCell(300).AsNumber());
+        Assert.Equal(ExcelLimits.MaxColumns, first.GetCell(ExcelLimits.MaxColumns).AsNumber());
+        Assert.True(first.GetCell(299).IsEmpty);
+
+        Assert.True(cursor.MoveNext());
+        ExcelRow second = cursor.Current;
+        Assert.Equal(ExcelLimits.MaxColumns - 2, second.CellCount);
+        Assert.Equal(-2.0, second.GetCell(2).AsNumber());
+        Assert.True(second.GetCell(3).IsEmpty);
+        Assert.True(second.GetCell(300).IsEmpty);
+        Assert.Equal(-1.0, second.GetCell(ExcelLimits.MaxColumns - 1).AsNumber());
+
+        Assert.True(cursor.MoveNext());
+        ExcelRow third = cursor.Current;
+        Assert.Equal(1000, third.StartColumn);
+        Assert.Equal(2, third.CellCount);
+        Assert.True(third.GetCell(1000).IsEmpty); // outside the projection
+        Assert.Equal(1001.0, third.GetCell(1001).AsNumber());
+        Assert.False(cursor.MoveNext());
+    }
+
     [Fact]
     public void Cursor_WithProjection_SkipsValuesButKeepsCellPositions()
     {
