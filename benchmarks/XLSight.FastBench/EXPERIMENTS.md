@@ -461,3 +461,37 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
   - A 64 KB FileStream buffer: about 8× fewer hops, but +60 KiB per pooled archive, which undoes
     part of E2.
   - A sync branch in `ScanBuffer`: it would leak packaging knowledge into the reader.
+
+## E19 — Layout: interval index for vector candidates, sliced connected components, ordered merge search — **KEEP (CPU)**
+
+- **Hypothesis (wave-2 Query worker, `w2-query-2.patch`, `SheetLayoutInference.cs` only):** three
+  scans in the vector-field pass were quadratic in the number of occupied ranges or components.
+  - **`AddVectorCandidate`:** `OverlapsAny` over every occupied range is replaced by a per-column
+    union of disjoint row intervals, answered by binary search. `occupied` is fixed for the whole
+    pass.
+  - **`FindConnectedComponents`:** when a bucket's row spans are disjoint (checked at runtime),
+    only the row-overlapping slice is visited. The sequence of unions is unchanged.
+  - **`MergeOverlappingComponents`:** buckets are kept in id order, and every merge keeps the
+    lower id. Component top rows therefore never change and stay ascending, so the forward search
+    stops at the first top row below the range, and each bucket stops at its first match.
+    `TopRowsAscend` checks this at the start and otherwise falls back to a full scan.
+- **Correctness:**
+  - Tests 1029/1029. `eqcheck.sh`: identical.
+  - Worker: identical full JSON dumps on 1,000 generated workbooks.
+  - Worker: a 60K-case differential fuzz of old vs new for all three routines (1.1M merges,
+    1.0M unions, 2.4M overlap checks) found 0 mismatches.
+- **Measurement** (`results/E19-layout-probe.md`, 2 alternating rounds, host quiet):
+
+  | Sheet | Base min | Cand min |
+  |---|--:|--:|
+  | mixed_sparse | 4525–4591 ms | 1687–1713 ms (**−63 %**) |
+  | sparse12500 | 1516–1546 ms | 722–733 ms (**−52 %**) |
+  | sparse6250 | 531–538 ms | 312–320 ms (−41 %) |
+  | stack1600, stack3200, t60k | — | unchanged within noise |
+
+  - Allocation: +0.1–0.3 MiB for the column index.
+  - The fast suite's layout and analyze cases (`results/E19-compare-layout-analyze.md`, 5 rounds)
+    were all inconclusive. `layout.sparse_fragmented_2k` is too small to reach the quadratic
+    regime: E10 already took it from 100 to 35 ms.
+- **Next targets (worker):** on mixed_sparse, `FindDenseFields` (about 103 ms) and `GetAxes`
+  (about 54 ms).
