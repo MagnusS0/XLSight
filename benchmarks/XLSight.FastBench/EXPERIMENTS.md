@@ -520,3 +520,19 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
 - **Recommended follow-up:** extract the segmenter from `AnalysisSink.RegionSegmenter` into a
   shared component with an early-stop hook, then build HEADER AUTO on it. The worker's
   equivalence harness (`w2-query/qeq.sh`, 51,768 queries) is the acceptance test.
+
+## Final cumulative check: E1–E19 vs baseline `5643a0c`, quiet host
+
+- **Default suite:** `ab 5643a0c 5` (`results/final-cumulative-vs-baseline.md`), load average
+  0.4–1.4, no workers running.
+  - Suite wall-clock 19.5–19.9 → 18.0–18.2 s, all runs complete.
+  - **19 of 29 cases "faster"** with every round agreeing; **0 slower**.
+  - `scan.strings_xlsb` was +12.8 %, inconclusive. A 9-round recheck of E16 alone against its
+    parent was +3.7 % at ±5.6 % noise; see open issue 1 in `REPORT.md`.
+- **Confirm tier:** run twice per side, interleaved (`results/final-confirm-vs-baseline.md`).
+  - Cold x10 cases −21 to −24 %; warm scans −10 to −22 % time and −40 to −69 % allocation.
+  - Peak RSS within ±1.2 %.
+  - Suite time 45.8 s (cand) vs 51.3 s (base), against a 180 s budget.
+- **`selftest`:** all deadline and failure paths behaved as specified (exit codes 3, 4, 5, 2 and 1;
+  no leftover processes).
+- **Summary and follow-ups:** `REPORT.md`.
