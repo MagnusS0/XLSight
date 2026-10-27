@@ -394,3 +394,31 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
   - The 11-round paired run (`results/E16-xlsb-11rounds.md`) was inconclusive at ±93 % noise
     because the Query worker was running.
 - **Decision:** keep for the allocation. The final quiet run re-checks `scan.numeric_xlsb`.
+
+## E17 — Defer the shared-string parser start until the first lookup — **KEEP (allocation)**
+
+- **Hypothesis (wave-2 Memory worker, `w2-memory-4.patch` minus the E14 hunks):** opening an
+  XLSX cursor built the SST parse state eagerly: arena, info chunk, cache directory and the first
+  64 KB inflate. That cost 66–129 KiB and 24–115 µs even when no `t="s"` cell was ever read.
+- **Change:**
+  - `SharedStringsByteParser.Parse` only stores the stream.
+  - Under the pump lock, `StartParserLocked` primes the window, reads `uniqueCount` and sizes the
+    cache before the first count is published, so lock-free readers that see a non-zero count
+    also see the arrays.
+  - A start failure is cached in an `ExceptionDispatchInfo` and rethrown by later lookups.
+- **Behaviour change:** a corrupt SST header now fails at the first shared-string lookup, not when
+  the cursor opens. A sheet that has no `t="s"` cells no longer fails at all.
+- **Tests:** 1022/1022. The new `SharedStringDeferralTests` check four things:
+  - no reads happen before the first lookup;
+  - Dispose before any lookup releases the stream;
+  - a start failure is rethrown;
+  - a numeric ReadCell does not start the parser.
+
+  `eqcheck.sh`: identical.
+- **Measurement** (`results/E17-readcell-probe.md`): ReadCell on a non-string cell allocates
+  32.3 KiB instead of 98–161 KiB (−67 to −80 %). p10 time is equal or lower.
+  - Fast suite (`results/E17-compare-open-readcell-range.md`, 5 rounds): allocation is unchanged,
+    because no default case reads an SST workbook without a string lookup.
+  - The `open.small` "faster" verdict there is not claimed: open does not touch the SST.
+- **Test debt noted (not changed):** a helper near line 1036 of `XlsxSheetScannerTests.cs` disposes
+  the stream it hands to the table. That is safe only because its fixtures have no SST.
