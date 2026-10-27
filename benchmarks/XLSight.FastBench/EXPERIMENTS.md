@@ -347,3 +347,28 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
     that returned value.
   - XLSB's table already used volatile fields and is unchanged.
 - **Tests:** 1009/1009. No timing claim: on x64 these are plain loads and stores.
+
+## E15 — Disposed workbook releases its shared-string table and analyzer metadata — **KEEP (retained memory)**
+
+- **Issue (wave-2 Memory worker, `w2-memory-1.patch`):** `Dispose` disposed the SST's parser
+  resources, but the reader kept the table itself (UTF-8 arena, string cache) and the analyzer
+  metadata. While anything still held the workbook, the whole table stayed alive.
+- **Change:** `WorkbookReaderBase.ReleaseCachedState()` runs from both `Dispose` and
+  `DisposeAsync`:
+  - It swaps the `Lazy` for a static sentinel with `Interlocked.Exchange`, so racing dispose calls
+    cannot dispose the table twice.
+  - The sentinel's factory throws `ObjectDisposedException`.
+  - It disposes the old table and clears the metadata.
+  - Cursors opened earlier keep their own references and behave as before.
+- **Behaviour change:** an operation already running when the workbook is disposed now gets
+  `ObjectDisposedException` on its next SST access. Before, it silently got "".
+- **Tests:** 1015/1015. The new `WorkbookDisposeRetentionTests` use `WeakReference` checks for xlsx,
+  xlsb and `DisposeAsync`, plus open-cursor continuity. They fail on the old Dispose behaviour.
+- **Measurement** (`results/E15-dispose-retention-probe.md`, re-run by the lead), retained after
+  Dispose with the reference held:
+
+  | Case | Base | Cand |
+  |---|--:|--:|
+  | strings_unique full scan | 17,784 KiB | 15 KiB |
+  | strings_unique Analyze | 6,268 KiB | 13 KiB |
+  | string_heavy.xlsb scan | 39 KiB | 9 KiB |
