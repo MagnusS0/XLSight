@@ -422,3 +422,42 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
   - The `open.small` "faster" verdict there is not claimed: open does not touch the SST.
 - **Test debt noted (not changed):** a helper near line 1036 of `XlsxSheetScannerTests.cs` disposes
   the stream it hands to the table. That is safe only because its fixtures have no SST.
+
+## E18 — File-backed async reads complete inline when no sync context is current — **KEEP (async time and allocation)**
+
+- **Hypothesis (wave-2 Readers worker, `w2-readers-2.patch`):** `RentArchive` opens the file for
+  synchronous I/O. On .NET 10 Unix, `FileStream.ReadAsync` on a sync handle queues the blocking
+  `pread` to the thread pool, and it observes cancellation only before the read starts.
+  `DeflateStream` reads 8 KB at a time, so an async scan of large.xlsx cost **463 pool work items**.
+  - Sources, all dotnet/runtime release/10.0, read 2026-10-26: `RandomAccess.Unix.cs`,
+    `SafeFileHandle.ThreadPoolValueTaskSource.cs`, `FileStreamHelpers.Unix.cs`, `DeflateStream.cs`.
+  - Also: Sitnik, "File IO improvements in .NET 6", .NET Blog, 2021.
+- **Change:**
+  - `OwnedEntryStream` takes a `completeAsyncReadsSynchronously` flag, set only on the
+    pooled-archive path, which always wraps our own sync FileStream.
+  - With the flag set, `ReadAsync` returns `FromCanceled` for a cancelled token. Otherwise it
+    reads inline and returns a completed or faulted task, as `MemoryStream` does.
+  - **Lead's amendment:** the inline path is skipped while a `SynchronizationContext` or a
+    non-default `TaskScheduler` is current. A UI or single-threaded caller that resumes on its
+    context between `ReadAsync` calls therefore keeps the old offload of the read and inflate.
+  - Streams passed in by the caller are unchanged.
+- **Tests:** 1029/1029. New tests:
+  - inline completion;
+  - a cancelled read consumes no bytes;
+  - a read after dispose faults;
+  - the sync-context guard (a recording inner stream);
+  - file-backed async equals sync in Values and Formulas mode, with cancellation honoured.
+
+  The worker's differential check (sync/async/range/Analyze over 19 workbooks, plus chunk
+  sweeps) was identical.
+- **Measurement:**
+  - `results/E18-threadpool-probe.md`: pool items per async scan 463 → 1, and scan time about
+    −15 %.
+  - Fast suite, 5 rounds (`results/E18-compare-async.md`): `range.async_large_middle_rows`
+    **−18 % time, −46 % allocation**, "faster" with every round agreeing. The sync control
+    `scan.numeric_xlsx` was +1.1 %, inconclusive.
+- **Rejected alternatives (worker):**
+  - `FileOptions.Asynchronous`: on Linux it uses the same strategy and the same pool path.
+  - A 64 KB FileStream buffer: about 8× fewer hops, but +60 KiB per pooled archive, which undoes
+    part of E2.
+  - A sync branch in `ScanBuffer`: it would leak packaging knowledge into the reader.

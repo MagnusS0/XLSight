@@ -224,6 +224,108 @@ public sealed class OwnedEntryStreamTests : IDisposable
         }
     }
 
+    // The pooled archive's FileStream is opened for synchronous I/O, so ReadAsync would only run
+    // the same blocking read on a thread-pool thread. It must complete inline instead.
+    [Fact]
+    public void TryOpenFreshEntry_ReadAsync_CompletesSynchronouslyWithEntryBytes()
+    {
+        using var package = OpenFileBacked();
+        using Stream? stream = package.TryOpenFreshEntryUnbuffered("xl/workbook.xml");
+        Assert.NotNull(stream);
+
+        var buf = new byte[64];
+        ValueTask<int> pending = stream!.ReadAsync(buf.AsMemory(), TestContext.Current.CancellationToken);
+        Assert.True(pending.IsCompletedSuccessfully);
+        int read = pending.Result;
+        Assert.Equal("<workbook/>", Encoding.UTF8.GetString(buf, 0, read).TrimStart('\uFEFF'));
+
+        Task<int> end = stream.ReadAsync(buf, 0, buf.Length, TestContext.Current.CancellationToken);
+        Assert.True(end.IsCompletedSuccessfully);
+        Assert.Equal(0, end.Result);
+    }
+
+    // A UI or single-threaded caller must still be moved off its thread by the first read, so
+    // the inline path is skipped while a SynchronizationContext is current.
+    [Theory]
+    [InlineData(false, 1, 0)]
+    [InlineData(true, 0, 1)]
+    public async Task ReadAsync_InlinesOnlyWithoutSynchronizationContext(bool withContext, int expectedSync, int expectedAsync)
+    {
+        var inner = new RecordingStream();
+        await using var stream = new OwnedEntryStream(inner, new NoopDisposable(), completeAsyncReadsSynchronously: true);
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(withContext ? new SynchronizationContext() : null);
+        try
+        {
+            _ = stream.ReadAsync(new byte[4].AsMemory(), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        Assert.Equal((expectedSync, expectedAsync), (inner.SyncReads, inner.AsyncReads));
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose() { }
+    }
+
+    private sealed class RecordingStream : MemoryStream
+    {
+        public int SyncReads { get; private set; }
+        public int AsyncReads { get; private set; }
+
+        public override int Read(Span<byte> buffer)
+        {
+            SyncReads++;
+            return 0;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            AsyncReads++;
+            return ValueTask.FromResult(0);
+        }
+    }
+
+    [Fact]
+    public async Task TryOpenFreshEntry_ReadAsync_PreCanceled_ThrowsWithoutConsumingBytes()
+    {
+        using var package = OpenFileBacked();
+        Stream? stream = package.TryOpenFreshEntryUnbuffered("xl/workbook.xml");
+        Assert.NotNull(stream);
+        await using (stream)
+        {
+            using var source = new CancellationTokenSource();
+            await source.CancelAsync();
+            var buf = new byte[64];
+
+            ValueTask<int> canceled = stream!.ReadAsync(buf.AsMemory(), source.Token);
+            Assert.True(canceled.IsCanceled);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await canceled);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => stream.ReadAsync(buf, 0, buf.Length, source.Token));
+
+            int read = await stream.ReadAsync(buf.AsMemory(), TestContext.Current.CancellationToken);
+            Assert.Equal("<workbook/>", Encoding.UTF8.GetString(buf, 0, read).TrimStart('\uFEFF'));
+        }
+    }
+
+    [Fact]
+    public async Task TryOpenFreshEntry_ReadAsyncAfterDispose_FaultsInsteadOfThrowingSynchronously()
+    {
+        using var package = OpenFileBacked();
+        Stream? stream = package.TryOpenFreshEntryUnbuffered("xl/workbook.xml");
+        Assert.NotNull(stream);
+        stream!.Dispose();
+
+        ValueTask<int> faulted = stream.ReadAsync(new byte[8].AsMemory(), TestContext.Current.CancellationToken);
+        Assert.True(faulted.IsFaulted);
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await faulted);
+    }
+
     // ── Dispose closes the archive owner ─────────────────────────────────────
 
     [Fact]
