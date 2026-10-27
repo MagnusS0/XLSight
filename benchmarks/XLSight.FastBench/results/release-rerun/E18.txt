@@ -1,0 +1,4 @@
+E18 base syncctx=False cells=500005 pool-items/op=463.17 alloc/op=212 KiB median=137.2 ms min=126.0 ms syncctx=True  cells=500005 pool-items/op=463.50 alloc/op=224 KiB median=132.7 ms min=112.9 ms 
+E18 cand syncctx=False cells=500005 pool-items/op=1.00 alloc/op=2 KiB median=111.1 ms min=88.0 ms syncctx=True  cells=500005 pool-items/op=1.00 alloc/op=1 KiB median=107.8 ms min=84.0 ms 
+E18 base syncctx=False cells=500005 pool-items/op=463.33 alloc/op=212 KiB median=128.0 ms min=123.5 ms syncctx=True  cells=500005 pool-items/op=463.67 alloc/op=211 KiB median=117.5 ms min=114.7 ms 
+E18 cand syncctx=False cells=500005 pool-items/op=1.00 alloc/op=1 KiB median=101.3 ms min=88.0 ms syncctx=True  cells=500005 pool-items/op=1.00 alloc/op=14 KiB median=123.5 ms min=93.0 ms 

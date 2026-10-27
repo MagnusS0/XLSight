@@ -41,15 +41,15 @@ The larger workloads in the confirm tier, run twice per side and interleaved
 - **Warm scans:** time −10 to −22 %, allocation −40 to −69 %.
 - **Peak RSS:** within ±1.2 % everywhere.
 
-Results measured outside the suite with probes:
+Results measured outside the suite with probes (Release re-runs; see the correction in `EXPERIMENTS.md`: the first probe tables were Debug builds):
 
 | Probe | Before | After | File |
 |---|--:|--:|---|
-| Layout, mixed_sparse (25K cells) | 4.5–4.6 s | 1.69–1.71 s | `results/E19-layout-probe.md` |
+| Layout, mixed_sparse (25K cells), E19 only | 785–796 ms | 484–500 ms (−38 %) | `results/release-rerun/E19.txt` |
 | Retained memory after Dispose, strings_unique | 17.8 MiB | 15 KiB | `results/E15-dispose-retention-probe.md` |
 | First cold XLSB cursor, allocation | 1024 KiB | 6 KiB | `results/E16-xlsb-cursor-probe.md` |
 | ReadCell on a non-string cell, allocation | 98–161 KiB | 32 KiB | `results/E17-readcell-probe.md` |
-| Thread-pool work items per async scan | 463 | 1 | `results/E18-threadpool-probe.md` |
+| Thread-pool work items per async scan | 463 | 1 (alloc/op 212 → 1–14 KiB) | `results/release-rerun/E18.txt` |
 
 **Correctness bugs found and fixed:**
 - **E1:** Formulas mode lost data at buffer boundaries.

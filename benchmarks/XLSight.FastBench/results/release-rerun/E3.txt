@@ -1,0 +1,12 @@
+== round 1 base
+first10   result=10 alloc=1245 KiB retained(open)=1178 KiB retained(disposed, ref held)=1163 KiB
+fullscan  result=160004 alloc=20197 KiB retained(open)=17797 KiB retained(disposed, ref held)=17782 KiB
+== round 1 cand
+first10   result=10 alloc=245 KiB retained(open)=178 KiB retained(disposed, ref held)=171 KiB
+fullscan  result=160004 alloc=20190 KiB retained(open)=17790 KiB retained(disposed, ref held)=17783 KiB
+== round 2 base
+first10   result=10 alloc=1245 KiB retained(open)=1178 KiB retained(disposed, ref held)=1163 KiB
+fullscan  result=160004 alloc=20197 KiB retained(open)=17797 KiB retained(disposed, ref held)=17782 KiB
+== round 2 cand
+first10   result=10 alloc=245 KiB retained(open)=178 KiB retained(disposed, ref held)=171 KiB
+fullscan  result=160004 alloc=20190 KiB retained(open)=17790 KiB retained(disposed, ref held)=17783 KiB

@@ -536,3 +536,69 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
 - **`selftest`:** all deadline and failure paths behaved as specified (exit codes 3, 4, 5, 2 and 1;
   no leftover processes).
 - **Summary and follow-ups:** `REPORT.md`.
+
+## Correction — file-based probe tables were Debug builds; Release re-runs
+
+- **Finding (2026-10-27):** the lead's probes are file-based apps that reference the library with
+  `#:project`. `#:property Configuration=Release` does not build the referenced library in Release.
+  Plain `dotnet run probe.cs` linked the Debug `XLSight.dll`. The tables in `results/E*-probe.*` that
+  were produced this way measured unoptimized library code.
+- **Not affected:** every FastBench verdict (`ab`, `confirm`, the final cumulative run), and the
+  worker harnesses that built with `-c Release`.
+- **Re-run:** each probe with `dotnet run -c Release`, at the same revisions
+  (`results/release-rerun/`).
+
+| Exp | What the decision rested on | Release re-run | Decision |
+|---|---|---|---|
+| E3 | allocation and retention | identical | unchanged |
+| E9 | stack3200 layout time | 267–295 → 123–132 ms (−55 %); other sheets unchanged | unchanged |
+| E10 | sparse layout time | sparse6250 −81 %, sparse12500 −93 % (3.34 s → 0.23–0.27 s), mixed_sparse −94 % (11.3–11.9 s → 0.62–0.74 s) | unchanged |
+| E11 | allocation | identical (strings_unique 19.94 → 6.41 MiB) | unchanged |
+| E12 | peak RSS, second-scan allocation, identity contract | identical (RSS 60 → 67 MiB, second scan 2.28 → 12.56 MiB) | unchanged; but in Release the candidate was *faster* (scan 1: 375–544 → 310–350 ms; scan 2: 196–253 → 122–156 ms), which the Debug table hid |
+| E15 | retention | identical | unchanged |
+| E16 | allocation; time "up to ~2 % slower" | allocation identical; full XLSB scan 36–40 ms both sides (Debug showed ~150 ms), no difference | unchanged |
+| E17 | allocation | identical; p10 time 228–374 → 190–355 µs | unchanged |
+| E18 | pool items; time | pool items 463 → 1; alloc/op 212 → 1–14 KiB (Debug showed ~26 MiB both sides); scan 124–137 → 88–111 ms | unchanged |
+| E19 | layout time | **mixed_sparse 785–796 → 484–500 ms (−38 %, not −63 %)**; sparse12500 −7 to −17 % (not −52 %); sparse6250 no gain (not −41 %) | kept; smaller win than logged |
+
+- **Process fix:** run file-based probes with `dotnet run -c Release`, and check the linked
+  `XLSight.dll` hash against `src/XLSight/bin/Release` before recording numbers.
+
+## M1 — Full 1M-row read: allocation breakdown (stand-in workbook) — **IN PROGRESS**
+
+- **Question:** BenchmarkDotNet on `xl_large.xlsx` (about 985K rows, sheet "Worksheet") still
+  allocates about 1.46 GiB through the borrowed reader and 1.66 GiB through safe streaming. What
+  accounts for that, what share of elapsed time is GC, and which part is avoidable?
+- **Blocker:** `xl_large.xlsx` is an optional fixture and is not in this container.
+  `fastbench.sh profile` (added for this) gives the breakdown on any workbook, so it can be run
+  where the file lives.
+- **Stand-in:** `proxy1m.xlsx`. 985K rows × 10 columns: id, styled date, 4 shared-string text
+  columns of increasing cardinality, 2 numbers, a status, and a 70 %-filled note column. It has
+  1.30M unique SST entries in first-appearance order, as Excel writes them.
+  Generator: `scratchpad/m1/gen/proxy1m.py`. Profile: `results/M1-proxy1m-profile.md`.
+
+  | Path | Elapsed | Alloc | B/cell | GCs (0/1/2) | GC pause | Peak RSS |
+  |---|--:|--:|--:|---|--:|--:|
+  | Borrowed reader | 2.5 s | 124 MiB | 13.6 | 0/0/0 | 0 % | 168 MiB |
+  | Safe stream | 3.0 s | 365 MiB | 40.1 | 2/1/0 | 4.6 % | 273 MiB |
+
+- **Where the reader's allocation goes:** measured exactly by phase with internal APIs, and with
+  allocation stacks from `dotnet-trace` (`GCAllocationTick`) resolved through TraceEvent.
+  - Shared-string table (UTF-8 arena, index, cache directory): **32 MiB**.
+  - Strings for SST entries **above the 131,072-entry cache**, decoded on every access:
+    **83 MiB**, from 1.37M accesses over 1.17M entries.
+  - Strings for cached entries, decoded once each: 8 MiB.
+  - Replaying the sheet's 5.61M SST lookups on a fresh table allocates 123.7 MiB, the same as the
+    reader's 123.9 MiB. **Nothing else in the reader allocates.**
+- **What is avoidable:**
+  - 1.09M of the 1.17M uncached entries are read exactly once, so repeat decodes are only
+    197K accesses, about **12 MiB**. That is the ceiling for any cache over the uncached range.
+  - On this shape, "cache more" saves at most 10 % of the reader's allocation, and E12 showed
+    caching costs peak RSS.
+  - The large avoidable cost is materializing strings the consumer never reads. That is the case
+    for lazy shared-string cells: keep the index, decode on `AsText()`.
+- **Safe stream:** +241 MiB over the reader, which is the per-row `ExcelCellValue[]` copies
+  (24 B × 9.55M cells ≈ 219 MiB, plus row objects). That cost buys independently owned rows.
+- **Not yet known:** `xl_large` allocates about 1.5 KB per row, 12× the stand-in. It must
+  materialize far more text per row (more or longer string columns, or inline strings), so its
+  split between avoidable and unavoidable needs the real profile. **No change has been made yet.**

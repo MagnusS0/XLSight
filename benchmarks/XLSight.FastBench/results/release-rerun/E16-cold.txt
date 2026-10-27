@@ -1,0 +1,12 @@
+== E16 base cold
+unbounded first-row cold=1024 KiB warm=0 KiB; bounded A1:E10 (after one warm bounded) first=1 KiB again=1 KiB
+4 concurrently open unbounded readers: 4256 KiB
+== E16 cand cold
+unbounded first-row cold=6 KiB warm=0 KiB; bounded A1:E10 (after one warm bounded) first=1 KiB again=1 KiB
+4 concurrently open unbounded readers: 178 KiB
+== E16 base cold
+unbounded first-row cold=1024 KiB warm=0 KiB; bounded A1:E10 (after one warm bounded) first=1 KiB again=1 KiB
+4 concurrently open unbounded readers: 4256 KiB
+== E16 cand cold
+unbounded first-row cold=6 KiB warm=0 KiB; bounded A1:E10 (after one warm bounded) first=1 KiB again=1 KiB
+4 concurrently open unbounded readers: 178 KiB

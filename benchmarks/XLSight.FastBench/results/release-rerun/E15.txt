@@ -1,0 +1,18 @@
+== E15 base
+strings_unique.xlsx    fullscan  result=160004 retained(open)=17783 KiB retained(disposed, ref held)=17776 KiB
+strings_unique.xlsx    analyze   result=1 retained(open)=6262 KiB retained(disposed, ref held)=6257 KiB
+string_heavy.xlsb      fullscan  result=10005 retained(open)=39 KiB retained(disposed, ref held)=39 KiB
+string_heavy.xlsb      analyze   result=1 retained(open)=80 KiB retained(disposed, ref held)=73 KiB
+large.xlsb             fullscan  result=500005 retained(open)=13 KiB retained(disposed, ref held)=13 KiB
+large.xlsb             analyze   result=1 retained(open)=22 KiB retained(disposed, ref held)=14 KiB
+complex_workbook.xlsb  fullscan  result=381 retained(open)=25 KiB retained(disposed, ref held)=25 KiB
+complex_workbook.xlsb  analyze   result=4 retained(open)=262 KiB retained(disposed, ref held)=190 KiB
+== E15 cand
+strings_unique.xlsx    fullscan  result=160004 retained(open)=17783 KiB retained(disposed, ref held)=7 KiB
+strings_unique.xlsx    analyze   result=1 retained(open)=6262 KiB retained(disposed, ref held)=13 KiB
+string_heavy.xlsb      fullscan  result=10005 retained(open)=39 KiB retained(disposed, ref held)=9 KiB
+string_heavy.xlsb      analyze   result=1 retained(open)=49 KiB retained(disposed, ref held)=9 KiB
+large.xlsb             fullscan  result=500005 retained(open)=13 KiB retained(disposed, ref held)=9 KiB
+large.xlsb             analyze   result=1 retained(open)=22 KiB retained(disposed, ref held)=9 KiB
+complex_workbook.xlsb  fullscan  result=381 retained(open)=25 KiB retained(disposed, ref held)=19 KiB
+complex_workbook.xlsb  analyze   result=4 retained(open)=255 KiB retained(disposed, ref held)=171 KiB

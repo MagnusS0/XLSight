@@ -1,0 +1,24 @@
+== E17 base
+[2020-10-28] mixed_sparse.xlsx A1: median=529 us p10=437 alloc=98.1 KiB
+[1] strings_repeated.xlsx A2: median=514 us p10=391 alloc=112.7 KiB
+[Empty] mixed_sparse.xlsx B1: median=367 us p10=289 alloc=98.2 KiB
+== E17 cand
+[2020-10-28] mixed_sparse.xlsx A1: median=383 us p10=302 alloc=32.3 KiB
+[1] strings_repeated.xlsx A2: median=327 us p10=296 alloc=32.3 KiB
+[Empty] mixed_sparse.xlsx B1: median=300 us p10=253 alloc=32.4 KiB
+== E17 base
+[2020-10-28] mixed_sparse.xlsx A1: median=424 us p10=352 alloc=98.1 KiB
+[1] strings_repeated.xlsx A2: median=474 us p10=360 alloc=112.7 KiB
+[Empty] mixed_sparse.xlsx B1: median=259 us p10=228 alloc=98.1 KiB
+== E17 cand
+[2020-10-28] mixed_sparse.xlsx A1: median=474 us p10=355 alloc=32.3 KiB
+[1] strings_repeated.xlsx A2: median=345 us p10=297 alloc=32.3 KiB
+[Empty] mixed_sparse.xlsx B1: median=304 us p10=247 alloc=32.3 KiB
+== E17 base
+[2020-10-28] mixed_sparse.xlsx A1: median=411 us p10=374 alloc=98.1 KiB
+[1] strings_repeated.xlsx A2: median=528 us p10=404 alloc=112.7 KiB
+[Empty] mixed_sparse.xlsx B1: median=286 us p10=255 alloc=98.2 KiB
+== E17 cand
+[2020-10-28] mixed_sparse.xlsx A1: median=366 us p10=283 alloc=32.3 KiB
+[1] strings_repeated.xlsx A2: median=329 us p10=264 alloc=32.3 KiB
+[Empty] mixed_sparse.xlsx B1: median=246 us p10=190 alloc=32.4 KiB

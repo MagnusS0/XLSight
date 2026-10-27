@@ -1,0 +1,20 @@
+== round 1 base
+unique scan1     374.9 ms alloc  20.05 MiB retained  17.83 MiB peakRSS   60.1 MiB (start 23.6)
+unique scan2     252.6 ms alloc   2.28 MiB retained  17.83 MiB
+repeated scan1 alloc   0.25 MiB
+repeated scan2 alloc   0.00 MiB
+== round 1 cand
+unique scan1     310.0 ms alloc  20.05 MiB retained   7.54 MiB peakRSS   66.9 MiB (start 23.6)
+unique scan2     122.3 ms alloc  12.56 MiB retained  17.83 MiB
+repeated scan1 alloc   0.38 MiB
+repeated scan2 alloc   0.00 MiB
+== round 2 base
+unique scan1     543.9 ms alloc  20.05 MiB retained  17.83 MiB peakRSS   60.5 MiB (start 23.6)
+unique scan2     196.2 ms alloc   2.28 MiB retained  17.83 MiB
+repeated scan1 alloc   0.25 MiB
+repeated scan2 alloc   0.00 MiB
+== round 2 cand
+unique scan1     349.5 ms alloc  20.05 MiB retained   7.54 MiB peakRSS   67.3 MiB (start 23.6)
+unique scan2     155.9 ms alloc  12.56 MiB retained  17.83 MiB
+repeated scan1 alloc   0.38 MiB
+repeated scan2 alloc   0.00 MiB

@@ -1,0 +1,28 @@
+== round 1 base
+strings_unique.xlsx          Observed  alloc   19.94 MiB
+strings_unique.xlsx          Full      alloc   19.94 MiB
+strings_repeated.xlsx        Observed  alloc    0.58 MiB
+strings_repeated.xlsx        Full      alloc    0.58 MiB
+03_Banking_golden.xlsx       Observed  alloc    3.66 MiB
+03_Banking_golden.xlsx       Full      alloc    3.78 MiB
+== round 1 cand
+strings_unique.xlsx          Observed  alloc    6.41 MiB
+strings_unique.xlsx          Full      alloc    6.41 MiB
+strings_repeated.xlsx        Observed  alloc    0.46 MiB
+strings_repeated.xlsx        Full      alloc    0.46 MiB
+03_Banking_golden.xlsx       Observed  alloc    3.55 MiB
+03_Banking_golden.xlsx       Full      alloc    3.65 MiB
+== round 2 base
+strings_unique.xlsx          Observed  alloc   19.95 MiB
+strings_unique.xlsx          Full      alloc   19.94 MiB
+strings_repeated.xlsx        Observed  alloc    0.58 MiB
+strings_repeated.xlsx        Full      alloc    0.58 MiB
+03_Banking_golden.xlsx       Observed  alloc    3.59 MiB
+03_Banking_golden.xlsx       Full      alloc    3.78 MiB
+== round 2 cand
+strings_unique.xlsx          Observed  alloc    6.42 MiB
+strings_unique.xlsx          Full      alloc    6.41 MiB
+strings_repeated.xlsx        Observed  alloc    0.46 MiB
+strings_repeated.xlsx        Full      alloc    0.46 MiB
+03_Banking_golden.xlsx       Observed  alloc    3.62 MiB
+03_Banking_golden.xlsx       Full      alloc    3.65 MiB

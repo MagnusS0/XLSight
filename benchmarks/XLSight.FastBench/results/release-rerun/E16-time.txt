@@ -1,0 +1,6 @@
+base: fullscan large.xlsb cells=500005 median=45.17 ms min=39.81 ms
+cand: fullscan large.xlsb cells=500005 median=44.32 ms min=36.77 ms
+base: fullscan large.xlsb cells=500005 median=37.88 ms min=35.93 ms
+cand: fullscan large.xlsb cells=500005 median=48.37 ms min=37.77 ms
+base: fullscan large.xlsb cells=500005 median=41.05 ms min=37.15 ms
+cand: fullscan large.xlsb cells=500005 median=39.58 ms min=36.96 ms

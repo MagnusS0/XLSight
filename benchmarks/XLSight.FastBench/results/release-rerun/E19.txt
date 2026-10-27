@@ -1,0 +1,28 @@
+== base
+stack1600.xlsx         min     211.0 ms  median     219.2 ms  alloc    11.5 MiB
+stack3200.xlsx         min     121.3 ms  median     127.2 ms  alloc    22.8 MiB
+sparse6250.xlsx        min     138.6 ms  median     147.8 ms  alloc    16.1 MiB
+sparse12500.xlsx       min     288.0 ms  median     324.3 ms  alloc    32.3 MiB
+mixed_sparse.xlsx      min     785.2 ms  median     792.2 ms  alloc    71.1 MiB
+t60k.xlsx              min     170.9 ms  median     259.5 ms  alloc    17.6 MiB
+== cand
+stack1600.xlsx         min     181.8 ms  median     187.8 ms  alloc    11.7 MiB
+stack3200.xlsx         min     144.3 ms  median     154.6 ms  alloc    23.1 MiB
+sparse6250.xlsx        min     144.9 ms  median     164.6 ms  alloc    16.1 MiB
+sparse12500.xlsx       min     240.2 ms  median     240.5 ms  alloc    32.4 MiB
+mixed_sparse.xlsx      min     483.9 ms  median     543.0 ms  alloc    71.3 MiB
+t60k.xlsx              min     147.0 ms  median     164.6 ms  alloc    17.6 MiB
+== base
+stack1600.xlsx         min     150.2 ms  median     161.1 ms  alloc    11.5 MiB
+stack3200.xlsx         min     154.9 ms  median     160.6 ms  alloc    23.0 MiB
+sparse6250.xlsx        min     131.1 ms  median     175.2 ms  alloc    16.1 MiB
+sparse12500.xlsx       min     234.2 ms  median     268.3 ms  alloc    32.3 MiB
+mixed_sparse.xlsx      min     795.9 ms  median     892.5 ms  alloc    71.1 MiB
+t60k.xlsx              min     158.3 ms  median     203.6 ms  alloc    17.6 MiB
+== cand
+stack1600.xlsx         min     127.5 ms  median     163.2 ms  alloc    11.6 MiB
+stack3200.xlsx         min     174.0 ms  median     176.2 ms  alloc    23.2 MiB
+sparse6250.xlsx        min     159.7 ms  median     174.5 ms  alloc    16.1 MiB
+sparse12500.xlsx       min     217.0 ms  median     227.7 ms  alloc    32.4 MiB
+mixed_sparse.xlsx      min     500.2 ms  median     546.1 ms  alloc    71.3 MiB
+t60k.xlsx              min     205.9 ms  median     213.8 ms  alloc    17.6 MiB
