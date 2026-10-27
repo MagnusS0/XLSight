@@ -9,6 +9,7 @@ using XLSight.FastBench;
 //   compare  --base A.json [A2.json ...] --cand B.json [B2.json ...] [--min-effect PCT] [--paired]
 //   fixtures [--force] [--confirm]  generate deterministic synthetic fixtures (--confirm adds the large tier)
 //   record-expected             calibration: pin fixture hashes and expected digests into the manifest
+//   profile  --path FILE --sheet NAME [--out FILE.md]  allocation breakdown of one full read (any workbook)
 //   child    --case ID          internal: one isolated case in a fresh process
 try
 {
@@ -41,6 +42,12 @@ try
             options.ContainsKey("paired")),
         "fixtures" => GenerateFixtures(root, manifestPath, options.ContainsKey("force"), options.ContainsKey("confirm")),
         "record-expected" => RecordExpected(root, manifestPath),
+        "profile" => Profile.Run(
+            Path.GetFullPath(Single(options, "path") ?? throw new ArgumentException("--path is required")),
+            Single(options, "sheet") ?? throw new ArgumentException("--sheet is required"),
+            Single(options, "out") is { } po ? Path.GetFullPath(po) : null),
+        "profile-child" => Profile.RunChildCommand(
+            Single(options, "path")!, Single(options, "sheet")!, Single(options, "mode")!, Single(options, "what")!),
         _ => throw new ArgumentException($"Unknown command '{command}'."),
     };
 }

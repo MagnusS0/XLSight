@@ -10,6 +10,7 @@
 #   fastbench.sh compare --base A.json... --cand B.json...
 #   fastbench.sh ab <base-ref> [rounds]   alternate baseline/candidate runs, then compare
 #   fastbench.sh selftest           demonstrate deadline, watchdog and missing-fixture handling
+#   fastbench.sh profile --path FILE --sheet NAME [--out FILE.md]  allocation breakdown of one full read
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -142,6 +143,10 @@ case "$cmd" in
     done
     dotnet "$DLL" compare --paired --base "${base_files[@]}" --cand "${cand_files[@]}" | tee "$OUT_DIR/ab-$(date -u +%Y%m%d-%H%M%S)-compare.md"
     git -C "$ROOT" worktree remove --force "$base_tree" ;;
+  profile)
+    check_fresh || exit 1
+    dotnet build-server shutdown >/dev/null 2>&1
+    dotnet "$DLL" profile "$@" ;;
   selftest)
     rc_all=0
     echo "== 1. suite budget too small for the default suite: expect status incomplete, exit 3" >&2
