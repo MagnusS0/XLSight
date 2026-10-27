@@ -329,3 +329,21 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
     inflated by host drift.
 - **Decision:** keep. The microbenchmark gives the per-cell saving directly, and no case regressed.
   The final quiet cumulative run re-measures it.
+
+## E14 — SharedStringTable publication ordering — **KEEP (correctness)**
+
+- **Issue (wave-2 Memory worker, `w2-memory-3.patch`):** lock-free readers checked
+  `index >= _parsedCount && !_isComplete` with plain reads. The pump also published
+  `_parsedCount` and `_isComplete` with plain writes. This has two risks:
+  - On weakly ordered CPUs, a reader can see a count before the arena bytes it covers.
+  - The JIT may coalesce adjacent non-volatile reads, so a reader could return "" for an entry
+    that was already parsed.
+  - Source: dotnet/runtime `docs/design/specs/Memory-model.md`, read 2026-10-27. Applying the
+    reordering rule to ARM64 is the worker's inference.
+- **Change:**
+  - The pump publishes each entry with `Volatile.Write(_parsedCount)` after writing its data,
+    and completion with `Volatile.Write(_isComplete)` after the final count.
+  - `EnsureParsed` returns an acquire-read of the count, and all three lookups compare against
+    that returned value.
+  - XLSB's table already used volatile fields and is unchanged.
+- **Tests:** 1009/1009. No timing claim: on x64 these are plain loads and stores.

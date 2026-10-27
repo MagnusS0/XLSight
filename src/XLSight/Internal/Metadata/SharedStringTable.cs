@@ -52,6 +52,11 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     private readonly int _cacheLength;
     private readonly int _declaredUniqueCount = -1;
 
+    // Publication protocol: the pump writes an entry's arena bytes and info slot (and any List
+    // growth) and then publishes it with a release write of _parsedCount; completion is published
+    // with a release write of _isComplete after the final count. Lock-free readers acquire-read
+    // _parsedCount, and re-read it after observing _isComplete, so on weakly ordered CPUs
+    // (ARM64) they never see a count ahead of the data it covers or miss the final count.
     private int  _parsedCount;
     private bool _isComplete;
 
@@ -61,11 +66,7 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     /// </summary>
     internal int Count
     {
-        get
-        {
-            EnsureParsed(int.MaxValue);
-            return _parsedCount;
-        }
+        get => EnsureParsed(int.MaxValue);
     }
 
     /// <summary>Empty singleton — no <c>xl/sharedStrings.xml</c> entry in the workbook.</summary>
@@ -106,12 +107,10 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
     public string GetString(int index)
     {
-        if (index >= _parsedCount && !_isComplete)
+        if ((uint)index >= (uint)Volatile.Read(ref _parsedCount) && (uint)index >= (uint)EnsureParsed(index))
         {
-            EnsureParsed(index);
+            return string.Empty;
         }
-
-        if ((uint)index >= (uint)_parsedCount) { return string.Empty; }
 
         if (index < _cacheLength)
         {
@@ -135,8 +134,11 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     /// </summary>
     public int GetCharCount(int index)
     {
-        if (index >= _parsedCount && !_isComplete) { EnsureParsed(index); }
-        if ((uint)index >= (uint)_parsedCount) { return 0; }
+        if ((uint)index >= (uint)Volatile.Read(ref _parsedCount) && (uint)index >= (uint)EnsureParsed(index))
+        {
+            return 0;
+        }
+
         var span = GetUtf8Span(index);
         return span.IsEmpty ? 0 : Encoding.UTF8.GetCharCount(span);
     }
@@ -147,8 +149,11 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     /// </summary>
     internal ReadOnlySpan<byte> GetUtf8Bytes(int index)
     {
-        if (index >= _parsedCount && !_isComplete) { EnsureParsed(index); }
-        if ((uint)index >= (uint)_parsedCount) { return default; }
+        if ((uint)index >= (uint)Volatile.Read(ref _parsedCount) && (uint)index >= (uint)EnsureParsed(index))
+        {
+            return default;
+        }
+
         return GetUtf8Span(index);
     }
 
@@ -174,28 +179,35 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
     /// <summary>
     /// Pumps the SST stream until <paramref name="targetIndex"/> has been parsed or the
-    /// stream is exhausted. No-op once <see cref="_isComplete"/> is true.
+    /// stream is exhausted, and returns the published entry count. Indexes below the
+    /// returned count are safe to read without the lock.
     /// </summary>
-    private void EnsureParsed(int targetIndex)
+    private int EnsureParsed(int targetIndex)
     {
-        if (_isComplete) { return; }
-        lock (_pumpLock)
+        if (!Volatile.Read(ref _isComplete))
         {
-            // Once the declared uniqueCount is reached, probe once more: on a well-formed SST
-            // this hits </sst>, completes the table and releases the stream, the 64 KB scan
-            // window and the 256 KB staging buffer instead of holding them until Dispose.
-            while (!_isComplete && (_parsedCount <= targetIndex || _parsedCount == _declaredUniqueCount))
+            lock (_pumpLock)
             {
-                if (!SharedStringsByteParser.FindNextSiCandidate(_sstBuffer!))
+                // Once the declared uniqueCount is reached, probe once more: on a well-formed SST
+                // this hits </sst>, completes the table and releases the stream, the 64 KB scan
+                // window and the 256 KB staging buffer instead of holding them until Dispose.
+                int parsed = _parsedCount;
+                while (!_isComplete && (parsed <= targetIndex || parsed == _declaredUniqueCount))
                 {
-                    _isComplete = true;
-                    CleanupParserResources();
-                    break;
+                    if (!SharedStringsByteParser.FindNextSiCandidate(_sstBuffer!))
+                    {
+                        Volatile.Write(ref _isComplete, true);
+                        CleanupParserResources();
+                        break;
+                    }
+                    SharedStringsByteParser.DispatchSiElement(_sstBuffer!, _parseState!);
+                    Volatile.Write(ref _parsedCount, ++parsed);
                 }
-                SharedStringsByteParser.DispatchSiElement(_sstBuffer!, _parseState!);
-                _parsedCount++;
             }
         }
+
+        // Acquire after observing completion (or after the lock): sees the final count.
+        return Volatile.Read(ref _parsedCount);
     }
 
     private void CleanupParserResources()
@@ -215,11 +227,11 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
     public void Dispose()
     {
-        if (_isComplete) { return; }
+        if (Volatile.Read(ref _isComplete)) { return; }
         lock (_pumpLock)
         {
             if (_isComplete) { return; }
-            _isComplete = true;
+            Volatile.Write(ref _isComplete, true);
             CleanupParserResources();
         }
     }
