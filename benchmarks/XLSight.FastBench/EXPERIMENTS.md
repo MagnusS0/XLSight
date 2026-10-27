@@ -495,3 +495,28 @@ the slower baseline under host load overran the 24 s internal budget (21.1–22.
     regime: E10 already took it from 100 to 35 ms.
 - **Next targets (worker):** on mixed_sparse, `FindDenseFields` (about 103 ms) and `GetAxes`
   (about 54 ms).
+
+## E20 — HEADER AUTO resolved by a dedicated early-stopping region sink — **DEFERRED (not applied)**
+
+- **Proposal (wave-2 Query worker, `w2-query-1.patch`):** HEADER AUTO ran a full
+  `AnalyzeSheet(Full)` only to pick a header row. A new `HeaderRegionScanSink` (an
+  `IByteSheetSink`) would resolve it instead:
+  - it copies AnalysisSink's span/block segmenter, seal order and DataTable/Crosstab rule;
+  - it skips profiles, formula and style tracking and secondary parts;
+  - it decodes only block-start shared strings, and stops once the answer is fixed.
+- **Worker evidence:**
+  - t60k `dsl_group_auto` 305–315 → 219–222 ms (−29 %), allocation 593 → 206 KB.
+  - Header row equal to the old rule in 708K checks (2,200 generated and 25 real workbooks).
+  - Full query results identical over 51,768 queries, including the 2,104 that throw.
+- **Why not applied now:**
+  - **(1) Duplicated heuristics.** It is a second, 386-line copy of AnalysisSink's region
+    heuristics. Its tests tie the two together, but any heuristic change now has to land twice.
+  - **(2) Behaviour changes.** HEADER AUTO would no longer emit the `AnalyzeSheet`
+    activity/EventSource events. It would also no longer throw on corrupt secondary parts or
+    corrupt post-sheetData XML.
+  - **(3) Narrow benefit.** HEADER AUTO is an explicit opt-in (`HEADER` is required), so the
+    gain reaches only those queries.
+  - **(4) Conflict.** It no longer applies on top of E15, which changed `WorkbookReaderBase`.
+- **Recommended follow-up:** extract the segmenter from `AnalysisSink.RegionSegmenter` into a
+  shared component with an early-stop hook, then build HEADER AUTO on it. The worker's
+  equivalence harness (`w2-query/qeq.sh`, 51,768 queries) is the acceptance test.
