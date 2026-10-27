@@ -302,3 +302,30 @@ Allocation/op: open −70 %, readcell −69 %, numeric scan −69 %, mixed scans
 −21 to −67 %, Banking analysis −19 %. Single-op cold cases and full numeric scans were too noisy
 to read here; a final quiet remeasure follows after wave 2. One base round came out incomplete:
 the slower baseline under host load overran the 24 s internal budget (21.1–22.8 s observed).
+
+## E13 — `<c>` attribute fast path — **KEEP (CPU, provisional until the final quiet run)**
+
+- **Hypothesis (wave-2 Readers worker, `w2-readers-1.patch`):** almost every `<c>` start tag uses the
+  exact shape ` r="A1" s="3" t="s">`. A strict single pass with inline digit and letter
+  arithmetic is cheaper than the general tokenizer, which calls `Utf8Parser`. The general tokenizer
+  (`ParseCellAttrsGeneral`) is kept unchanged and handles every shape the fast path declines
+  (other attributes, whitespace variants, quotes, entities, overflow, unknown `t`).
+- **Correctness:** `CellAttributeParserTests`: 14 accepted shapes, 36 declined, and 200,000 random
+  attribute lists, each compared with the general parser. Full suite 1009/1009. `eqcheck.sh`:
+  **identical**. The worker's differential check covered sync and async scans, ranges, and Analyze
+  over 19 workbooks, plus chunk sweeps (1–4093-byte reads): identical.
+- **Measurement:**
+  - Fast-path acceptance (worker probe): 100 % of cells on large, Banking, McDonalds and the
+    generated fixtures; 79.7 % on complex_workbook.
+  - Microbenchmark: about 30 vs 60–70 ns per cell, which is 15 vs 32 ms over the 500K cells of
+    large.xlsx.
+  - Fast suite, 3 rounds (`results/E13-compare.md`): "faster" with every round agreeing on
+    numeric xlsx scan −21 %, McDonalds scan −27 %, snapshot stream −9 %, and three queries
+    −8 to −18 %.
+  - 5-round recheck of the scan and stream cases (`results/E13-recheck-5rounds.md`):
+    **inconclusive**. Noise was ±7–36 % because the two other wave-2 workers were running; the
+    numeric xlsx scan was −8 %.
+  - The untouched XLSB control moved −33 % in the 3-round run, so those 3-round magnitudes are
+    inflated by host drift.
+- **Decision:** keep. The microbenchmark gives the per-cell saving directly, and no case regressed.
+  The final quiet cumulative run re-measures it.
