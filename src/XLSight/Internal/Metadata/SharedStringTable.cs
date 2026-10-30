@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
@@ -38,19 +39,24 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
     internal static readonly SharedStringTable Empty = new();
 
-    private readonly List<byte[]> _arena;
-    private readonly List<long[]> _info;
+    // Set once, under _pumpLock, by StartParser before the first entry is published, so a
+    // reader that has acquired a non-zero _parsedCount always sees them.
+    private List<byte[]> _arena;
+    private List<long[]> _info;
     // Low-index strings are clustered and highly repeated; high-index strings bypass and die in Gen 0.
-    private readonly string?[]?[] _cache;
+    private string?[]?[] _cache;
+    private int _cacheLength;
+    private int _declaredUniqueCount = -1;
 
-    // Lazy-parsing state — all null once _isComplete is true.
+    // Lazy-parsing state — all null once _isComplete is true. Until the first lookup only
+    // _sstStream is set: the 64 KB scan window, its first inflate and the 256 KB staging
+    // buffer are deferred, so a read that touches no t="s" cell never pays for them.
     private SharedStringsByteParser.ParseState? _parseState;
     private Stream? _sstStream;
     private ScanBuffer? _sstBuffer;
     private byte[]? _stagingBuf;
+    private ExceptionDispatchInfo? _startFailure;
     private readonly Lock _pumpLock = new();
-    private readonly int _cacheLength;
-    private readonly int _declaredUniqueCount = -1;
 
     // Publication protocol: the pump writes an entry's arena bytes and info slot (and any List
     // growth) and then publishes it with a release write of _parsedCount; completion is published
@@ -80,30 +86,48 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
     }
 
     /// <summary>
-    /// Lazy SST — parsing is deferred to the first <see cref="GetString"/> call that
-    /// requests an index not yet in the arena.
+    /// Lazy SST that owns <paramref name="stream"/>. Nothing is read until the first lookup
+    /// of an index not yet in the arena; parsing then proceeds only as far as each lookup needs.
     /// </summary>
-    internal SharedStringTable(
-        Stream stream,
-        ScanBuffer buffer,
-        SharedStringsByteParser.ParseState state,
-        byte[] stagingBuf,
-        int declaredUniqueCount)
+    internal SharedStringTable(Stream stream)
     {
-        _sstStream  = stream;
-        _sstBuffer  = buffer;
-        _parseState = state;
-        _stagingBuf = stagingBuf;
-        _arena      = state.ArenaChunks;
-        _info       = state.InfoChunks;
-        _cacheLength = GetCacheLength(declaredUniqueCount);
-        _cache      = new string?[]?[(_cacheLength + CacheChunkMask) >> CacheChunkBits];
-        _declaredUniqueCount = declaredUniqueCount;
-        _isComplete = false;
+        _sstStream = stream;
+        _arena     = [];
+        _info      = [];
+        _cache     = [];
     }
 
-    internal int CacheLength => _cacheLength;
-    internal int FirstInfoChunkLength => _info.Count == 0 ? 0 : _info[0].Length;
+    /// <summary>Test hook: starts the parser if needed, then reports the cache sizing.</summary>
+    internal int CacheLength
+    {
+        get
+        {
+            EnsureStarted();
+            return _cacheLength;
+        }
+    }
+
+    /// <summary>Test hook: starts the parser if needed, then reports the first info chunk size.</summary>
+    internal int FirstInfoChunkLength
+    {
+        get
+        {
+            EnsureStarted();
+            return _info.Count == 0 ? 0 : _info[0].Length;
+        }
+    }
+
+    /// <summary>Test hook: whether the scan window and parse state are currently held.</summary>
+    internal bool HoldsParserState
+    {
+        get
+        {
+            lock (_pumpLock)
+            {
+                return _parseState is not null;
+            }
+        }
+    }
 
     public string GetString(int index)
     {
@@ -191,6 +215,11 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
                 // Once the declared uniqueCount is reached, probe once more: on a well-formed SST
                 // this hits </sst>, completes the table and releases the stream, the 64 KB scan
                 // window and the 256 KB staging buffer instead of holding them until Dispose.
+                if (!_isComplete && _sstBuffer is null)
+                {
+                    StartParserLocked();
+                }
+
                 int parsed = _parsedCount;
                 while (!_isComplete && (parsed <= targetIndex || parsed == _declaredUniqueCount))
                 {
@@ -208,6 +237,50 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
         // Acquire after observing completion (or after the lock): sees the final count.
         return Volatile.Read(ref _parsedCount);
+    }
+
+    private void EnsureStarted()
+    {
+        lock (_pumpLock)
+        {
+            if (!_isComplete && _sstBuffer is null)
+            {
+                StartParserLocked();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Primes the scan window, reads the declared <c>uniqueCount</c> and sizes the cache.
+    /// A failure is cached and rethrown by every later lookup, as the eager constructor's
+    /// exception was by the reader's Lazy.
+    /// </summary>
+    private void StartParserLocked()
+    {
+        _startFailure?.Throw();
+        SharedStringsByteParser.ParseState state;
+        ScanBuffer buffer;
+        byte[] stagingBuf;
+        int declaredUniqueCount;
+        try
+        {
+            state = SharedStringsByteParser.StartParser(
+                _sstStream!, out buffer, out stagingBuf, out declaredUniqueCount);
+        }
+        catch (Exception ex)
+        {
+            _startFailure = ExceptionDispatchInfo.Capture(ex);
+            throw;
+        }
+
+        _sstBuffer  = buffer;
+        _stagingBuf = stagingBuf;
+        _arena      = state.ArenaChunks;
+        _info       = state.InfoChunks;
+        _declaredUniqueCount = declaredUniqueCount;
+        _cacheLength = GetCacheLength(declaredUniqueCount);
+        _cache      = new string?[]?[(_cacheLength + CacheChunkMask) >> CacheChunkBits];
+        _parseState = state;
     }
 
     private void CleanupParserResources()
