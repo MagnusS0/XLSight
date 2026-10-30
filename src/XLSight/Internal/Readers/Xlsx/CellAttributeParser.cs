@@ -33,6 +33,160 @@ internal static class CellAttributeParser
         out int styleIndex,
         out bool isEmptyElement)
     {
+        if (!TryParseCommonCellAttrs(attrBytes, out column, out row, out kind, out styleIndex, out isEmptyElement))
+        {
+            ParseCellAttrsGeneral(attrBytes, out column, out row, out kind, out styleIndex, out isEmptyElement);
+        }
+    }
+
+    /// <summary>
+    /// Fast path for the attribute shape Excel and common writers emit:
+    /// <c>( ' ' ('r'|'s'|'t') '="' value '"' )* ( '&gt;' | '/&gt;' )</c>, with <c>r</c> as
+    /// 1–3 uppercase letters plus 1–7 digits, <c>s</c> as 1–9 digits and <c>t</c> as a known
+    /// type code. Returns <see langword="false"/> for anything else (other attributes, other
+    /// whitespace, single quotes, prefixes, entities, unusual values) so the caller falls back
+    /// to <see cref="ParseCellAttrsGeneral"/>. When it returns <see langword="true"/> the outputs
+    /// equal the general parser's: the digit and letter limits keep the arithmetic exact, where
+    /// <see cref="Utf8Parser"/> would otherwise decide on overflow, signs or trailing bytes.
+    /// </summary>
+    internal static bool TryParseCommonCellAttrs(
+        ReadOnlySpan<byte> attrBytes,
+        out int column,
+        out int row,
+        out CellDataKind kind,
+        out int styleIndex,
+        out bool isEmptyElement)
+    {
+        column = 0;
+        row = 0;
+        kind = CellDataKind.Number;
+        styleIndex = 0;
+        isEmptyElement = false;
+
+        int pos = 0;
+        int len = attrBytes.Length;
+        while (true)
+        {
+            if ((uint)pos >= (uint)len) { return false; }
+
+            byte b = attrBytes[pos];
+            if (b == (byte)'>')
+            {
+                return pos == len - 1;
+            }
+
+            if (b == (byte)'/')
+            {
+                isEmptyElement = true;
+                return pos == len - 2 && attrBytes[pos + 1] == (byte)'>';
+            }
+
+            // Separator, one-letter name, '=' and '"', then at least one value byte and the
+            // closing quote.
+            if (b != (byte)' ' || pos + 5 >= len
+                || attrBytes[pos + 2] != (byte)'=' || attrBytes[pos + 3] != (byte)'"')
+            {
+                return false;
+            }
+
+            byte name = attrBytes[pos + 1];
+            pos += 4;
+            bool ok = name switch
+            {
+                (byte)'r' => TryReadCellRef(attrBytes, ref pos, out column, out row),
+                (byte)'s' => TryReadDigits(attrBytes, ref pos, maxDigits: 9, out styleIndex),
+                (byte)'t' => TryReadKind(attrBytes, ref pos, out kind),
+                _ => false,
+            };
+
+            if (!ok || pos >= len || attrBytes[pos] != (byte)'"') { return false; }
+            pos++;
+        }
+    }
+
+    // Column letters (1–3, uppercase) followed by row digits (1–7).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadCellRef(ReadOnlySpan<byte> bytes, ref int pos, out int column, out int row)
+    {
+        int col = 0;
+        int start = pos;
+        while (pos < bytes.Length)
+        {
+            uint letter = (uint)(bytes[pos] - 'A');
+            if (letter > 25) { break; }
+            col = (col * 26) + (int)letter + 1;
+            pos++;
+        }
+
+        column = col;
+        row = 0;
+        return pos - start is >= 1 and <= 3 && TryReadDigits(bytes, ref pos, maxDigits: 7, out row);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadDigits(ReadOnlySpan<byte> bytes, ref int pos, int maxDigits, out int value)
+    {
+        int v = 0;
+        int start = pos;
+        while (pos < bytes.Length)
+        {
+            uint digit = (uint)(bytes[pos] - '0');
+            if (digit > 9) { break; }
+            v = (v * 10) + (int)digit;
+            pos++;
+        }
+
+        value = v;
+        return pos - start >= 1 && pos - start <= maxDigits;
+    }
+
+    // Switches on the first byte; the caller guarantees two bytes are available at pos.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadKind(ReadOnlySpan<byte> bytes, ref int pos, out CellDataKind kind)
+    {
+        kind = CellDataKind.Number;
+        if (bytes[pos + 1] == (byte)'"')
+        {
+            switch (bytes[pos])
+            {
+                case (byte)'s': kind = CellDataKind.SharedString; break;
+                case (byte)'n': break;
+                case (byte)'b': kind = CellDataKind.Boolean; break;
+                case (byte)'e': kind = CellDataKind.Error; break;
+                case (byte)'d': kind = CellDataKind.FormulaString; break; // ISO date: see ParseKind.
+                default: return false;
+            }
+
+            pos++;
+            return true;
+        }
+
+        if (bytes[pos..].StartsWith("str\""u8))
+        {
+            kind = CellDataKind.FormulaString;
+            pos += 3;
+            return true;
+        }
+
+        if (bytes[pos..].StartsWith("inlineStr\""u8))
+        {
+            kind = CellDataKind.InlineString;
+            pos += 9;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>General attribute tokenizer; handles every shape the fast path declines.</summary>
+    internal static void ParseCellAttrsGeneral(
+        ReadOnlySpan<byte> attrBytes,
+        out int column,
+        out int row,
+        out CellDataKind kind,
+        out int styleIndex,
+        out bool isEmptyElement)
+    {
         column = 0;
         row = 0;
         kind = CellDataKind.Number;
