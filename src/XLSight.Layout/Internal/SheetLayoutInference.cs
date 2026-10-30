@@ -845,28 +845,33 @@ internal static class SheetLayoutInference
         // Connected vectors are column-adjacent, so each vector only needs comparing with those
         // whose left column is right after its own right column; the opposite direction is found
         // from the other vector. Components are a partition, so pair order does not matter.
-        var byLeftColumn = new Dictionary<int, List<int>>();
-        for (int i = 0; i < pending.Count; i++)
-        {
-            int left = pending[i].Range.TopLeft.Column;
-            if (!byLeftColumn.TryGetValue(left, out List<int>? bucket))
-            {
-                bucket = [];
-                byLeftColumn.Add(left, bucket);
-            }
+        Dictionary<int, List<int>> byLeftColumn = BucketByLeftColumn(pending);
 
-            bucket.Add(i);
-        }
+        // `pending` is sorted by top row, so each bucket lists its vectors by ascending top row.
+        // When a bucket's row spans are also disjoint (the usual case: one column's runs), bottoms
+        // ascend too and the row-overlapping neighbors of a vector form one contiguous slice found
+        // by binary search. Otherwise the bucket is scanned in full.
+        HashSet<int> disjointBuckets = FindRowDisjointBuckets(pending, byLeftColumn);
 
         for (int i = 0; i < pending.Count; i++)
         {
-            if (!byLeftColumn.TryGetValue(pending[i].Range.BottomRight.Column + 1, out List<int>? neighbors))
+            int neighborColumn = pending[i].Range.BottomRight.Column + 1;
+            if (!byLeftColumn.TryGetValue(neighborColumn, out List<int>? neighbors))
             {
                 continue;
             }
 
-            foreach (int j in neighbors)
+            bool sliced = disjointBuckets.Contains(neighborColumn);
+            int start = sliced ? FirstReachingRow(pending, neighbors, pending[i].Range.TopLeft.Row) : 0;
+
+            for (int k = start; k < neighbors.Count; k++)
             {
+                int j = neighbors[k];
+                if (sliced && pending[j].Range.TopLeft.Row > pending[i].Range.BottomRight.Row)
+                {
+                    break;
+                }
+
                 if (VectorsConnect(pending[i].Range, pending[j].Range))
                 {
                     int rootA = Find(i);
@@ -880,6 +885,59 @@ internal static class SheetLayoutInference
         }
 
         return [.. Enumerable.Range(0, pending.Count).Select(Find)];
+    }
+
+    // Vector indices grouped by left column, each bucket in ascending index order.
+    private static Dictionary<int, List<int>> BucketByLeftColumn(List<FieldCandidate> pending)
+    {
+        var byLeftColumn = new Dictionary<int, List<int>>();
+        for (int i = 0; i < pending.Count; i++)
+        {
+            int left = pending[i].Range.TopLeft.Column;
+            if (!byLeftColumn.TryGetValue(left, out List<int>? bucket))
+            {
+                bucket = [];
+                byLeftColumn.Add(left, bucket);
+            }
+
+            bucket.Add(i);
+        }
+
+        return byLeftColumn;
+    }
+
+    // Left columns whose bucket (ascending top row) has pairwise row-disjoint spans.
+    private static HashSet<int> FindRowDisjointBuckets(List<FieldCandidate> pending, Dictionary<int, List<int>> byLeftColumn)
+    {
+        var disjointBuckets = new HashSet<int>();
+        foreach ((int left, List<int> bucket) in byLeftColumn)
+        {
+            bool disjoint = true;
+            for (int k = 1; k < bucket.Count && disjoint; k++)
+            {
+                disjoint = pending[bucket[k]].Range.TopLeft.Row > pending[bucket[k - 1]].Range.BottomRight.Row;
+            }
+
+            if (disjoint)
+            {
+                disjointBuckets.Add(left);
+            }
+        }
+
+        return disjointBuckets;
+    }
+
+    // First position in a row-disjoint bucket whose bottom row reaches `top` (bottoms ascend).
+    private static int FirstReachingRow(List<FieldCandidate> pending, List<int> bucket, int top)
+    {
+        int lo = 0, hi = bucket.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (pending[bucket[mid]].Range.BottomRight.Row < top) { lo = mid + 1; } else { hi = mid; }
+        }
+
+        return lo;
     }
 
     // A component's bounding range can swallow cells of another component (e.g. an isolated
@@ -909,6 +967,7 @@ internal static class SheetLayoutInference
             IndexColumns(byColumn, id, bounds[id].TopLeft.Column, bounds[id].BottomRight.Column);
         }
 
+        bool topsAscending = TopRowsAscend(bounds);
         int current = 0;
         while (current < count)
         {
@@ -918,7 +977,7 @@ internal static class SheetLayoutInference
                 continue;
             }
 
-            int next = FirstOverlapping(byColumn, bounds, alive, current, after: true);
+            int next = FirstOverlapping(byColumn, bounds, alive, current, after: true, topsAscending);
             if (next < 0)
             {
                 current++;
@@ -926,9 +985,9 @@ internal static class SheetLayoutInference
             }
 
             Absorb(byColumn, bounds, alive, current, next);
-            for (int earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false);
+            for (int earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false, topsAscending);
                 earlier >= 0;
-                earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false))
+                earlier = FirstOverlapping(byColumn, bounds, alive, current, after: false, topsAscending))
             {
                 Absorb(byColumn, bounds, alive, earlier, current);
                 current = earlier;
@@ -947,6 +1006,19 @@ internal static class SheetLayoutInference
         components.RemoveRange(write, count - write);
     }
 
+    private static bool TopRowsAscend(ExcelRange[] bounds)
+    {
+        for (int id = 1; id < bounds.Length; id++)
+        {
+            if (bounds[id].TopLeft.Row < bounds[id - 1].TopLeft.Row)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static void IndexColumns(Dictionary<int, List<int>> byColumn, int id, int startCol, int endCol)
     {
         for (int col = startCol; col <= endCol; col++)
@@ -957,12 +1029,19 @@ internal static class SheetLayoutInference
                 byColumn.Add(col, bucket);
             }
 
-            bucket.Add(id);
+            // Keep each bucket in ascending id order (ids are never indexed twice in a column).
+            int at = bucket.Count == 0 || bucket[^1] < id ? bucket.Count : ~bucket.BinarySearch(id);
+            bucket.Insert(at, id);
         }
     }
 
     // Lowest live id above (after) or below (!after) `id` whose bounds overlap it, or -1.
-    private static int FirstOverlapping(Dictionary<int, List<int>> byColumn, ExcelRange[] bounds, bool[] alive, int id, bool after)
+    // Buckets are in ascending id order, so the first match in a bucket is that bucket's lowest.
+    // When `topsAscending` (component top rows never decrease with id; merges keep the lower id
+    // and so never change a top row), ids above `id` whose top row is below `id`'s bottom row
+    // cannot overlap it, and neither can any later id in the bucket.
+    private static int FirstOverlapping(
+        Dictionary<int, List<int>> byColumn, ExcelRange[] bounds, bool[] alive, int id, bool after, bool topsAscending)
     {
         int best = -1;
         ExcelRange range = bounds[id];
@@ -973,15 +1052,26 @@ internal static class SheetLayoutInference
                 continue;
             }
 
-            foreach (int other in bucket)
+            int k = after ? ~bucket.BinarySearch(id) : 0;
+            if (k < 0)
             {
-                if (other == id || !alive[other] || (after ? other < id : other > id) ||
-                    (best >= 0 && other >= best) || !Overlaps(range, bounds[other]))
+                k = ~k + 1;   // `id` itself is in the bucket: start just past it
+            }
+
+            for (; k < bucket.Count; k++)
+            {
+                int other = bucket[k];
+                if ((!after && other >= id) || (best >= 0 && other >= best) ||
+                    (after && topsAscending && bounds[other].TopLeft.Row > range.BottomRight.Row))
                 {
-                    continue;
+                    break;
                 }
 
-                best = other;
+                if (alive[other] && Overlaps(range, bounds[other]))
+                {
+                    best = other;
+                    break;
+                }
             }
         }
 
@@ -1018,6 +1108,7 @@ internal static class SheetLayoutInference
         int[] lastRows = new int[width];
         var rowIntervals = new List<(int Start, int End)>();
         var sweep = new OccupiedRowSweep(occupied);
+        var columnIndex = new OccupiedColumnIndex(occupied, sheet.MinCol, sheet.MaxCol);
         int currentRow = int.MinValue;
         int intervalCursor = 0;
 
@@ -1049,14 +1140,14 @@ internal static class SheetLayoutInference
                 continue;
             }
 
-            AddVectorCandidate(sheet, occupied, candidates, cell.Column, startRows[col], lastRows[col]);
+            AddVectorCandidate(sheet, columnIndex, candidates, cell.Column, startRows[col], lastRows[col]);
             startRows[col] = cell.Row;
             lastRows[col] = cell.Row;
         }
 
         for (int col = 0; col < width; col++)
         {
-            AddVectorCandidate(sheet, occupied, candidates, sheet.MinCol + col, startRows[col], lastRows[col]);
+            AddVectorCandidate(sheet, columnIndex, candidates, sheet.MinCol + col, startRows[col], lastRows[col]);
         }
 
         return candidates
@@ -1141,9 +1232,80 @@ internal static class SheetLayoutInference
         buffer.RemoveRange(write + 1, buffer.Count - write - 1);
     }
 
+    // Answers OverlapsAny(single-column range, occupied) for the vector pass without scanning every
+    // occupied range per candidate: for each sheet column, the row intervals of the occupied ranges
+    // that cover it, merged into disjoint ascending intervals. A column-`col` rectangle over rows
+    // [top, bottom] overlaps some occupied range exactly when it overlaps that column's union.
+    // Columns outside [minCol, maxCol] are never queried (candidates come from sheet cells).
+    private sealed class OccupiedColumnIndex
+    {
+        private readonly int _minCol;
+        private readonly List<(int Top, int Bottom)>?[] _byColumn;
+
+        public OccupiedColumnIndex(List<ExcelRange> occupied, int minCol, int maxCol)
+        {
+            _minCol = minCol;
+            _byColumn = new List<(int Top, int Bottom)>?[maxCol - minCol + 1];
+            foreach (ExcelRange range in occupied)
+            {
+                int left = Math.Max(range.TopLeft.Column, minCol);
+                int right = Math.Min(range.BottomRight.Column, maxCol);
+                for (int col = left; col <= right; col++)
+                {
+                    (_byColumn[col - minCol] ??= []).Add((range.TopLeft.Row, range.BottomRight.Row));
+                }
+            }
+
+            foreach (List<(int Top, int Bottom)>? intervals in _byColumn)
+            {
+                if (intervals is not { Count: > 1 })
+                {
+                    continue;
+                }
+
+                intervals.Sort(static (a, b) => a.Top.CompareTo(b.Top));
+                int write = 0;
+                for (int read = 1; read < intervals.Count; read++)
+                {
+                    if (intervals[read].Top <= intervals[write].Bottom)
+                    {
+                        if (intervals[read].Bottom > intervals[write].Bottom)
+                        {
+                            intervals[write] = (intervals[write].Top, intervals[read].Bottom);
+                        }
+                    }
+                    else
+                    {
+                        intervals[++write] = intervals[read];
+                    }
+                }
+
+                intervals.RemoveRange(write + 1, intervals.Count - write - 1);
+            }
+        }
+
+        public bool Overlaps(int col, int top, int bottom)
+        {
+            if (_byColumn[col - _minCol] is not { } intervals)
+            {
+                return false;
+            }
+
+            // First interval whose bottom reaches `top`; bottoms ascend in a disjoint sorted union.
+            int lo = 0, hi = intervals.Count;
+            while (lo < hi)
+            {
+                int mid = (lo + hi) >>> 1;
+                if (intervals[mid].Bottom < top) { lo = mid + 1; } else { hi = mid; }
+            }
+
+            return lo < intervals.Count && intervals[lo].Top <= bottom;
+        }
+    }
+
     private static void AddVectorCandidate(
         SheetFacts sheet,
-        List<ExcelRange> occupied,
+        OccupiedColumnIndex occupied,
         List<FieldCandidate> candidates,
         int col,
         int startRow,
@@ -1155,7 +1317,7 @@ internal static class SheetLayoutInference
         }
 
         var range = new ExcelRange(new ExcelAddress(col, startRow), new ExcelAddress(col, lastRow));
-        if (!OverlapsAny(range, occupied) && HasLeftAxis(sheet, range))
+        if (!occupied.Overlaps(col, startRow, lastRow) && HasLeftAxis(sheet, range))
         {
             candidates.Add(new FieldCandidate(range, 0, col, col));
         }
