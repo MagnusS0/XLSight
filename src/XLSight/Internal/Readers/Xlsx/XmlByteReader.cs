@@ -73,6 +73,105 @@ internal static class XmlByteReader
         }
     }
 
+    /// <summary>
+    /// Skips past the next end tag whose local name is <paramref name="localName"/>, searching
+    /// for the name itself with a vectorized substring search instead of visiting every tag.
+    /// </summary>
+    /// <remarks>
+    /// Used to discard whole elements (rows or cells outside a bounded range) whose content is
+    /// never inspected. A candidate is accepted only when it is preceded by <c>&lt;/</c>
+    /// (optionally <c>&lt;/prefix:</c>) and followed by optional whitespace and <c>&gt;</c>,
+    /// which cannot occur in well-formed text or attribute values because <c>&lt;</c> must be
+    /// escaped there. When the window holds no complete match, bytes from the last <c>&lt;</c>
+    /// are kept so an end tag split across a refill boundary is still found.
+    /// </remarks>
+    internal static void SkipPastEndTag(ScanBuffer buf, ReadOnlySpan<byte> localName)
+    {
+        int searchFrom = 0;
+        while (true)
+        {
+            var span = buf.Span;
+            bool needMore = false;
+            while (searchFrom < span.Length)
+            {
+                int rel = span[searchFrom..].IndexOf(localName);
+                if (rel < 0) { break; }
+
+                int nameStart = searchFrom + rel;
+                var result = MatchEndTagAroundName(span, nameStart, localName.Length, out int tagEnd);
+                if (result == TagSearchResult.Found)
+                {
+                    buf.Advance(tagEnd);
+                    return;
+                }
+
+                if (result == TagSearchResult.NeedMoreData)
+                {
+                    needMore = true;
+                    break;
+                }
+
+                searchFrom = nameStart + 1;
+            }
+
+            // Any end tag not yet complete must start at the last '<' in the window:
+            // '<' cannot occur inside a tag, so earlier tags were complete and already searched.
+            int keep = span.LastIndexOf((byte)'<');
+            if (keep < 0)
+            {
+                buf.Advance(span.Length);
+                searchFrom = 0;
+                if (!buf.Refill()) { return; }
+                continue;
+            }
+
+            if (!buf.CanReadMore)
+            {
+                // No further bytes can complete a partial match; mirror SkipToEndTag at EOF.
+                if (needMore) { return; }
+                buf.Advance(span.Length);
+                return;
+            }
+
+            buf.Advance(keep);
+            searchFrom = 0;
+            if (!buf.Refill()) { return; }
+        }
+    }
+
+    // Validates that the local name at nameStart belongs to an end tag: "</" [prefix ":"] name ws* ">".
+    private static TagSearchResult MatchEndTagAroundName(
+        ReadOnlySpan<byte> span, int nameStart, int nameLength, out int tagEnd)
+    {
+        tagEnd = 0;
+        int j = nameStart - 1;
+        if (j < 1) { return TagSearchResult.NotFound; }
+
+        if (span[j] == (byte)':')
+        {
+            j--;
+            while (j >= 0 && span[j] is not ((byte)'/' or (byte)'<' or (byte)'>') && !s_xmlWhitespace.Contains(span[j]))
+            {
+                j--;
+            }
+
+            if (j < 1) { return TagSearchResult.NotFound; }
+        }
+
+        if (span[j] != (byte)'/' || span[j - 1] != (byte)'<')
+        {
+            return TagSearchResult.NotFound;
+        }
+
+        int k = nameStart + nameLength;
+        int gt = FindCloseAngleBracket(span, k);
+        if (gt == -1) { return TagSearchResult.NeedMoreData; }
+        if (gt == -2) { return TagSearchResult.NotFound; }
+
+        tagEnd = gt + 1;
+        return TagSearchResult.Found;
+    }
+
     internal static bool RefillKeepingTagStart(ScanBuffer buf, ReadOnlySpan<byte> span, int partialIndex)
     {
         int keepIndex = partialIndex;

@@ -762,6 +762,38 @@ public sealed class XlsxSheetScannerTests
     }
 
     [Fact]
+    public void BoundedRange_SkippedRowsAndCells_EveryChunkBoundary_MatchesFilteredFullScan()
+    {
+        // Rows and cells outside the range are skipped by a substring search for the end tag;
+        // prefixed tags, look-alike names and "row>" in text must not end the skip early.
+        string xml = $"""
+            <x:worksheet xmlns:x="{Ns}">
+              <x:sheetData>
+                <x:row r="1"><x:c r="A1" t="inlineStr"><x:is><x:t>row&gt; &lt;/row&gt; grow</x:t></x:is></x:c><x:c r="B1"><x:v>1</x:v></x:c></x:row >
+                <x:row r="2"><x:c r="A2"><x:v>2</x:v></x:c><x:c r="B2" t="inlineStr"><x:is><x:t>in</x:t></x:is></x:c><x:c r="C2"><x:v>3</x:v></x:c><x:c r="D2"><x:v>4</x:v></x:c></x:row>
+                <x:row r="3"><x:c r="A3"><x:v>5</x:v></x:c><x:c r="B3"><x:v>6</x:v></x:c><x:c r="C3" t="inlineStr"><x:is><x:t>&lt;/x:rowx&gt;</x:t></x:is></x:c><x:c r="E3"><x:v>7</x:v></x:c></x:row>
+                <x:row r="4"><x:c r="B4"><x:v>8</x:v></x:c></x:row>
+              </x:sheetData>
+            </x:worksheet>
+            """;
+        var range = ExcelRange.Parse("B2:C3");
+        List<string> expected =
+        [
+            .. Scan(xml).Where(row => row.RowIndex is >= 2 and <= 3)
+                .SelectMany(row => Enumerable.Range(2, 2).Select(col => $"{row.RowIndex}:{col}:{row.GetCell(col)}")),
+        ];
+
+        Assert.Equal(expected, Describe(Scan(xml, range: range)));
+        for (int chunkSize = 1; chunkSize <= 64; chunkSize++)
+        {
+            Assert.Equal(expected, Describe(ScanChunked(xml, chunkSize, range: range)));
+        }
+
+        static List<string> Describe(List<ExcelRow> rows) =>
+            [.. rows.SelectMany(row => Enumerable.Range(2, 2).Select(col => $"{row.RowIndex}:{col}:{row.GetCell(col)}"))];
+    }
+
+    [Fact]
     public void FormulasMode_EveryChunkBoundary_MatchesUnchunkedScan()
     {
         // A refill landing inside "<v>…</v>" of a non-formula cell used to keep only the latest
