@@ -114,6 +114,15 @@ internal static class SheetLayoutInference
             int runStart = lo;
             while (runStart < hi)
             {
+                // A qualifying run needs at least three column-consecutive, uniform-step measure
+                // cells from runStart. Extending at most three cells is O(1), so this exact
+                // precondition rejects ordinary data cells before any row/column binary search.
+                if (ExtendUniformRun(sheet, runStart, Math.Min(hi, runStart + 3)) < runStart + 3)
+                {
+                    runStart++;
+                    continue;
+                }
+
                 // A matrix needs a coordinate-column seed just left of its run start; vetting
                 // that cheap precondition before extending keeps a wide rejected uniform run
                 // from re-extending every suffix, which is quadratic in the run's width.
@@ -1402,6 +1411,58 @@ internal static class SheetLayoutInference
 
     // Query layer over the chunked LayoutCellStore built during the scan: the store's CSR row
     // index and numeric prefix counts make rectangle and point queries a binary search per row.
+    [StructLayout(LayoutKind.Auto)]
+    private struct HeaderRunEnumerator
+    {
+        private readonly LayoutCellStore _store;
+        private readonly int _end;
+        private int _index;
+        private (int StartCol, int EndCol) _current;
+
+        public HeaderRunEnumerator(LayoutCellStore store, int rowIndex)
+        {
+            _store = store;
+            _index = rowIndex < 0 ? 0 : store.RowStartAt(rowIndex);
+            _end = rowIndex < 0 ? 0 : store.RowStartAt(rowIndex + 1);
+            _current = default;
+        }
+
+        public readonly HeaderRunEnumerator GetEnumerator() => this;
+
+        public readonly (int StartCol, int EndCol) Current => _current;
+
+        public bool MoveNext()
+        {
+            while (_index < _end && !_store[_index].IsHeaderLike)
+            {
+                _index++;
+            }
+
+            if (_index >= _end)
+            {
+                return false;
+            }
+
+            int start = _store[_index].Column;
+            int end = start;
+            _index++;
+            while (_index < _end)
+            {
+                LayoutCellFact cell = _store[_index];
+                if (!cell.IsHeaderLike || cell.Column > end + 1)
+                {
+                    break;
+                }
+
+                end = cell.Column;
+                _index++;
+            }
+
+            _current = (start, end);
+            return true;
+        }
+    }
+
     private sealed class SheetFacts
     {
         private readonly LayoutCellStore _store;
@@ -1580,48 +1641,8 @@ internal static class SheetLayoutInference
             return count;
         }
 
-        public IEnumerable<(int StartCol, int EndCol)> GetHeaderRuns(int row)
-        {
-            int rowIndex = _rowNumbers.BinarySearch(row);
-            if (rowIndex < 0)
-            {
-                yield break;
-            }
-
-            int start = 0;
-            int end = 0;
-            for (int i = _store.RowStartAt(rowIndex); i < _store.RowStartAt(rowIndex + 1); i++)
-            {
-                LayoutCellFact cell = _store[i];
-                if (!cell.IsHeaderLike)
-                {
-                    if (start != 0)
-                    {
-                        yield return (start, end);
-                        start = 0;
-                    }
-
-                    continue;
-                }
-
-                if (start == 0 || cell.Column > end + 1)
-                {
-                    if (start != 0)
-                    {
-                        yield return (start, end);
-                    }
-
-                    start = cell.Column;
-                }
-
-                end = cell.Column;
-            }
-
-            if (start != 0)
-            {
-                yield return (start, end);
-            }
-        }
+        /// <summary>Maximal column-contiguous runs of header-like cells in a row, without allocating.</summary>
+        public HeaderRunEnumerator GetHeaderRuns(int row) => new(_store, _rowNumbers.BinarySearch(row));
 
         // A section boundary is a reprinted header band that spans a substantial part of the field
         // width (e.g. the year row above each statement), not a stray 2-cell run from one label cell
