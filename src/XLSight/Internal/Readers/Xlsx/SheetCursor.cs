@@ -112,7 +112,7 @@ internal sealed class SheetCursor : IRowCursor
 
             if (!_range.IsUnbounded && rowIndex < _range.TopLeft.Row)
             {
-                SkipToEndTag(_buf, XlsxSheetScanner.TagRow);
+                SkipPastEndTag(_buf, XlsxSheetScanner.TagRow);
                 CommitSkippedRow();
                 continue;
             }
