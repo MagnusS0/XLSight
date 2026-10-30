@@ -28,7 +28,7 @@ internal static class SharedStringsByteParser
         var buf = new ScanBuffer(stream); // ownership transferred to SharedStringTable
         int declaredUniqueCount = ReadDeclaredUniqueCount(buf.Span);
         var state = new ParseState(stagingBuf, declaredUniqueCount);
-        return new SharedStringTable(buf, state, stagingBuf, declaredUniqueCount);
+        return new SharedStringTable(stream, buf, state, stagingBuf, declaredUniqueCount);
     }
 
     // ── Parse state ───────────────────────────────────────────────────────────
