@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Text;
 using System.Net;
 using System.Text;
@@ -51,14 +52,13 @@ internal static class Utf8CellDecoder
 
             case CellDataKind.Error:
                 {
-                    return ExcelCellValue.FromError(Encoding.UTF8.GetString(valueBytes));
+                    return ExcelCellValue.FromError(DecodeErrorCode(valueBytes));
                 }
 
             case CellDataKind.FormulaString:
             case CellDataKind.InlineString:
                 {
-                    // Slow path: allocate string and unescape XML entities via WebUtility.HtmlDecode.
-                    return ExcelCellValue.FromText(UnescapeXml(Encoding.UTF8.GetString(valueBytes)));
+                    return ExcelCellValue.FromText(DecodeXmlText(valueBytes));
                 }
 
             default:
@@ -165,6 +165,130 @@ internal static class Utf8CellDecoder
         double result = fracDigits == 0 ? mantissa : mantissa / ExactPowersOfTen[fracDigits];
         value = negative ? -result : result;
         return true;
+    }
+
+    /// <summary>
+    /// Decodes XML character data to a string with a single allocation. Handles the five XML
+    /// named entities and numeric references directly on UTF-8 bytes; any other '&amp;' form
+    /// falls back to the historical <see cref="WebUtility.HtmlDecode(string)"/> path so output
+    /// stays identical for unusual or malformed input.
+    /// </summary>
+    internal static string DecodeXmlText(ReadOnlySpan<byte> bytes)
+    {
+        int amp = bytes.IndexOf((byte)'&');
+        if (amp < 0) { return bytes.IsEmpty ? string.Empty : Encoding.UTF8.GetString(bytes); }
+
+        // Every recognised entity decodes to fewer bytes than its encoded form.
+        const int StackLimit = 256;
+        byte[]? rented = null;
+        Span<byte> scratch = bytes.Length <= StackLimit
+            ? stackalloc byte[StackLimit]
+            : (rented = ArrayPool<byte>.Shared.Rent(bytes.Length));
+        try
+        {
+            if (TryDecodeEntities(bytes, amp, scratch, out int written))
+            {
+                return Encoding.UTF8.GetString(scratch[..written]);
+            }
+
+            return UnescapeXml(Encoding.UTF8.GetString(bytes));
+        }
+        finally
+        {
+            if (rented is not null) { ArrayPool<byte>.Shared.Return(rented); }
+        }
+    }
+
+    private static bool TryDecodeEntities(ReadOnlySpan<byte> src, int amp, Span<byte> dst, out int written)
+    {
+        src[..amp].CopyTo(dst);
+        written = amp;
+        int pos = amp;
+        while (pos < src.Length)
+        {
+            ReadOnlySpan<byte> rest = src[pos..];
+            int next = rest.IndexOf((byte)'&');
+            if (next < 0)
+            {
+                rest.CopyTo(dst[written..]);
+                written += rest.Length;
+                return true;
+            }
+
+            rest[..next].CopyTo(dst[written..]);
+            written += next;
+            pos += next;
+
+            ReadOnlySpan<byte> entity = src[(pos + 1)..];
+            int semi = entity.Length > 12 ? entity[..12].IndexOf((byte)';') : entity.IndexOf((byte)';');
+            if (semi <= 0 || !TryDecodeEntity(entity[..semi], dst[written..], out int produced))
+            {
+                return false;
+            }
+
+            written += produced;
+            pos += semi + 2;
+        }
+
+        return true;
+    }
+
+    private static bool TryDecodeEntity(ReadOnlySpan<byte> body, Span<byte> dst, out int produced)
+    {
+        produced = 1;
+        if (body.SequenceEqual("amp"u8)) { dst[0] = (byte)'&'; return true; }
+        if (body.SequenceEqual("lt"u8)) { dst[0] = (byte)'<'; return true; }
+        if (body.SequenceEqual("gt"u8)) { dst[0] = (byte)'>'; return true; }
+        if (body.SequenceEqual("quot"u8)) { dst[0] = (byte)'"'; return true; }
+        if (body.SequenceEqual("apos"u8)) { dst[0] = (byte)'\''; return true; }
+
+        produced = 0;
+        if (body.Length < 2 || body[0] != (byte)'#') { return false; }
+
+        bool hex = body[1] is (byte)'x' or (byte)'X';
+        ReadOnlySpan<byte> digits = body[(hex ? 2 : 1)..];
+        if (digits.IsEmpty || digits.Length > 7) { return false; }
+
+        int codePoint = 0;
+        foreach (byte b in digits)
+        {
+            int d = b - '0';
+            if ((uint)d > 9)
+            {
+                if (!hex) { return false; }
+                d = (b | 0x20) - 'a' + 10;
+                if (d is < 10 or > 15) { return false; }
+            }
+
+            codePoint = (codePoint * (hex ? 16 : 10)) + d;
+        }
+
+        // Only scalar values >= U+0001 take the fast path; NUL, surrogates and out-of-range
+        // values keep the historical HtmlDecode behaviour.
+        if (codePoint == 0 || !Rune.TryCreate(codePoint, out Rune rune)) { return false; }
+
+        produced = rune.EncodeToUtf8(dst);
+        return true;
+    }
+
+    private static readonly string[] s_errorCodes =
+    [
+        "#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#GETTING_DATA",
+        "#SPILL!", "#CALC!", "#FIELD!", "#BLOCKED!", "#CONNECT!", "#BUSY!", "#UNKNOWN!",
+    ];
+
+    /// <summary>Returns a shared instance for the fixed set of Excel error codes.</summary>
+    internal static string DecodeErrorCode(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length is > 0 and <= 16 && bytes[0] == (byte)'#')
+        {
+            foreach (string code in s_errorCodes)
+            {
+                if (code.Length == bytes.Length && Ascii.Equals(bytes, code)) { return code; }
+            }
+        }
+
+        return Encoding.UTF8.GetString(bytes);
     }
 
     internal static string UnescapeXml(string value)
