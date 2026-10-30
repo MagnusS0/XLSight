@@ -156,7 +156,12 @@ internal sealed class XlsxPackage : IDisposable, IAsyncDisposable
             // addBuffer=false when the caller supplies its own pool buffer (e.g. XlsbRecordIterator),
             // avoiding a redundant 65 KB heap allocation that would otherwise pressure the GC.
             Stream inner = addBuffer ? new BufferedStream(raw, ZipEntryExtensions.ReadBufferSize(entry)) : raw;
-            var owned = new OwnedEntryStream(inner, new PooledArchiveHandle(this, zip));
+            // RentArchive opens the file for synchronous I/O, so async reads would only move the
+            // same blocking read onto a thread-pool thread.
+            var owned = new OwnedEntryStream(
+                inner,
+                new PooledArchiveHandle(this, zip),
+                completeAsyncReadsSynchronously: true);
             raw = null;
             return owned;
         }
