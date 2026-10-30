@@ -16,6 +16,12 @@ internal abstract class WorkbookReaderBase<
     bool isDate1904) : IWorkbookReader
     where TSharedStrings : class, IDisposable
 {
+    // Installed by Dispose. PublicationOnly does not cache the factory's exception, so each
+    // access throws a fresh ObjectDisposedException.
+    private static readonly Lazy<TSharedStrings> DisposedSharedStrings = new(
+        static () => throw new ObjectDisposedException(typeof(TSharedStrings).Name),
+        LazyThreadSafetyMode.PublicationOnly);
+
     private Lazy<TSharedStrings> _sharedStrings = null!;
     private readonly SemaphoreSlim _analyzerMetadataGate = new(1, 1);
     private AnalyzerMetadata? _analyzerMetadata;
@@ -27,6 +33,19 @@ internal abstract class WorkbookReaderBase<
     protected Lazy<TSharedStrings> SharedStringsLazy => _sharedStrings;
     protected TSharedStrings SharedStrings => _sharedStrings.Value;
     protected AnalyzerMetadata AnalyzerMetadata => GetAnalyzerMetadata(CancellationToken.None);
+
+    /// <summary>The shared-string table if it has been created and not released by Dispose.</summary>
+    internal TSharedStrings? CreatedSharedStrings
+    {
+        get
+        {
+            Lazy<TSharedStrings> sharedStrings = Volatile.Read(ref _sharedStrings);
+            return sharedStrings.IsValueCreated ? sharedStrings.Value : null;
+        }
+    }
+
+    /// <summary>The analyzer metadata if it has been built and not released by Dispose.</summary>
+    internal AnalyzerMetadata? BuiltAnalyzerMetadata => Volatile.Read(ref _analyzerMetadata);
 
     public bool IsFileBacked => package.IsFileBacked;
 
@@ -206,7 +225,7 @@ internal abstract class WorkbookReaderBase<
         }
 
         _disposed = true;
-        DisposeSharedStrings();
+        ReleaseCachedState();
         package.Dispose();
     }
 
@@ -218,7 +237,7 @@ internal abstract class WorkbookReaderBase<
         }
 
         _disposed = true;
-        DisposeSharedStrings();
+        ReleaseCachedState();
         await package.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -421,12 +440,22 @@ internal abstract class WorkbookReaderBase<
     private Stream OpenRequiredVbaProjectStream() => OpenVbaProjectStream()
         ?? throw new InvalidOperationException("The workbook does not contain a VBA macro project.");
 
-    private void DisposeSharedStrings()
+    /// <summary>
+    /// Disposes the shared-string table and drops this reader's references to it and to the
+    /// analyzer metadata, so a disposed workbook that is still referenced does not keep the
+    /// whole table alive. Cursors opened before disposal hold their own references.
+    /// </summary>
+    private void ReleaseCachedState()
     {
-        if (_sharedStrings.IsValueCreated)
+        // Exchange: Dispose and DisposeAsync are not mutually exclusive, so a racing second call
+        // must see the sentinel rather than dispose the table twice.
+        Lazy<TSharedStrings> sharedStrings = Interlocked.Exchange(ref _sharedStrings, DisposedSharedStrings);
+        if (sharedStrings.IsValueCreated)
         {
-            _sharedStrings.Value.Dispose();
+            sharedStrings.Value.Dispose();
         }
+
+        Volatile.Write(ref _analyzerMetadata, null);
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, GetType());
