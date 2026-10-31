@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Text;
 using XLSight.Internal.Analysis;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Parsing;
 using XLSight.Internal.Sinks;
 using static XLSight.Internal.Readers.Xlsx.XmlByteReader;
 
@@ -265,9 +266,7 @@ internal static partial class XlsxSheetScanner
     private static void AccumulateInlineText(
         ReadOnlySpan<byte> bytes, ref string? first, ref StringBuilder? sb)
     {
-        var cell = Utf8CellDecoder.Decode(bytes, CellDataKind.InlineString, 0, SharedStringTable.Empty, StyleTable.Default, false);
-        if (cell.CellType != CellType.Text) { return; }
-        var text = cell.AsText();
+        var text = ExcelTextDecoder.Decode(Utf8CellDecoder.DecodeXmlText(bytes));
         if (first is null) { first = text; }
         else { (sb ??= new StringBuilder(first)).Append(text); }
     }

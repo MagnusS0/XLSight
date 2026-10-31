@@ -97,6 +97,21 @@ public sealed class WorkbookParserAdditionalTests
         Assert.False(wb.UsesDate1904);
     }
 
+    [Theory]
+    [InlineData("http://schemas.openxmlformats.org/spreadsheetml/2006/main")]
+    [InlineData("http://purl.oclc.org/ooxml/spreadsheetml/main")]
+    public void Parse_ExtensionWorkbookProperties_DoNotChangeDateSystem(string mainNamespace)
+    {
+        using var stream = Utf8($"""
+            <workbook xmlns="{mainNamespace}" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+              <workbookPr date1904="1" />
+              <extLst><ext><x15:workbookPr /><workbookPr date1904="0" /></ext></extLst>
+            </workbook>
+            """);
+
+        Assert.True(WorkbookParser.Parse(stream).UsesDate1904);
+    }
+
     // ── hasMacros flag ────────────────────────────────────────────────────────
 
     [Fact]
