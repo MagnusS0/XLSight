@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using XLSight.Internal.Metadata;
 
 namespace XLSight.Internal.Readers.Xlsb;
@@ -13,12 +14,15 @@ internal sealed class XlsbSheetCursor(
     XlsbFormulaContext? formulaContext = null,
     RowProjection? projection = null) : IRowCursor
 {
-    private const int UnboundedInputBufferSize = 1024 * 1024;
+    // Cells are stored at their absolute column index. Start small and grow on demand, as
+    // the XLSX cursor does, instead of renting all 16,384 columns (384 KB on the LOH) per cursor.
+    private const int InitialCellCapacity = 256;
 
-    private readonly XlsbRecordIterator _iterator = new(
-        worksheetStream,
-        range.IsUnbounded ? UnboundedInputBufferSize : XlsbRecordIterator.DefaultInputBufferSize);
-    private readonly ExcelCellValue[] _cellPool = ArrayPool<ExcelCellValue>.Shared.Rent(ExcelLimits.MaxColumns);
+    // The default 32 KB window (not 1 MB for unbounded reads): full-scan time is unchanged and a
+    // record larger than the window already takes the iterator's oversize path.
+    private readonly XlsbRecordIterator _iterator = new(worksheetStream);
+    private ExcelCellValue[] _cellPool = RentCleared(
+        range.IsUnbounded ? InitialCellCapacity : Math.Min(range.BottomRight.Column, InitialCellCapacity));
 
     private ExcelRow _current;
     private int _currentStart;
@@ -69,7 +73,7 @@ internal sealed class XlsbSheetCursor(
                     XlsbCellDecoder.TryReadCellLocation(record.Payload, out int projCol) &&
                     !projection.IncludesColumn(projCol))
                 {
-                    _cellPool[projCol - 1] = ExcelCellValue.Empty;
+                    StoreCell(projCol, ExcelCellValue.Empty);
                     startColumn = Math.Min(startColumn, projCol);
                     endColumn = Math.Max(endColumn, projCol);
                     hasValue = true;
@@ -88,7 +92,7 @@ internal sealed class XlsbSheetCursor(
                     continue;
                 }
 
-                _cellPool[columnIndex - 1] = value;
+                StoreCell(columnIndex, value);
                 startColumn = Math.Min(startColumn, columnIndex);
                 endColumn = Math.Max(endColumn, columnIndex);
                 hasValue = true;
@@ -273,10 +277,44 @@ internal sealed class XlsbSheetCursor(
         ref int endColumn,
         ref bool hasValue)
     {
-        _cellPool[columnIndex - 1] = value;
+        StoreCell(columnIndex, value);
         startColumn = Math.Min(startColumn, columnIndex);
         endColumn = Math.Max(endColumn, columnIndex);
         hasValue = true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void StoreCell(int columnIndex, ExcelCellValue value)
+    {
+        ExcelCellValue[] cells = _cellPool;
+        if ((uint)(columnIndex - 1) >= (uint)cells.Length)
+        {
+            cells = GrowCellPool(columnIndex);
+        }
+
+        cells[columnIndex - 1] = value;
+    }
+
+    // columnIndex is validated to 1..MaxColumns by XlsbCellDecoder. Growth happens inside
+    // MoveNext while the next row is assembled; the previously yielded borrowed row is already
+    // invalid by then (and was cleared by ClearPreviousRow), so swapping arrays is safe.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ExcelCellValue[] GrowCellPool(int columnIndex)
+    {
+        ExcelCellValue[] old = _cellPool;
+        int capacity = Math.Min(Math.Max(columnIndex, old.Length * 2), ExcelLimits.MaxColumns);
+        ExcelCellValue[] grown = RentCleared(capacity);
+        old.AsSpan().CopyTo(grown);
+        ArrayPool<ExcelCellValue>.Shared.Return(old, clearArray: true);
+        _cellPool = grown;
+        return grown;
+    }
+
+    private static ExcelCellValue[] RentCleared(int minimumLength)
+    {
+        ExcelCellValue[] cells = ArrayPool<ExcelCellValue>.Shared.Rent(minimumLength);
+        cells.AsSpan().Clear();
+        return cells;
     }
 
     private bool ShouldDecodeCell(int rowIndex, int columnIndex) =>

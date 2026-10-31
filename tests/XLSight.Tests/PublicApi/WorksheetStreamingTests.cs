@@ -256,6 +256,54 @@ public sealed class WorksheetStreamingTests
         Assert.Equal(ExcelCellValue.FromNumber(3.14), second.GetCell(1));
     }
 
+    // File-backed sheet entries complete their async reads inline (the pooled FileStream is
+    // synchronous). Output must match the sync reader, and cancellation must still stop the scan.
+    [Theory]
+    [InlineData(ReadMode.Values)]
+    [InlineData(ReadMode.Formulas)]
+    public async Task GetSheetReaderAsync_FileBacked_MatchesSyncReaderAndHonoursCancellation(ReadMode mode)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "TestData", "medium.xlsx");
+        var ct = TestContext.Current.CancellationToken;
+
+        var expected = new List<ExcelRow>();
+        using (var syncWorkbook = XLSight.ExcelWorkbook.Open(path))
+        using (var syncReader = syncWorkbook.GetSheetReader("Data", mode))
+        {
+            while (syncReader.Read())
+            {
+                expected.Add(syncReader.Current.ToSnapshot());
+            }
+        }
+
+        Assert.True(expected.Count > 1000);
+
+        await using var workbook = await XLSight.ExcelWorkbook.OpenAsync(path, ct);
+        await using (var reader = await workbook.GetSheetReaderAsync("Data", mode, ct))
+        {
+            int index = 0;
+            while (await reader.ReadAsync(ct))
+            {
+                Assert.Equal(expected[index].RowIndex, reader.Current.RowIndex);
+                Assert.Equal(expected[index].Cells.ToArray(), reader.Current.Cells.ToArray());
+                index++;
+            }
+
+            Assert.Equal(expected.Count, index);
+        }
+
+        using var source = new CancellationTokenSource();
+        await using var canceledReader = await workbook.GetSheetReaderAsync("Data", mode, ct);
+        Assert.True(await canceledReader.ReadAsync(source.Token));
+        await source.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            while (await canceledReader.ReadAsync(source.Token))
+            {
+            }
+        });
+    }
+
     [Fact]
     public void GetSheetReader_OnStreamBackedWorkbook_BlocksConcurrentOperationUntilDisposed()
     {
