@@ -25,6 +25,7 @@ internal sealed class ScanBuffer : IDisposable
     // before RefillAsync compacts and reads for real.
     private bool _noIO;
     private bool _ioSkipped;
+    private int _rollbackStart;
 
     /// <summary>
     /// True when the most recent <see cref="TryWithoutIO"/> call was interrupted by a
@@ -220,7 +221,7 @@ internal sealed class ScanBuffer : IDisposable
     /// </summary>
     internal bool TryWithoutIO(Func<bool> parse)
     {
-        int savedStart = _start;
+        _rollbackStart = _start;
         _ioSkipped = false;
         _noIO = true;
         bool result = parse();
@@ -233,10 +234,28 @@ internal sealed class ScanBuffer : IDisposable
 
         if (_ioSkipped)
         {
-            _start = savedStart;
+            _start = _rollbackStart;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Inside <see cref="TryWithoutIO"/>, moves the rollback point to the current position so
+    /// work that produced no output (skipped or empty rows) is not repeated after a refill.
+    /// Without this, a parse that skips more rows than fit in the window is rewound to its start
+    /// on every refill and the window grows until it exceeds <see cref="MaxBufferSize"/>.
+    /// Returns <see langword="true"/> when the position was committed.
+    /// </summary>
+    internal bool CommitNoIOProgress()
+    {
+        if (!_noIO || _ioSkipped)
+        {
+            return false;
+        }
+
+        _rollbackStart = _start;
+        return true;
     }
 
     /// <inheritdoc/>

@@ -35,6 +35,7 @@ internal sealed class SheetCursor : IRowCursor
 
     private ExcelRow _current;
     private int _lastRow;
+    private int _committedLastRow;
     private bool _done;
     private bool _disposed;
 
@@ -99,7 +100,7 @@ internal sealed class SheetCursor : IRowCursor
                 return false;
             }
 
-            if (emptyRow) { continue; }
+            if (emptyRow) { CommitSkippedRow(); continue; }
 
             int rowIndex = _lastRow;
 
@@ -112,6 +113,7 @@ internal sealed class SheetCursor : IRowCursor
             if (!_range.IsUnbounded && rowIndex < _range.TopLeft.Row)
             {
                 SkipToEndTag(_buf, XlsxSheetScanner.TagRow);
+                CommitSkippedRow();
                 continue;
             }
 
@@ -123,6 +125,18 @@ internal sealed class SheetCursor : IRowCursor
                 _current = new ExcelRow(rowIndex, _cellPool.AsMemory(0, width), startCol);
                 return true;
             }
+
+            CommitSkippedRow();
+        }
+    }
+
+    // In the async no-I/O parse, keep progress over rows that yield nothing so a later
+    // refill does not rewind (and re-grow the window) to the first skipped row.
+    private void CommitSkippedRow()
+    {
+        if (_buf.CommitNoIOProgress())
+        {
+            _committedLastRow = _lastRow;
         }
     }
 
@@ -144,7 +158,7 @@ internal sealed class SheetCursor : IRowCursor
         row = default;
         if (_done) { return false; }
 
-        int savedLastRow = _lastRow;
+        _committedLastRow = _lastRow;
 
         bool parsed = _buf.TryWithoutIO(_moveNext);
 
@@ -159,7 +173,7 @@ internal sealed class SheetCursor : IRowCursor
         // entirely within the buffer) it set _done = true legitimately; don't erase that.
         if (_buf.LastParseNeededIO)
         {
-            _lastRow = savedLastRow;
+            _lastRow = _committedLastRow;
             _done = false;
         }
         return false;
