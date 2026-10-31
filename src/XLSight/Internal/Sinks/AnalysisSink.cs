@@ -38,6 +38,7 @@ internal partial struct AnalysisSink : IByteSheetSink
 
     // ── Region segmenter state ────────────────────────────────────────────────────
     private List<RowSpanState> _pendingRowSpans;
+    private List<PendingText> _pendingRowTexts;
     private List<ActiveBlockState> _activeBlocks;
     private List<RegionInfo> _sealedRegions;
 
@@ -79,6 +80,7 @@ internal partial struct AnalysisSink : IByteSheetSink
         _firstRowIndex = 0;
         _firstRowByColumn = null;  // lazily initialised on first row
         _pendingRowSpans = [];
+        _pendingRowTexts = [];
         _activeBlocks = [];
         _sealedRegions = [];
     }
@@ -200,30 +202,39 @@ internal partial struct AnalysisSink : IByteSheetSink
         UpdateValueBounds(_currentRow, column);
         _cellCount++;
 
-        // Materialise shared-string value once — used by first-row tracking and RecordValue.
-        if (isSharedString && value.IsEmpty)
-        {
-            value = ExcelCellValue.FromSharedString(_sst.GetString(rawIndex), rawIndex);
-        }
-
+        bool isFirstRow = _currentRow == _firstRowIndex;
         var state = GetOrAddColumnState(column);
-        if (isSharedString && _currentRow != _firstRowIndex)
+        bool isLazySharedString = isSharedString && value.IsEmpty;
+        if (isSharedString && !isFirstRow)
         {
+            // Profiling needs only the SST index and its character count; the string itself is
+            // materialised later, and only for spans that start a region block.
             state.RecordSharedString(rawIndex, _sst);
         }
         else
         {
-            state.RecordValue(value);
-        }
+            // First-row tracking and RecordValue need the decoded value.
+            if (isLazySharedString)
+            {
+                value = ExcelCellValue.FromSharedString(_sst.GetString(rawIndex), rawIndex);
+                isLazySharedString = false;
+            }
 
-        if (_currentRow == _firstRowIndex && _firstRowByColumn is not null)
-        {
-            _firstRowByColumn.Add((column, value));
+            state.RecordValue(value);
+            if (isFirstRow && _firstRowByColumn is not null)
+            {
+                _firstRowByColumn.Add((column, value));
+            }
         }
 
         bool isFormula = _nextCellIsFormula;
         _nextCellIsFormula = false;
-        if (_level >= AnalysisLevel.Full) { AddRowCell(column, value, isFormula); }
+        if (_level >= AnalysisLevel.Full)
+        {
+            if (isLazySharedString) { AddRowSharedStringCell(column, rawIndex, isFormula); }
+            else { AddRowCell(column, value, isFormula); }
+        }
+
         return true;
     }
 
