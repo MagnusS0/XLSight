@@ -145,6 +145,58 @@ public sealed class SharedStringsByteParserTests
         Assert.Equal("<tag>", result.GetString(1));
     }
 
+    [Fact]
+    public void Parse_ExcelEscapes_DecodesOnceAndCountsUtf16Units()
+    {
+        using var stream = Utf8("""
+            <sst><si><t>&#95;x0041_ _x005F_x0042_ _xD83D__xDE00_ _xD800_ _x12G4_</t></si></sst>
+            """);
+        using SharedStringTable table = SharedStringsByteParser.Parse(stream);
+        const string expected = "A _x0042_ 😀 \uD800 _x12G4_";
+        Assert.Equal(expected.Length, table.GetCharCount(0));
+        Assert.Equal(expected, table.GetString(0));
+        Assert.Equal(expected.Length, table.GetCharCount(0));
+    }
+
+    [Fact]
+    public void Parse_EscapeFlag_PreservesPlainAndEncodedEntryLengths()
+    {
+        using var stream = Utf8("""
+            <sst>
+              <si><t>Plain 😀</t></si>
+              <si><t>_x0041_</t></si>
+              <si><t>invalid _x12G4_</t></si>
+              <si><t>After</t></si>
+            </sst>
+            """);
+        using SharedStringTable table = SharedStringsByteParser.Parse(stream);
+        string[] expected = ["Plain 😀", "A", "invalid _x12G4_", "After"];
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.Equal(expected[i].Length, table.GetCharCount(i));
+            Assert.Equal(expected[i], table.GetString(i));
+        }
+    }
+
+    [Fact]
+    public void Parse_RichTextEscapes_DoNotCrossTextElementsOrReadBoundaries()
+    {
+        using var stream = new OneByteAtATimeStream(Encoding.UTF8.GetBytes("""
+            <sst>
+              <si><r><t>_x00</t></r><r><t>41_</t></r></si>
+              <si><r><t>_x005F_</t></r><r><t>x0041_</t></r></si>
+              <si><t>_x0041_</t></si>
+            </sst>
+            """));
+        using SharedStringTable table = SharedStringsByteParser.Parse(stream);
+        string[] expected = ["_x0041_", "_x0041_", "A"];
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.Equal(expected[i].Length, table.GetCharCount(i));
+            Assert.Equal(expected[i], table.GetString(i));
+        }
+    }
+
     // ── <t xml:space="preserve"> ─────────────────────────────────────────────
 
     [Fact]

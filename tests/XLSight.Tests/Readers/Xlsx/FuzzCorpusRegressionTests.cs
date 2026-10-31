@@ -54,6 +54,7 @@ public sealed class FuzzCorpusRegressionTests
 
     private static bool IsExpectedInputException(Exception ex) =>
         ex is InvalidDataException
+            or MalformedWorkbookException
             or FormatException
             or OverflowException
             or ArgumentException

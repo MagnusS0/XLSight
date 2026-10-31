@@ -3,6 +3,7 @@ using System.Buffers.Text;
 using System.Net;
 using System.Text;
 using XLSight.Internal.Metadata;
+using XLSight.Internal.Parsing;
 using XLSight.Internal.Sinks;
 
 namespace XLSight.Internal.Readers.Xlsx;
@@ -47,7 +48,19 @@ internal static class Utf8CellDecoder
 
             case CellDataKind.Boolean:
                 {
-                    return ExcelCellValue.FromBoolean(valueBytes[0] == (byte)'1');
+                    while (!valueBytes.IsEmpty && valueBytes[0] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') { valueBytes = valueBytes[1..]; }
+                    while (!valueBytes.IsEmpty && valueBytes[^1] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') { valueBytes = valueBytes[..^1]; }
+                    if (valueBytes.SequenceEqual("1"u8) || valueBytes.SequenceEqual("true"u8))
+                    {
+                        return ExcelCellValue.FromBoolean(true);
+                    }
+
+                    if (valueBytes.SequenceEqual("0"u8) || valueBytes.SequenceEqual("false"u8))
+                    {
+                        return ExcelCellValue.FromBoolean(false);
+                    }
+
+                    throw new MalformedWorkbookException("Invalid boolean cell value.");
                 }
 
             case CellDataKind.Error:
@@ -58,7 +71,7 @@ internal static class Utf8CellDecoder
             case CellDataKind.FormulaString:
             case CellDataKind.InlineString:
                 {
-                    return ExcelCellValue.FromText(DecodeXmlText(valueBytes));
+                    return ExcelCellValue.FromText(ExcelTextDecoder.Decode(DecodeXmlText(valueBytes)));
                 }
 
             default:

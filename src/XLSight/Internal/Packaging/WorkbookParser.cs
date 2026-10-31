@@ -22,6 +22,7 @@ internal static class WorkbookParser
             var sheets = new List<SheetDefinition>();
             var namedRanges = new List<WorkbookMetadata.WorkbookNamedRange>();
             var usesDate1904 = false;
+            string? workbookNamespace = null;
 
             while (reader.Read())
             {
@@ -31,7 +32,14 @@ internal static class WorkbookParser
                     continue;
                 }
 
-                if (string.Equals(reader.LocalName, "workbookPr", StringComparison.Ordinal))
+                if (reader.Depth == 0 && string.Equals(reader.LocalName, "workbook", StringComparison.Ordinal))
+                {
+                    workbookNamespace = reader.NamespaceURI;
+                }
+
+                if (reader.Depth == 1 && workbookNamespace is not null &&
+                    string.Equals(reader.NamespaceURI, workbookNamespace, StringComparison.Ordinal) &&
+                    string.Equals(reader.LocalName, "workbookPr", StringComparison.Ordinal))
                 {
                     usesDate1904 = ReadDate1904Flag(reader);
                     continue;

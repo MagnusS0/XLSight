@@ -38,6 +38,24 @@ public sealed class CachedValueFastPathTests
     }
 
     [Theory]
+    [InlineData("0", false)]
+    [InlineData("1", true)]
+    [InlineData("false", false)]
+    [InlineData("true", true)]
+    [InlineData(" \ttrue\r\n", true)]
+    [InlineData(" \nfalse\t", false)]
+    public void ReadCell_BooleanLexicalValues_AreDecoded(string value, bool expected)
+        => AssertCell($"<c t=\"b\"><v>{value}</v></c>", ExcelCellValue.FromBoolean(expected));
+
+    [Theory]
+    [InlineData("garbage")]
+    [InlineData("1garbage")]
+    [InlineData("TRUE")]
+    [InlineData(" \t ")]
+    public void ReadCell_InvalidBoolean_Throws(string value)
+        => Assert.Throws<MalformedWorkbookException>(() => AssertCell($"<c t=\"b\"><v>{value}</v></c>", ExcelCellValue.Empty));
+
+    [Theory]
     [InlineData("<c><v/></c>", false)]
     [InlineData("<c><v></v></c>", false)]
     [InlineData("<c><v>42</v ></c>", true)]

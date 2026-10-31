@@ -117,6 +117,22 @@ public sealed class XlsxSheetScannerTests
     }
 
     [Fact]
+    public void TextCells_DecodeExcelEscapesAfterXmlEntities()
+    {
+        var rows = Scan($"""
+            <worksheet xmlns="{Ns}"><sheetData><row r="1">
+              <c r="A1" t="inlineStr"><is><r><t>&amp;#95; _x005F_</t></r><r><t>x0041_ _xD83D__xDE00_</t></r></is></c>
+              <c r="B1" t="str"><f>"literal"</f><v>&#95;x0041_ _x005F_x0042_ _x12G4_</v></c>
+              <c r="C1" t="inlineStr"><is><r><t>_x00</t></r><r><t>41_</t></r></is></c>
+            </row></sheetData></worksheet>
+            """);
+
+        Assert.Equal("&#95; _x0041_ 😀", rows[0].GetCell(1).AsText());
+        Assert.Equal("A _x0042_ _x12G4_", rows[0].GetCell(2).AsText());
+        Assert.Equal("_x0041_", rows[0].GetCell(3).AsText());
+    }
+
+    [Fact]
     public void PrefixedWorksheetTags_AreParsed()
     {
         const string prefixedNs = "urn:test";
