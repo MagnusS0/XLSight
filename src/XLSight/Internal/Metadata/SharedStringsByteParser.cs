@@ -19,16 +19,32 @@ internal static class SharedStringsByteParser
 
     /// <summary>
     /// Creates a lazy <see cref="SharedStringTable"/> that owns <paramref name="stream"/>
-    /// and pumps it on demand. The stream is closed once all entries are parsed or when
-    /// the table is disposed.
+    /// and pumps it on demand. Nothing is read until the first lookup. The stream is closed
+    /// once all entries are parsed or when the table is disposed.
     /// </summary>
-    internal static SharedStringTable Parse(Stream stream)
+    internal static SharedStringTable Parse(Stream stream) => new(stream);
+
+    /// <summary>Primes the scan window over <paramref name="stream"/> and creates the parse state.</summary>
+    internal static ParseState StartParser(
+        Stream stream,
+        out ScanBuffer buffer,
+        out byte[] stagingBuf,
+        out int declaredUniqueCount)
     {
-        byte[] stagingBuf = ArrayPool<byte>.Shared.Rent(StagingCapacity);
-        var buf = new ScanBuffer(stream); // ownership transferred to SharedStringTable
-        int declaredUniqueCount = ReadDeclaredUniqueCount(buf.Span);
-        var state = new ParseState(stagingBuf, declaredUniqueCount);
-        return new SharedStringTable(buf, state, stagingBuf, declaredUniqueCount);
+        byte[] staging = ArrayPool<byte>.Shared.Rent(StagingCapacity);
+        try
+        {
+            buffer = new ScanBuffer(stream); // does not own the stream; the table does
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(staging);
+            throw;
+        }
+
+        stagingBuf = staging;
+        declaredUniqueCount = ReadDeclaredUniqueCount(buffer.Span);
+        return new ParseState(staging, declaredUniqueCount);
     }
 
     // ── Parse state ───────────────────────────────────────────────────────────
