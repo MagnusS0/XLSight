@@ -8,7 +8,7 @@ namespace XLSight.Internal.Metadata;
 /// Allocation-free SST parser that scans raw UTF-8 bytes instead of using XmlReader.
 /// Each <c>&lt;si&gt;</c> entry is assembled in a 256 KB staging buffer, then committed
 /// atomically to a 64 KB arena chunk (below the LOH threshold). XML entities are
-/// resolved into the staging buffer so the arena always contains clean UTF-8.
+/// resolved into the staging buffer; Excel escapes remain encoded until materialization.
 /// </summary>
 internal static class SharedStringsByteParser
 {
@@ -99,7 +99,11 @@ internal static class SharedStringsByteParser
             // Global offset encodes chunk position: (chunkIdx << 16) | chunkOffset.
             // Max arena: 65 535 chunks × 64 KB ≈ 4 GB — sufficient for any real workbook.
             int globalOffset = (ArenaChunkIdx << 16) | ArenaChunkOffset;
-            long packed      = ((long)globalOffset << 32) | (uint)length;
+            // The high bit of the 32-bit length marks entries that may contain an
+            // Excel escape; the staging buffer is far smaller than 2 GB.
+            uint encodedLength = (uint)length;
+            if (StagingBuf.AsSpan(0, length).IndexOf("_x"u8) >= 0) { encodedLength |= 0x80000000u; }
+            long packed = ((long)globalOffset << 32) | encodedLength;
 
             EnsureInfoCapacity();
 
@@ -341,8 +345,69 @@ internal static class SharedStringsByteParser
         bool selfClosed = SkipOpeningTagClose(buf);
         if (selfClosed) { return; }
 
+        int textStart = state.StagingLen;
         CopyTextContent(buf, state);
+        ProtectPartialEscape(state, textStart);
         SkipToGt(buf);
+    }
+
+    // Preserve a text element boundary when its final characters could combine with the
+    // next element to form an escape. Complete escapes must be skipped as a unit.
+    private static void ProtectPartialEscape(ParseState state, int textStart)
+    {
+        ReadOnlySpan<byte> text = state.StagingBuf.AsSpan(textStart, state.StagingLen - textStart);
+        int candidate = -1;
+        for (int i = Math.Max(0, text.Length - 6); i < text.Length; i++)
+        {
+            if (text[i] != (byte)'_') { continue; }
+            ReadOnlySpan<byte> suffix = text[i..];
+            if (suffix.Length > 1 && suffix[1] != (byte)'x') { continue; }
+            bool partial = true;
+            for (int j = 2; j < suffix.Length; j++)
+            {
+                byte c = suffix[j];
+                if (!((c >= (byte)'0' && c <= (byte)'9')
+                    || (c >= (byte)'a' && c <= (byte)'f')
+                    || (c >= (byte)'A' && c <= (byte)'F')))
+                {
+                    partial = false;
+                    break;
+                }
+            }
+            if (partial) { candidate = i; break; }
+        }
+
+        if (candidate < 0) { return; }
+        // A candidate can be the closing underscore of a complete escape.
+        for (int i = 0; i < candidate; i++)
+        {
+            if (text[i] != (byte)'_' || i + 6 >= text.Length || text[i + 1] != (byte)'x' || text[i + 6] != (byte)'_') { continue; }
+            bool valid = true;
+            for (int j = i + 2; j < i + 6; j++)
+            {
+                byte c = text[j];
+                if (!((c >= (byte)'0' && c <= (byte)'9')
+                    || (c >= (byte)'a' && c <= (byte)'f')
+                    || (c >= (byte)'A' && c <= (byte)'F')))
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) { continue; }
+            if (i + 6 == candidate) { return; }
+            i += 6;
+        }
+
+        if (state.StagingLen > state.StagingBuf.Length - 6)
+        {
+            throw new MalformedWorkbookException("Shared string exceeds the staging buffer capacity.");
+        }
+        int offset = textStart + candidate;
+        state.StagingBuf.AsSpan(offset + 1, state.StagingLen - offset - 1)
+            .CopyTo(state.StagingBuf.AsSpan(offset + 7));
+        "_x005F_"u8.CopyTo(state.StagingBuf.AsSpan(offset));
+        state.StagingLen += 6;
     }
 
     private static bool HandleClosingTag(ScanBuffer buf, ReadOnlySpan<byte> span, int ltIdx)

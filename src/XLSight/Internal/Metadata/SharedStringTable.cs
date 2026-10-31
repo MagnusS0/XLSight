@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.ExceptionServices;
 using System.Text;
+using XLSight.Internal.Parsing;
 using XLSight.Internal.Readers.Xlsx;
 using XLSight.Internal.Sinks;
 
@@ -163,8 +164,8 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
             return 0;
         }
 
-        var span = GetUtf8Span(index);
-        return span.IsEmpty ? 0 : Encoding.UTF8.GetCharCount(span);
+        var span = GetUtf8Span(index, out bool hasExcelEscape);
+        return hasExcelEscape ? ExcelTextDecoder.GetCharCount(span) : Encoding.UTF8.GetCharCount(span);
     }
 
     /// <summary>
@@ -178,14 +179,16 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
             return default;
         }
 
-        return GetUtf8Span(index);
+        return GetUtf8Span(index, out _);
     }
 
-    private ReadOnlySpan<byte> GetUtf8Span(int index)
+    private ReadOnlySpan<byte> GetUtf8Span(int index, out bool hasExcelEscape)
     {
         long packed      = _info[index >> InfoChunkBits][index & InfoChunkMask];
         int globalOffset = (int)(packed >> 32);
-        int length       = (int)packed;
+        uint encodedLength = (uint)packed;
+        hasExcelEscape = (encodedLength & 0x80000000u) != 0;
+        int length = (int)(encodedLength & 0x7fffffffu);
 
         if (length == 0) { return default; }
 
@@ -197,8 +200,10 @@ internal sealed class SharedStringTable : ISharedStringSource, IDisposable
 
     private string DecodeFromArena(int index)
     {
-        var span = GetUtf8Span(index);
-        return span.IsEmpty ? string.Empty : Encoding.UTF8.GetString(span);
+        var span = GetUtf8Span(index, out bool hasExcelEscape);
+        if (span.IsEmpty) { return string.Empty; }
+        string text = Encoding.UTF8.GetString(span);
+        return hasExcelEscape ? ExcelTextDecoder.Decode(text) : text;
     }
 
     /// <summary>

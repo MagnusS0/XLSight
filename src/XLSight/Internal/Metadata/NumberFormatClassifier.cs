@@ -8,7 +8,8 @@ namespace XLSight.Internal.Metadata;
 internal static class NumberFormatClassifier
 {
     // Built-in Excel number formats, keyed by numFmtId.
-    // IDs 5–8 and 23–36 are not defined in the spec and are omitted (treated as General).
+    // Regional IDs can represent dates or times depending on the workbook's locale.
+    // DateTime covers either for value decoding; this classifier does not render formats.
     private static readonly FrozenDictionary<int, FormatClass> s_builtInFormats =
         new Dictionary<int, FormatClass>
         {
@@ -31,6 +32,16 @@ internal static class NumberFormatClassifier
             [20] = FormatClass.Time,
             [21] = FormatClass.Time,
             [22] = FormatClass.DateTime,
+            [27] = FormatClass.Date,
+            [28] = FormatClass.Date,
+            [29] = FormatClass.Date,
+            [30] = FormatClass.Date,
+            [31] = FormatClass.Date,
+            [32] = FormatClass.Time,
+            [33] = FormatClass.Time,
+            [34] = FormatClass.DateTime,
+            [35] = FormatClass.DateTime,
+            [36] = FormatClass.Date,
             [37] = FormatClass.Number,
             [38] = FormatClass.Number,
             [39] = FormatClass.Number,
@@ -44,6 +55,15 @@ internal static class NumberFormatClassifier
             [47] = FormatClass.Time,
             [48] = FormatClass.Number,
             [49] = FormatClass.Text,
+            [50] = FormatClass.Date,
+            [51] = FormatClass.Date,
+            [52] = FormatClass.DateTime,
+            [53] = FormatClass.DateTime,
+            [54] = FormatClass.Date,
+            [55] = FormatClass.DateTime,
+            [56] = FormatClass.DateTime,
+            [57] = FormatClass.Date,
+            [58] = FormatClass.Date,
         }.ToFrozenDictionary();
 
     /// <summary>
