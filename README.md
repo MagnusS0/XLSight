@@ -8,7 +8,7 @@ XLSight is a fast, dependency-free Excel reader and analyzer for .NET 10. It sup
 
 XLSight reads worksheet XML as UTF-8 bytes. It bypasses `XmlReader` on hot paths and creates managed strings only when required.
 
-- Reads the NYC 311 workbook with one million rows in **3.38 s** with **161 MiB** peak RSS: **2.3×** faster than [`calamine`](https://github.com/tafia/calamine), **5.2×** faster than [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader), and **6.5×** faster than [`MiniExcel`](https://github.com/mini-software/MiniExcel).
+- Reads the NYC 311 workbook with one million rows in **2.92 s** with **164 MiB** peak RSS: **2.71×** faster than [`calamine`](https://github.com/tafia/calamine), **5.92×** faster than [`ExcelDataReader`](https://github.com/ExcelDataReader/ExcelDataReader), and **7.09×** faster than [`MiniExcel`](https://github.com/mini-software/MiniExcel).
 - Stops as soon as the caller has read the required N rows. This allows fast sample reads with minimal memory allocation.
 
 > **Scope:** XLSight reads Open XML and binary workbooks. It can inspect VBA metadata without running macros.
@@ -472,21 +472,22 @@ Console.WriteLine(ExcelLimits.MaxCells);   // 100,000,000
 
 ## Performance
 
-All benchmarks were run on a Intel Core i9-14900K, running Linux, with .NET 10.0.11. Release builds, measured 2026-09-05.
-XLSight uses `GetSheetReader` for streaming and `ReadRange` for bounded reads.
+Measured on 2026-10-31 on an Intel Core i9-14900K running Linux, using Release builds with .NET 10.0.14 (SDK 10.0.114).
+XLSight uses `GetSheetReader` for streaming and `ReadRange` for bounded reads. Ratios use XLSight reader as 1× (`ReadRange` for bounded reads).
+XLSight revisions: `662fe2f` for NYC; `d9846f9` for BenchmarkDotNet.
 
 ### Real-world benchmark — NYC 311 service requests, 1 M rows × 41 cols
 
 Wall time and peak RSS were measured with a small Python script using `psutil`: 2 warmups, 5 measured runs, 10 ms sampling. **41,000,041 cells**.
 
-> Calamine `0af05f4`: Rust 1.98.0, `opt-level=3`, LTO, `codegen-units=1`, `target-cpu=native`. ExcelDataReader 3.9.0; MiniExcel 1.46.0.
+> Calamine 0.37.0 (`zip` 9.2.0): Rust 1.98.0, `opt-level=3`, LTO, `codegen-units=1`, `target-cpu=native`. ExcelDataReader 3.9.0; MiniExcel 1.46.0.
 
 | Library | Mean time | Stddev | Peak RSS |
 |---|---:|---:|---:|
-| **XLSight reader (.NET 10)** | **3.38 s** | **0.025 s** | 161 MiB |
-| calamine (Rust) | 7.73 s | 0.030 s | **160 MiB** |
-| ExcelDataReader | 17.58 s | 0.265 s | 291 MiB |
-| MiniExcel[^1] | 22.10 s | 0.240 s | 396 MiB |
+| **XLSight reader (.NET 10)** | **2.92 s** | **0.015 s** | 164 MiB |
+| calamine (Rust) | 7.91 s (2.71×) | 0.036 s | **160 MiB** |
+| ExcelDataReader | 17.28 s (5.92×) | 0.288 s | 291 MiB |
+| MiniExcel[^1] | 20.67 s (7.09×) | 0.306 s | 396 MiB |
 
 ### BenchmarkDotNet — public streaming throughput, all rows
 
@@ -495,10 +496,10 @@ synthetic xlsx files with numeric and string columns.
 
 | Library | 100 K rows | 1 M rows | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight reader** | **53.2 ms** | **1.43 s** | **279.7 KiB** | **1.46 GiB** |
-| **XLSight safe stream** | **55.9 ms** | **1.42 s** | **14.0 MiB** | **1.66 GiB** |
-| ExcelDataReader | 238.5 ms (4.5×) | 5.11 s (3.6×) | 118.9 MiB (435.3×) | 2.71 GiB (1.9×) |
-| MiniExcel[^1] | 434.8 ms (8.2×) | 5.24 s (3.7×) | 1.00 GiB (3748.9×) | 9.53 GiB (6.5×) |
+| **XLSight reader** | **43.3 ms** | **1.30 s** | **87.6 KiB** | **1.46 GiB** |
+| **XLSight safe stream** | **45.8 ms** | **1.32 s** | **13.8 MiB** | **1.66 GiB** |
+| ExcelDataReader | 241.3 ms (5.6×) | 4.94 s (3.8×) | 118.9 MiB (1,389.2×) | 2.71 GiB (1.8×) |
+| MiniExcel[^1] | 402.4 ms (9.3×) | 5.17 s (4.0×) | 1.00 GiB (11,925.5×) | 9.53 GiB (6.5×) |
 
 > **Allocated** is total managed heap throughput (BenchmarkDotNet), not peak live RSS.
 
@@ -510,9 +511,9 @@ synthetic xlsx files with numeric and string columns.
 
 | Library | Time | Allocated |
 |---|---:|---:|
-| **XLSight `ReadRange`** | **143.7 μs** | **425.6 KiB** |
-| ExcelDataReader | 640.6 μs (4.5×) | 466.7 KiB (1.1×) |
-| MiniExcel[^1] | 645.5 μs (4.5×) | 946.1 KiB (2.2×) |
+| **XLSight `ReadRange`** | **121.8 μs** | **235.8 KiB** |
+| ExcelDataReader | 689.1 μs (5.7×) | 466.8 KiB (2.0×) |
+| MiniExcel[^1] | 653.5 μs (5.4×) | 945.7 KiB (4.0×) |
 
 > XLSight can use a true bounded range API here; MiniExcel and ExcelDataReader still iterate sheet
 > rows and then consume just the requested rectangle.
@@ -523,10 +524,10 @@ The same datasets, stopping after 10 rows.
 
 | Library | First 10 of 100 K | First 10 of 1 M | Allocated (100 K) | Allocated (1 M) |
 |---|---:|---:|---:|---:|
-| **XLSight reader** | **137.6 μs** | **307.9 μs** | **279.7 KiB** | **1.48 MiB** |
-| **XLSight safe stream** | **137.5 μs** | **304.7 μs** | **281.2 KiB** | **1.48 MiB** |
-| ExcelDataReader | 84.3 ms (612.6×) | 2.60 s (8444.3×) | 21.9 MiB (80.2×) | 1.40 GiB (968.6×) |
-| MiniExcel[^1] | 179.5 ms (1304.5×) | 1.22 s (3962.3×) | 482.3 MiB (1765.7×) | 1.51 GiB (1044.8×) |
+| **XLSight reader** | **120.9 μs** | **218.9 μs** | **87.7 KiB** | **318.6 KiB** |
+| **XLSight safe stream** | **122.7 μs** | **220.9 μs** | **89.2 KiB** | **320.9 KiB** |
+| ExcelDataReader | 83.6 ms (691.9×) | 2.48 s (11,340.8×) | 21.9 MiB (256.3×) | 1.40 GiB (4,620.6×) |
+| MiniExcel[^1] | 158.0 ms (1,306.8×) | 1.11 s (5,054.0×) | 482.6 MiB (5,637.5×) | 1.51 GiB (4,974.5×) |
 
 <details>
 <summary>Why the performance gap?</summary>
