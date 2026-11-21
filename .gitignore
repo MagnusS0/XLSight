@@ -61,8 +61,8 @@ dlldata.c
 BenchmarkDotNet.Artifacts/
 
 # Local-only directories (development artifacts, not for upstream)
+.local/
 bench/
-docs/
 scripts/query-oracle/
 
 # .NET
