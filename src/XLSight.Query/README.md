@@ -32,7 +32,8 @@ QueryResult result = workbook
 
 foreach (QueryResultRow row in result.Rows)
 {
-    Console.WriteLine($"{row.Values[0]}: {row.Values[1]} ({row.Values[2]} rows)");
+    ReadOnlySpan<ExcelCellValue> values = row.Values.Span;
+    Console.WriteLine($"{values[0]}: {values[1]} ({values[2]} rows)");
 }
 ```
 
@@ -103,8 +104,8 @@ Supported clauses:
 - `HAVING` filters completed groups. It can use aliases for selected aggregates.
 - `ORDER BY <key> [ASC|DESC]` orders grouped or row results. `ASC` is the default.
 - `LIMIT` accepts an integer of zero or more. `LIMIT 0` reads headers and returns
-  no data rows. `HEADER AUTO` can still read workbook metadata to find the
-  header row.
+  no data rows. With `HEADER AUTO`, XLSight first runs a full sheet analysis to
+  find the header row, which is an extra pass over the sheet.
 
 ### Expression values
 
